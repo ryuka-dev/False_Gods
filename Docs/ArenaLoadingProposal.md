@@ -93,7 +93,8 @@ assets. The flow:
 3. Resolve only the `VanillaAssetProxy` objects through the player's local Addressables catalog.
 4. Replace those proxies with live vanilla prefabs while preserving authored transforms.
 5. Register collision/navigation/gameplay roots.
-6. Enter the ready-gate and start the encounter.
+6. Report `ArenaReady` with the arena identity and content hash, and wait for the gate.
+7. Only after the gate passes: seal, teleport, publish the `EncounterBaseline`, start the encounter (§2.4).
 
 The instantiated vanilla objects keep their **real materials, shaders, and Renderer setup** — this is why the
 material-loss problems from raw mesh extraction are avoided (report 3). Resolution mirrors the game's own API:
@@ -109,25 +110,40 @@ material-loss problems from raw mesh extraction are avoided (report 3). Resoluti
 ## 2.4 Proposed runtime ownership & lifecycle (Strategy B)
 
 A single mod-owned controller, e.g. `ArenaController` (project-owned, no vanilla base type), owns the arena's
-whole lifecycle:
+whole lifecycle. **Ready comes before placement**, matching the multiplayer contract exactly
+([MultiplayerLoadingContract.md §5.3](MultiplayerLoadingContract.md)) — a peer must prove it built the same
+arena before anyone stands in it, and before a boss exists:
 
 ```
-Enter:  gate/trigger fires
-  → ArenaController.LoadAsync(arenaId, arenaVersion)
+Enter:  gate/trigger fires (a real game event)
+  → ArenaController.LoadAsync(ArenaManifest)
       1. instantiate our layout (VisualRoot / CollisionRoot / NavigationRoot / GameplayRoot / LightingRoot)
       2. resolve + instantiate all VanillaAssetProxy targets (Addressables)  [await all]
-      3. rebuild A* recast over the arena  (report 4)
-      4. place player(s) at PlayerSpawn; (host) spawn boss at BossSpawn
-      5. signal "arena ready"  (single-player: immediate; multiplayer: ready-gate, report 5)
+      3. build/apply A* navigation over the arena, via INavigationPort  (report 4)
+      4. compute the local ContentHash from the realized result
+      5. report ArenaReady(ArenaId, ArenaVersion, ContentHash, ProtocolVersion, BundleVersion)
+           single-player : the required set is one local peer; the gate resolves immediately
+           multiplayer   : host validates every required peer via IEncounterReadyGate (report 5)
+                           mismatch / load failure / timeout  →  FAIL CLOSED, abort, tear down
+  → after the gate passes (host authoritative)
+      6. seal the arena and teleport player(s) to PlayerSpawn, via IArenaLockdownPort
+      7. publish EncounterBaseline
+      8. spawn the boss at BossSpawn and start the simulation
 Exit:   boss dead / player leaves
   → ArenaController.Unload()
-      release Addressables handles, destroy roots, restore/rescan nav, clear GameplayRoot state
+      release Addressables handles, destroy roots, remove the arena's own nodes/links/modifiers from the
+      active level's A* graph, clear GameplayRoot state, unsubscribe every replication/event handler
 ```
 
-Lifecycle hooks should attach to **real events** (the gate/trigger that starts the encounter, the boss death
-event) rather than scene-name or timing heuristics (CLAUDE.md §6). SULFUR Together already patches the
-relevant level-transition methods (`SwitchLevelRoutine`, `CompleteLevel`) and boss triggers, so the arena
-entry can be driven from a genuine game event.
+There is **one** sequence, not a single-player one and a multiplayer one; single-player is the degenerate case
+with a one-member required set.
+
+Lifecycle hooks attach to **canonical events** — the gate/trigger that starts the encounter, the method that
+commits the level transition, the authoritative boss-death event — never to scene names, object names, or timing
+heuristics ([DependencyRules.md §4](DependencyRules.md)). SULFUR Together already patches the relevant
+level-transition methods (`SwitchLevelRoutine`, `CompleteLevel`) and boss triggers, so the arena entry can be
+driven from a genuine game event; False Gods reaches those through `ISceneLifecycleEvents`, not by naming the
+patch.
 
 ## 2.5 What still needs verification (feeds the PoC)
 - Whether our own AssetBundle built in the game's Unity version loads cleanly under BepInEx (Unity version

@@ -10,11 +10,14 @@ The PoC is split into two phases:
 - **Phase B — Original Boss Networking Vertical Slice** (§7.6): proves the network-native boss architecture
   with a throwaway test actor. Needs a host + client.
 
+The step ids below (P0–P9, B0–B10) are the same ones [RiskList.md](RiskList.md) orders by risk; the two
+documents describe one plan.
+
 ---
 
-# Phase A — Arena Pipeline PoC
+## Phase A — Arena Pipeline PoC
 
-## 7.1 The test room
+### 7.1 The test room
 
 - Size: **~20×20 m**, flat.
 - **CollisionRoot:** one floor collider + four simple boundary walls + one large central pillar collider — all
@@ -28,38 +31,41 @@ The PoC is split into two phases:
 - **Enemy:** one **ordinary** vanilla enemy (not a boss), host-owned, that should track the player and path
   around the pillar.
 
-## 7.2 Build order (each step gates the next)
+### 7.2 Build order (each step gates the next)
 
 | Step | Validates | Depends on |
 |---|---|---|
 | P0 | BepInEx probe plugin loads; can read `AstarPath.active`, `GameManager.Instance.geometryLayer`, recast params | — |
 | P1 | Resolve + instantiate a vanilla cave prefab by Addressables key/GUID at runtime | R1 |
 | P2 | Load our own AssetBundle (built in the game's Unity version) with our ground mesh + layout | R2 |
-| P3 | Vanilla prefab **renders correctly** (no pink) under our lighting; test one vanilla floor material on our ground mesh | R6, report 3.4 |
+| P3 | Vanilla prefab **renders correctly** (no pink) under our lighting; test one vanilla floor material on our ground mesh | R6, R13, report 3.4 |
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |
-| P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5 |
-| P7 | **Teardown**: leave the room → load a normal level; assert no leftovers, nav clean, handles released | R8 |
-| P8 | **Single-player** full loop: enter → fight the dummy enemy → leave, all stable | P1–P7 |
-| P9 | **SULFUR Together host+client**: both load the identical room (compare an arena hash), enemy activates for the client, both see the same layout; leave cleanly | R7, R10, report 5 |
+| P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
+| P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
+| P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest | P1–P7, R14 |
+| P9 | **Host+client**: both load the identical room and exchange `ContentHash` in `ArenaReady`; the gate blocks seal/teleport until both match; an NPC wakes for a client who enters first while the host is far away; a forced mismatch/timeout **aborts** instead of starting | R7, R10, R33, report 5 |
 
-## 7.3 Pass/fail criteria (the request's acceptance list)
+### 7.3 Pass/fail criteria (the request's acceptance list)
 
 - ✅ Vanilla assets load at runtime from the player's install (no redistribution).
 - ✅ Materials display correctly (no pink; lighting from our `LightingRoot`).
 - ✅ Collision is correct (players/enemy don't clip walls or snag on decoration).
 - ✅ The ordinary enemy tracks the player and navigates around the pillar (A\* works on our geometry).
-- ✅ Host and client see the **same** room (parity hash matches; enemy activates for a client who enters first).
-- ✅ On exit, all arena objects **and** nav data are fully cleaned up; the next level is unaffected.
+- ✅ Host and client see the **same** room (`ContentHash` matches; an NPC wakes for a client who enters first —
+  which needs the activation port, not just roster registration).
+- ✅ A deliberate content mismatch or a stalled peer **aborts** the encounter; nothing seals, teleports, or spawns.
+- ✅ On exit, all arena objects **and** the arena's nav contributions are cleaned out of the *active* level, and
+  the next level is unaffected.
 
-## 7.4 Explicitly out of scope for the PoC
+### 7.4 Explicitly out of scope for the PoC
 - The full large square cave arena.
 - The original boss — only an ordinary enemy is tested here. (The boss is an original `FalseGods.Core`
   `BossSimulation`, **not** a `BossFightHelper`/`BossPhase` subclass; those vanilla types are references only.)
 - Procedural / random arena assembly (fixed room only).
 - Phase-changing terrain, destructibles, mechanisms.
 
-## 7.5 Known verification limits (report honestly)
+### 7.5 Known verification limits (report honestly)
 - Runtime rendering/nav/teardown claims are **unverified** until P0–P8 actually run in-game; this document is
   a plan, not a result.
 - Multiplayer parity/activation (P9) requires **two game instances** (host + client). Full boss-authority
@@ -67,19 +73,22 @@ The PoC is split into two phases:
 
 ---
 
-# Phase B — Original Boss Networking Vertical Slice
+## Phase B — Original Boss Networking Vertical Slice (§7.6)
 
 This is not the final first boss. It is a temporary test actor proving the False Gods boss architecture.
 
 **Follow the vertical-slice order** ([DefinitionOfDone.md §3](DefinitionOfDone.md)): establish the minimum
-module skeleton (`FalseGods.Core` / `.Protocol` / `.UnityRuntime` / `.Plugin` + the two integration adapters,
-per [Architecture.md](Architecture.md)) → arena PoC (Phase A) → one temporary `BossSimulation` in Core → one
-`BossPresentation` in UnityRuntime → single-player → transport-neutral snapshots/events in Protocol → connect
-via `FalseGods.Integration.SulfurTogether` → host/client validation. Extract shared abstractions **only** from
-demonstrated repetition — do not build a universal boss framework up front. The three layers below map to
-`BossSimulation` (Core), `BossPresentation` (UnityRuntime), and `BossReplication` (via the ST adapter).
+module skeleton (`FalseGods.Core` / `.Protocol` / `.RuntimeContracts` / `.Application` / `.UnityRuntime` /
+`.Plugin` + `Integration.Sulfur`, per [Architecture.md](Architecture.md)) → arena PoC (Phase A) → one temporary
+`BossSimulation` in Core → one `BossPresentation` in UnityRuntime, driven through
+`PresentationState`/`PresentationEvent` → single-player → transport-neutral snapshots/events in Protocol plus
+the Application mapper → connect through the **optional, separately-loaded**
+`FalseGods.Integration.SulfurTogether` (registered via `IIntegrationRegistry`, never referenced by the Plugin)
+→ host/client validation. Extract shared abstractions **only** from demonstrated repetition — do not build a
+universal boss framework up front. The three layers below map to `BossSimulation` (Core), `BossPresentation`
+(UnityRuntime), and `BossReplication` (Application over the adapter's `IEncounterChannel`).
 
-## 7.6.1 Test boss
+### 7.6.1 Test boss
 
 Use either:
 
@@ -97,44 +106,48 @@ It must have:
 - death;
 - arena completion.
 
-## 7.6.2 Required architecture
+### 7.6.2 Required architecture
 
-- `BossSimulation`
-- `BossPresentation`
-- `BossReplication`
-- stable boss instance id
-- stable attack instance id
+- `BossSimulation` (Core), `ArenaSimulation` (Core), `EncounterCoordinator` (Core)
+- `BossPresentation` (UnityRuntime), fed only `PresentationState` / `PresentationEvent`
+- `BossReplication` (Application) over `IEncounterChannel`
+- stable `EncounterId`, `BossInstanceId`, `AttackInstanceId`
 - host simulation tick/time
-- full baseline snapshot
-- reliable discrete events
-- unreliable movement/state correction
-- duplicate suppression
-- join-in-progress restoration
+- `BossSnapshot` + `ArenaSnapshot` (unreliable correction)
+- `BossEvent` + `ArenaEvent` (reliable, sequenced, one sequence space each)
+- `EncounterBaseline` composing boss + arena + encounter state
+- per-stream duplicate suppression
+- join-in-progress restoration from one baseline
 
-## 7.6.3 Test sequence
+### 7.6.3 Test sequence
 
-- **B0.** Run the test boss in single-player without SULFUR Together.
-- **B1.** Host and client load the arena and receive the same boss definition/protocol version.
+- **B0.** Run the test boss in single-player with SULFUR Together **and the ST adapter DLL** absent — no
+  `TypeLoadException`, no `FileNotFoundException`.
+- **B1.** Host and client load the arena and agree on boss definition and protocol version. Assert
+  `BossPresentation`'s public surface names no `FalseGods.Protocol` type.
 - **B2.** Host selects an attack; both peers show the same `AttackInstanceId`.
 - **B3.** Telegraph begins from host simulation time on both machines.
 - **B4.** Host commits the projectile/area attack; client presentation does not decide damage.
 - **B5.** Drop several continuous state packets; the discrete attack still completes exactly once.
-- **B6.** Deliver one duplicate reliable event; no duplicate projectile, mechanism, or damage occurs.
-- **B7.** Enter phase 2; all peers agree on phase and current state.
-- **B8.** Start a client during phase 2; it reconstructs the current boss, attack, weak point, and arena state
-  from a baseline snapshot.
+- **B6.** Deliver one duplicate reliable event **on each stream**; no duplicate projectile, mechanism, or damage
+  occurs, and a dropped `ArenaEvent` does not stall the boss stream.
+- **B7.** Enter phase 2; the coordinator drives the arena's phase-2 mechanism group; all peers agree on boss
+  phase and arena mechanism state.
+- **B8.** Start a client during phase 2; it reconstructs the current boss, attack, weak point, **and** arena
+  state from **one** `EncounterBaseline`, then resumes both event streams from the sequences it carries.
 - **B9.** Kill the boss; death, reward, unlock, and teardown occur exactly once.
-- **B10.** Return to a normal level and verify no boss, arena, event subscription, or navigation state
-  survives.
+- **B10.** Leave the arena and keep playing the current level, then return to a normal level; verify no boss,
+  arena, event subscription, or navigation state survives either transition.
 
-## 7.6.4 Pass criteria
+### 7.6.4 Pass criteria
 
-- Single-player and host use the same simulation rules.
-- The client never executes authoritative AI or damage.
+- Single-player and host use the same simulation rules and the same presentation entry point.
+- The client never executes authoritative AI or damage, and presentation never touches a wire DTO.
 - Phase, attack, and death events happen exactly once.
 - Visual timing is tied to host simulation time.
-- A late join reconstructs the current encounter.
-- Packet duplication and snapshot loss do not duplicate gameplay.
+- A late join reconstructs boss, arena, and encounter state from one `EncounterBaseline`.
+- Packet duplication and snapshot loss do not duplicate gameplay, on either stream.
+- The boss never starts unless the ready gate passed for every required peer.
 - The complete arena and boss teardown is clean.
 
 > Everything in Phase B is **proposed / unverified** until it runs in-game with a host + client; this is a

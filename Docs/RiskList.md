@@ -12,20 +12,20 @@ arena.
 | **R4** | **`NavmeshPrefab.Apply()` from a mod + validity of a bundle-baked navmesh** | Option 1 nav (prebaked, deterministic, cheap) hinges on this. If it fails we fall back to runtime rescan (Option 2), which is heavier and needs the `NavMeshCleaner` workaround. | In the PoC room, bake a `NavmeshPrefab`, call `.Apply()` + `UpdateGraphs(bounds)`, and confirm an enemy paths on it. |
 | **R5** | **`NavMeshCleaner` flood-fill discards our island** | On a runtime rescan, walkability is restricted to areas containing `validNavMeshPoints` (connectors + `navMeshAnchor`s). A custom arena with none gets marked unwalkable. | In the PoC, do a rescan and observe whether the arena floor is walkable; if not, add a `navMeshAnchor`-tagged transform / custom `GraphModifier` and retest. |
 | **R6** | **Shader variants missing** for reused/own materials | Pink materials in-game even if fine in editor. | Instantiate a vanilla cave prefab at runtime and eyeball it; for any original shader, ship a variant collection. (report 3.6) |
-| **R7** | **Multiplayer arena-load parity & readiness races** | If clients load a slightly different arena or the host starts the boss before a client is ready, states diverge. | PoC host+client parity check (report 7): both ends load arena, compare an arena hash, gate on all-ready before any spawn. |
-| **R8** | **Teardown pollutes the next level** (stale nav nodes / leaked objects / unreleased Addressables) | `AstarPath.active` is persistent and shared; leftovers corrupt the next real level or leak memory. | PoC: enter arena → leave → load a normal level; assert no arena `GameObject`s remain, Addressables handles released, and the next level's nav is correct. |
+| **R7** | **Multiplayer arena-load parity & readiness races** | If peers load a slightly different arena, or the host starts the boss before a peer is ready, states diverge. Matching `ArenaVersion` is not proof of matching content. | PoC host+client parity check (report 7 / P9): both ends load the arena, exchange `ContentHash` in `ArenaReady`, and the gate blocks seal/teleport/boss-start until every required peer matches. Verify the gate **fails closed** on mismatch and on timeout (report 5 §5.3.1). |
+| **R8** | **Teardown pollutes the level we are still in** (stale nav nodes / leaked objects / unreleased Addressables) | `AstarPath.active` is shared global state for the **active** level. A normal level change rebuilds it (`ClearGraphs()`+`Destroy` at `GameManager.cs:1097`, `Instantiate(astarPathPrefab)` at `:1137`), so residue does not cross levels — but every vanilla NPC paths on our leftovers until that transition happens, and a Boss Rush or hub-return flow may never reach one. | PoC P7: enter arena → leave → keep playing the same level (assert vanilla NPCs path normally and no arena `GameObject`s / nav nodes remain) → then load a normal level and assert Addressables handles were released and its nav is correct. |
 | **R9** | **Big-boss pathing** doesn't fit a normal recast agent | A large original boss may clip walls / stick on corners with plain `RichAI`. | Prototype boss movement as raycast-ground-follow (like `EmperorBossSpiderEndless`) + navmesh target queries, not pure `RichAI`. (report 4.5) |
-| **R10** | **Enemy activation for a client who enters first** | Vanilla `NpcUpdateManager.LateUpdate` wakes NPCs only near the host singleton. | Reuse SULFUR Together's registry fix (register remote players in `GameManager.Players`); verify an add wakes for a client. |
+| **R10** | **Enemy activation for a client who enters first** — and the roster/activation conflation | Vanilla `NpcUpdateManager.LateUpdate` measures activation distance from `GameManager.Instance.PlayerObject.transform.position`, the **local main player only**. Registering remote players in `GameManager.Players` feeds detection/LOS/targeting for NPCs that are *already awake* — it does **not** wake them. These are two mechanisms, and treating them as one leaves adds asleep next to a client. ST solves activation with a *separate* `NpcUpdateManager.LateUpdate` postfix. | Model them as two ports: `IPlayerRoster` (membership/identity/positions) and `IRemoteNpcActivationPort` (wake NPCs near non-local participants) — both outer, neither in Core. Verify separately: (a) an awake add chases a remote player; (b) an asleep add wakes for a client who enters first with the host far away. **Open:** if ST already patches `LateUpdate`, the adapter must report "activation already provided" so the two do not double-wake. |
 | **R11** | **Boss encounter-start caveats** (client invulnerability / presentation) | `BossAuthority.md` notes client presentation can leave a boss permanently invulnerable if `DoneAppearing` never fires. | For an original boss, drive start from the host-authoritative `BossSimulation` (§5.5) with non-authoritative client presentation — the layered model avoids this class of bug by construction; only relevant if reusing a vanilla presentation path. |
 | **R12** | **Legal / asset-redistribution** | Shipping vanilla meshes/textures/shaders is not acceptable. | Enforce: mod bundle contains only original assets + proxy keys; all vanilla content resolved at runtime (report 2). CI/pack check. |
 | **R13** | **Original shader / render-pipeline compatibility** | Original arena and boss materials may work in the editor but fail in the game bundle. | Load one original opaque material, one transparent sprite material, and one emissive material in the asset PoC. |
 | **R14** | **Unity-prefab editor/runtime divergence** | The arena may look correct in the editor but differ after bundle load and runtime vanilla-proxy replacement. | Compute an authored arena manifest and compare runtime hierarchy/transforms against it. |
 | **R15** | **2D boss sorting / billboarding / hitbox mismatch** | A large sprite may face incorrectly, sort behind the arena, or have hitboxes detached from visual parts. | Build a temporary multi-part billboard boss with one weak point and one muzzle transform. |
-| **R16** | **Boss simulation and presentation remain coupled** | Client presentation code may accidentally make gameplay decisions, recreating vanilla synchronization problems. | Run the boss presentation with simulation disabled and verify it cannot advance phase or deal damage. |
+| **R16** | **Boss simulation and presentation remain coupled** | Client presentation code may accidentally make gameplay decisions, recreating vanilla synchronization problems. Handing presentation a wire DTO is how it starts: the snapshot carries authoritative fields, so reading one "just for display" is one line away from acting on it. | Run the boss presentation with simulation disabled and verify it cannot advance phase or deal damage. Enforce structurally: `FalseGods.UnityRuntime` does not reference `FalseGods.Protocol`; presentation accepts only `PresentationState`/`PresentationEvent` (Architecture §7). |
 | **R17** | **Host-time / attack-timeline drift** | Clients may show telegraphs or attack commits at different times. | Replicate one attack using host simulation ticks and measure host/client telegraph and commit offsets. |
 | **R18** | **Late-join recovery is incomplete** | A client joining during phase 2 may not know active mechanisms, weak points, or current attack. | Join a second client mid-attack and rebuild the complete presentation from a baseline snapshot. |
 | **R19** | **Duplicate / out-of-order event handling** | Retransmission may duplicate projectiles, adds, deaths, or rewards. | Replay duplicate and reordered event sequences in a test harness and verify idempotence. |
-| **R20** | **False Gods becomes hard-dependent on SULFUR Together** | Single-player may fail if networking types are referenced directly. | Run the same boss build without SULFUR Together installed; optional integration must be discovered/reflected or isolated behind an adapter assembly. |
+| **R20** | **False Gods becomes hard-dependent on SULFUR Together** | An assembly reference resolves at type-load, not at a runtime null check. If `FalseGods.Plugin` references `FalseGods.Integration.SulfurTogether` at all — even only to wire it up — single-player dies at load when the DLL is absent. | Build check: read `FalseGods.Plugin.dll`'s metadata references and assert the adapter is not among them. Runtime check (PoC B0): delete the adapter DLL and play single-player. The adapter must self-register through `IIntegrationRegistry`, or be found by guarded reflection. |
 | **R21** | **SULFUR Together internals leak outside the adapter** | ST/manager/message types spreading into boss/arena/protocol code recreate the coupling debt. | CI namespace scan: fail if `SULFURTogether.*`/`LiteNetLib.*`/`Steamworks.*` appears outside `Integration.SulfurTogether` (DependencyRules §7). |
 | **R22** | **Transport-specific types leak into Protocol/Core** | Protocol/domain must be transport-neutral or a transport change ripples inward. | Analyzer/scan: `FalseGods.Protocol` and `.Core` reference neither LiteNetLib/Steamworks nor `Net*` types; Protocol carries only DTOs. |
 | **R23** | **Core accidentally gains Unity/game DLL references** | Any such ref makes Core un-testable and couples it to the engine/game. | Core `.csproj` references no Unity/game/network DLLs; a build with those refs absent must compile Core + its tests. |
@@ -33,24 +33,44 @@ arena.
 | **R25** | **Harmony patches spread through feature code** | Distributed patches recreate ST's scattered-patch problem and obscure ownership. | Restrict Harmony to `Integration.Sulfur`; scan for `HarmonyLib`/`[HarmonyPatch]` elsewhere and fail. |
 | **R26** | **Global static / service-locator growth** | Arbitrary components fetching global managers reintroduce hidden coupling. | Ban static mutable singletons/service-locators in Core/UnityRuntime; wire dependencies from the Composition Root; review new statics in DoD. |
 | **R27** | **Two sources of truth (Simulation vs Presentation)** | Presentation holding authoritative state diverges from the host simulation. | Assert presentation has no authoritative fields; run presentation with simulation disabled and confirm it cannot advance state (RiskList R16). |
-| **R28** | **Ambiguous lifecycle ownership** | Unclear init/teardown owner leaks resources or double-frees. | Every subsystem names one owner in its DoD entry; Composition Root owns start/stop ordering (Architecture §8). |
-| **R29** | **Optional-ST absence causes type-load failure** | A hard reference to a missing ST assembly crashes single-player at load. | Launch with the ST integration assembly removed; assert no `TypeLoadException`/`FileNotFound` and single-player runs. |
+| **R28** | **Ambiguous lifecycle ownership** | Unclear init/teardown owner leaks resources or double-frees. | Every subsystem names one owner in its DoD entry; Composition Root owns start/stop ordering (Architecture §9). |
+| **R29** | **Optional-ST absence causes type-load failure** | A hard reference to a missing ST assembly crashes single-player at load — including an indirect one, via a field type, a method signature, or a `typeof()` on a static-init path in the Composition Root. | Launch with the ST integration assembly removed; assert no `TypeLoadException`/`FileNotFoundException` and that single-player runs. Back it with the metadata-reference check in R20 so a signature-level leak cannot pass. |
 | **R30** | **Cleanup responsibilities split across modules** | Partial teardown leaves objects/nav/handlers behind. | One teardown owner per subsystem; PoC P7/B10 assert nothing survives into the next level. |
-| **R31** | **Premature abstraction → oversized framework** | Speculative generality slows delivery and adds untested surface. | Enforce the vertical-slice rule (DoD §3): generalize only after a second real use case; review new abstractions for a present consumer. |
+| **R31** | **Premature abstraction → oversized framework** | Speculative generality slows delivery and adds untested surface. A port with no consumer is the common form: e.g. a Core-declared `IAssetProvider` nothing in the domain calls. | Enforce the vertical-slice rule (DoD §3): generalize only after a second real use case; review every new abstraction for a present consumer and for placement in the innermost consuming module (Architecture §6). |
+| **R32** | **ST's capabilities are `internal`; the adapter must reflect** | Roughly 189 `internal` types to 38 `public` in ST, with no `[InternalsVisibleTo]`. `CoopConnection`, `ArenaLockdownManager`, `NetBossEncounterManager`, `NetLoadBarrier`, `RemotePlayerRegistryManager` are all `internal`. Reflection is version-fragile: an ST update can silently break session, lockdown, or roster access. | Every reflective lookup is resolved once, guarded, and degrades to "capability unavailable" (never a throw). A capability self-test at adapter load reports which ports registered. Longer-term: request a **public integration bridge** from the ST project (ADR-004). |
+| **R33** | **Ready gate degrades into "start anyway"** | ST's `NetLoadBarrier` is log/status-only by default and blocks nothing; copying its shape without its intent yields a gate that always opens. A boss started against a half-loaded party desyncs immediately. | Assert fail-closed behaviour directly: with one peer's load stalled, the host must abort the encounter rather than seal, teleport, or spawn the boss. Test each of load-failure / hash-mismatch / timeout / disconnect (report 5 §5.3.1). |
 
-## Suggested validation order (do the cheap, high-leverage probes first)
+## Suggested validation order
 
-1. Unity version and own AssetBundle load. *(R2)*
-2. Original materials and one 2D sprite render correctly. *(R13, R6)*
-3. Vanilla Addressables resolution. *(R1)*
-4. Collision and A* navigation. *(R3, R4, R5)*
-5. Arena teardown. *(R8)*
-6. Unity-authored prefab runtime parity. *(R14)*
-7. Boss simulation/presentation separation. *(R16)*
-8. One networked attack timeline. *(R17)*
-9. Snapshot/event duplicate handling. *(R19)*
-10. Late join. *(R18)*
-11. Full arena + boss multiplayer loop. *(R7, R10, R15, R20)*
+This mirrors the PoC step ids exactly ([MinimalProofOfConceptPlan.md](MinimalProofOfConceptPlan.md)) — the two
+documents are the same plan, addressed by risk here and by procedure there.
 
-Steps 1–6 can be checked in **single-player** with a probe plugin + the PoC room (Phase A), before any
-multiplayer or boss work. Steps 7–11 are the network-native boss slice (Phase B) and need a host + client.
+**Phase A — single-player, probe plugin + PoC room.** Cheap, high-leverage probes first.
+
+| PoC step | Validates | Risks |
+|---|---|---|
+| P0 | Probe plugin loads; read `AstarPath.active`, `GameManager.geometryLayer`, recast params | R3 |
+| P1 | Vanilla Addressables resolution | R1 |
+| P2 | Our own AssetBundle loads in the game's Unity version | R2 |
+| P3 | Vanilla + original materials render (no pink); one 2D sprite | R6, R13 |
+| P4 | Arena collision behaves | R3 |
+| P5 | A\* navigation works; `NavMeshCleaner` does not discard our island | R4, R5 |
+| P6 | An ordinary enemy paths around the pillar | R9 |
+| P7 | Teardown: the arena leaves neither the current level nor the next one polluted | R8, R30 |
+| P8 | Single-player full loop; runtime hierarchy matches the authored manifest | R14 |
+| P9 | Host+client: identical arena (`ContentHash` parity), fail-closed gate, NPC activation for a client | R7, R10, R33 |
+
+**Phase B — network-native boss slice.** Needs a host + client.
+
+| PoC step | Validates | Risks |
+|---|---|---|
+| B0 | Runs with SULFUR Together **and the adapter DLL** absent | R20, R29, R32 |
+| B1–B2 | Simulation/presentation separation; presentation sees no wire DTO; shared `AttackInstanceId`; 2D boss sorting/hitboxes | R16, R27, R15 |
+| B3–B4 | One networked attack timeline aligned to host simulation time | R17 |
+| B5–B6 | Snapshot loss + duplicate reliable events; per-stream idempotence | R19 |
+| B7–B8 | Phase change; late join restored from one `EncounterBaseline` (boss + arena + encounter) | R18 |
+| B9–B10 | Death exactly once; complete arena + boss teardown | R8, R28, R30 |
+
+Structural risks (R21–R26, R31) are not runtime probes — they are the CI dependency scans and architecture
+tests in [DependencyRules.md §7](DependencyRules.md), and they should be wired up alongside the module skeleton,
+before P0.

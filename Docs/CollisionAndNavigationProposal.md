@@ -40,9 +40,25 @@ meshes. We follow the same instinct — never make the boss or players collide w
 Verified facts (`BuildNavMeshNode`, `NavMeshManager`, `NavMeshCleaner`, `RecastTagVolume`, `AiAgent`,
 `CustomRichAI`):
 
-- There is **one persistent `AstarPath.active`** in the game. Its recast graph is **graph index 0**
-  (`NNConstraint.graphMask = 1` throughout the code). It is **re-scanned at runtime for every level**, not
-  baked per scene.
+- There is **one `AstarPath.active`** at a time, and it is **shared global state for the currently active
+  level**. Its recast graph is **graph index 0** (`NNConstraint.graphMask = 1` throughout the code), built at
+  runtime rather than baked per scene.
+- It is **not persistent across levels.** A normal level change destroys and rebuilds it. In
+  `GameManager`'s level-switch routine:
+  ```csharp
+  // Decompiled/.../GameManager.cs:1097
+  if (AstarPath.active != null) {
+      AstarPath.active.data.ClearGraphs();
+      UnityEngine.Object.Destroy(AstarPath.active.gameObject);
+  }
+  // …then, for the next level:
+  // Decompiled/.../GameManager.cs:1137
+  UnityEngine.Object.Instantiate<AstarPath>(astarPathPrefab);
+  AstarPath.FindAstarPath();
+  ```
+  ⚠️ This does **not** license an additive arena to leak. The arena shares the graph with the level the players
+  are still standing in; a future level change would clear it, but everything between arena exit and that
+  transition would run against a polluted graph. See §4.6.
 - The runtime scan the game performs (`BuildNavMeshNode.Execute`):
   1. `AstarPath.active.data.recastGraph.cellSize = currentEnvironment.navMeshVoxelSize` (**0.1** by default).
   2. `recastGraph.SnapBoundsToScene()` (fit graph bounds to current geometry).
@@ -110,25 +126,35 @@ if the arena needs disconnected walkable areas. A single flat arena floor needs 
 - **Authority**: in multiplayer the **host runs boss AI/pathing**; the client shows an interpolated puppet
   (report 5, and SULFUR Together `HostDrivenProxyPlan.md`). Never compute boss paths on the client.
 
-## 4.6 Runtime teardown (must not pollute the next level)
+## 4.6 Runtime teardown (must not pollute the active level)
 
-Because `AstarPath.active` is **persistent and shared**, arena teardown must restore it:
+`AstarPath.active` is **shared global state for the current level**. A normal level change rebuilds it
+(`ClearGraphs()` + `Destroy(...)` at `GameManager.cs:1097`, `Instantiate(astarPathPrefab)` at `:1137` — §4.3), so
+arena residue does not survive a level transition.
 
-- If **Option 1 (NavmeshPrefab)** was used: on exit, remove/replace the applied graph region. The safest is to
-  let the **next level's own generation rescan** overwrite it — but do not leave stale walkable nodes that the
-  next `NavMeshCleaner` pass might treat as valid. Prefer triggering a clean rescan (or the game's normal
-  level transition, which already rescans) after unloading the arena geometry.
-- If **Option 2 (rescan)** was used: unloading the arena geometry and letting the normal level-transition
-  rescan run is sufficient, since the game rescans every level anyway.
-- Destroy all arena roots, `Addressables.Release` every handle taken for vanilla assets, remove any off-mesh
-  links we added to `AstarPath.active.offMeshLinks`, and clear any `GraphModifier`/`RecastTagVolume` we
-  registered. Verify no arena `GameObject`s or nav nodes survive into the next level (PoC teardown check).
+**That is not a cleanup strategy.** The additive arena adds its nodes, links, and modifiers to the graph the
+players are currently walking on. Between arena exit and the next level change, every vanilla NPC in that level
+paths on whatever we left behind. The arena must therefore remove exactly what it added, when it exits — not
+wait for a rebuild that may be many minutes away, and that a Boss Rush or hub-return flow may never reach.
+
+- If **Option 1 (NavmeshPrefab)** was used: on exit, remove/replace the applied graph region and re-apply or
+  rescan the region the arena overwrote, so the surrounding level's walkability is restored.
+- If **Option 2 (rescan)** was used: unload the arena geometry and rescan, so the graph reflects the level
+  without the arena. Do not leave stale walkable nodes that a subsequent `NavMeshCleaner` pass might treat as
+  valid.
+- In both cases: destroy all arena roots, `Addressables.Release` every handle taken for vanilla assets, remove
+  any off-mesh links we added to `AstarPath.active.offMeshLinks`, and unregister any
+  `GraphModifier`/`RecastTagVolume` we added. Verify no arena `GameObject`s or nav nodes survive — first into
+  the rest of the current level, then into the next one (PoC teardown check, P7).
+
+All of this happens behind `INavigationPort`; no gameplay or arena code names `AstarPath` directly.
 
 ## 4.7 Open verification items (RiskList)
 - R3: exact geometry layer + recast rasterization mask (read at runtime).
 - R4: `NavmeshPrefab.Apply()` usability from a mod + validity of a bundle-baked navmesh.
 - R5: real recast agent params (read at runtime, record here).
-- R8: teardown leaves `AstarPath.active` clean for the next level.
+- R8: teardown leaves the **active level's** `AstarPath` graph clean, without relying on the next level change
+  to rebuild it.
 
 ## 4.8 Unity-authored navigation source
 

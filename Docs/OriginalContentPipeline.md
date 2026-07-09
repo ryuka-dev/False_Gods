@@ -61,7 +61,9 @@ The arena is authored as one `ArenaRoot` prefab (hierarchy in
 - Carries an `ArenaId` + `ArenaVersion` (matches the `ArenaManifest` in
   [MultiplayerLoadingContract.md §5.2](MultiplayerLoadingContract.md)).
 - An **editor tool exports an authored arena manifest** (hierarchy + transforms + proxy keys) so runtime can
-  verify parity after load and proxy replacement (RiskList R14).
+  verify parity after load and proxy replacement (RiskList R14). The same export produces the `ContentHash`
+  that peers exchange in `ArenaReady` — matching `ArenaVersion` names the arena, matching `ContentHash` proves
+  two peers realized the same one.
 
 ## 8.4 Boss prefab spec
 
@@ -99,9 +101,13 @@ The arena is authored as one `ArenaRoot` prefab (hierarchy in
 5. **Publish-package check** (CI/pack gate): assert the bundle contains only original + proxy references and
    **no** vanilla SULFUR assets; assert bundle/content versions are stamped.
 6. **Runtime load** (BepInEx plugin): load the bundle, instantiate the prefab, resolve `VanillaAssetProxy`
-   objects via the player's local Addressables, register roots, then hand off to the arena/boss controllers.
-7. **Runtime unload:** destroy instantiated content, **release Addressables handles**, unload the bundle, and
-   drop bundle dependencies (report 4.6 teardown), leaving no residue for the next level (RiskList R8).
+   objects via the player's local Addressables, register roots, compute the `ContentHash`, and report
+   `ArenaReady`. Only once the gate passes do the arena/boss controllers seal, teleport, and start
+   ([MultiplayerLoadingContract.md §5.3](MultiplayerLoadingContract.md)).
+7. **Runtime unload:** destroy instantiated content, **release Addressables handles**, unload the bundle, drop
+   bundle dependencies, and remove the arena's own nodes/links/modifiers from the active level's A\* graph
+   (report 4.6 teardown) — leaving no residue in the rest of the current level, nor in the next one
+   (RiskList R8).
 
 ## 8.7 Verification (PoC)
 - P2 (report 7): a trivial bundle built in Unity 6000.3.6f1 loads under BepInEx.

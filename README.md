@@ -41,13 +41,19 @@ to be the final replication model for original False Gods bosses.
 
 False Gods bosses are authored as network-native encounters from the beginning:
 
-- one deterministic host-authoritative simulation;
-- a separate presentation layer;
-- explicit replicated state and discrete events;
-- snapshot and join-in-progress recovery;
+- one **host-authoritative simulation with deterministic identifiers and explicit authoritative decisions**;
+- a separate presentation layer, driven by project-owned presentation contracts rather than wire DTOs;
+- explicit replicated state (`BossSnapshot` / `ArenaSnapshot`) and discrete events (`BossEvent` / `ArenaEvent`);
+- an `EncounterBaseline` for join-in-progress and full recovery;
 - no client-authoritative phase, damage, death, or attack selection.
 
-The project consumes SULFUR Together's transport, session, player registry, arena readiness, and lockdown
+**What "deterministic" does and does not mean here.** It does **not** mean Unity physics, A\* recast scans, or
+client-side simulation are bit-identical across machines — we never require that, and clients never re-run the
+authoritative simulation. It means: stable identifiers (`EncounterId`, `BossInstanceId`, `AttackInstanceId`,
+`ArenaId`), a stable event order, idempotent event application, and authoritative decisions that are made
+exactly once on the host and replicated as **results**.
+
+The project consumes SULFUR Together's transport, session, player roster, arena readiness, and lockdown
 capabilities **through project-owned ports** (never direct dependencies), while defining a purpose-built
 replication contract for original bosses.
 
@@ -59,10 +65,18 @@ coupling), False Gods establishes strict boundaries **before** implementation:
 - **Inward dependency rule** — the boss/encounter domain (`FalseGods.Core`) knows nothing of Unity, BepInEx,
   Harmony, SULFUR, A\*, Addressables, SULFUR Together, LiteNetLib, or Steam. Those live in outer integration
   adapters.
+- **Core stays narrow** — it holds only the domain and the abstractions the domain itself calls. Asset,
+  Addressables, navigation, scene, loading, channel, session, and replication ports live in the outer modules
+  whose code actually consumes them.
 - **Transport and Steam P2P are invisible** to boss and arena code; adding/replacing a transport changes only
   the SULFUR Together adapter.
-- **SULFUR Together is optional**, isolated behind `FalseGods.Integration.SulfurTogether`; single-player runs
-  with it absent.
+- **Presentation never sees a wire DTO** — network snapshots/events are mapped into project-owned
+  `PresentationState` / `PresentationEvent` before reaching `BossPresentation`, so single-player and multiplayer
+  drive the same presentation entry point.
+- **SULFUR Together is optional and never a CLR dependency of the base plugin.**
+  `FalseGods.Integration.SulfurTogether` is a separate optional assembly that references the stable
+  `FalseGods.RuntimeContracts` and registers itself at runtime; `FalseGods.Plugin` never names an ST adapter
+  type. Single-player runs with the adapter absent.
 - Vanilla `BossFightHelper` / `BossPhase` / `IBossEncounterAdapter` are **reverse-engineering references, not
   base classes** for original bosses.
 
