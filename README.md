@@ -157,8 +157,10 @@ machine with no game and no BepInEx installed, which is what makes the domain un
 
 `setup-dev.ps1` points git at the tracked `.githooks/` directory (`git config --local core.hooksPath
 .githooks`). That activates **`.githooks/pre-push`**, which runs the full `scripts/verify.ps1` **before every
-`git push`** and **blocks the push** if verification fails. Normal pushes verify Debug; pushes to `master`, a
-`release*` branch, or a tag additionally verify Release.
+`git push`** and **blocks the push** if verification fails. It verifies **both Debug and Release on every
+push** — because under branch protection nobody pushes `master` directly (GitHub merges the PR server-side,
+which never runs this hook), and CI only builds the Debug inner subset, so a feature-branch push is the only
+place a full Release build happens before code reaches `master`. The cost is a second full build per push.
 
 - **Install once per clone.** The setting lives in this clone's `.git/config`, so re-run `setup-dev.ps1` after
   a fresh clone, on a new machine, or if the repo's `.git` config is lost or reset. `setup-dev.ps1` is

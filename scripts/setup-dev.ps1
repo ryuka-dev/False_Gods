@@ -33,10 +33,21 @@ function Stop-Setup {
 
 Push-Location $repoRoot
 try {
-    # 1. This must be a git working tree.
-    $null = & git rev-parse --show-toplevel 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    # 1. This must be a git working tree, and specifically THIS repo's — not a parent or nested repo that
+    #    happens to contain the script. Compare the git root against the repo root derived from the
+    #    script's own location, normalised so slash direction / trailing separators / case do not matter.
+    $top = (& git rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($top)) {
         Stop-Setup "this is not a git repository. Run from a clone of False Gods (the folder with 'False Gods.slnx')."
+    }
+
+    $gitRoot  = [System.IO.Path]::GetFullPath($top).TrimEnd('\', '/')
+    $thisRoot = [System.IO.Path]::GetFullPath($repoRoot).TrimEnd('\', '/')
+    if (-not [string]::Equals($gitRoot, $thisRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Stop-Setup ("the git root is not the False Gods repo root." + [Environment]::NewLine +
+                    "  git root:  $gitRoot" + [Environment]::NewLine +
+                    "  this repo: $thisRoot" + [Environment]::NewLine +
+                    "Run scripts/setup-dev.ps1 from inside the False Gods clone, not a parent or nested repository.")
     }
 
     # 2. The hook we are about to activate must actually be present, or we would point git at nothing.
