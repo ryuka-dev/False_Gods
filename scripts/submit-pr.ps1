@@ -280,9 +280,21 @@ try {
     if ($existing.ExitCode -ne 0) {
         Stop-WithError ("gh pr list failed (exit $($existing.ExitCode)):" + [Environment]::NewLine + $existing.StdErr.Trim())
     }
+    # Windows PowerShell 5.1 hands a JSON array to the pipeline as ONE object rather than enumerating it, so
+    # `@(<string> | ConvertFrom-Json)` on an empty result `[]` produces a ONE-element array whose element is an
+    # empty Object[] - not an empty array. Assign first, then normalise, then keep only real PR records: an
+    # entry with no 'number' is not a pull request and must never reach $openPrs[0].number.
     $openPrs = @()
     if (-not [string]::IsNullOrWhiteSpace($existing.StdOut)) {
-        $openPrs = @($existing.StdOut | ConvertFrom-Json)
+        try {
+            $parsedPrs = $existing.StdOut | ConvertFrom-Json
+        }
+        catch {
+            Stop-WithError ("gh pr list did not return valid JSON:" + [Environment]::NewLine + $existing.StdOut.Trim())
+        }
+        if ($null -ne $parsedPrs) {
+            $openPrs = @(@($parsedPrs) | Where-Object { $null -ne $_ -and $_.PSObject.Properties['number'] })
+        }
     }
 
     if ($openPrs.Count -gt 0) {
@@ -290,7 +302,10 @@ try {
 
         # The open PR for this branch must target the base we were asked to submit against. Retargeting a PR's
         # base is a decision for a human, not a silent side effect of updating its title/body.
-        $existingBase = $openPrs[0].baseRefName
+        $existingBase = ''
+        if ($openPrs[0].PSObject.Properties['baseRefName'] -and $openPrs[0].baseRefName) {
+            $existingBase = [string]$openPrs[0].baseRefName
+        }
         if (-not [string]::Equals($existingBase, $BaseBranch, [System.StringComparison]::OrdinalIgnoreCase)) {
             Stop-WithError ("open PR #$prNumber targets base '$existingBase', not '$BaseBranch'. " +
                             "Resolve this on GitHub before resubmitting; this script will not change a PR's base.")
@@ -321,7 +336,13 @@ try {
     if ($view.ExitCode -ne 0) {
         Stop-WithError ("gh pr view failed (exit $($view.ExitCode)):" + [Environment]::NewLine + $view.StdErr.Trim())
     }
-    $pr = $view.StdOut | ConvertFrom-Json
+    $pr = $null
+    if (-not [string]::IsNullOrWhiteSpace($view.StdOut)) {
+        try { $pr = $view.StdOut | ConvertFrom-Json } catch { $pr = $null }
+    }
+    if ($null -eq $pr -or -not $pr.PSObject.Properties['number'] -or -not $pr.PSObject.Properties['url']) {
+        Stop-WithError ("gh pr view did not return the PR number and URL:" + [Environment]::NewLine + $view.StdOut.Trim())
+    }
     $prNumber = $pr.number
     $prUrl = $pr.url
     Write-Host "  PR #$prNumber  $prUrl"
