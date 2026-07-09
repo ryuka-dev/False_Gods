@@ -94,13 +94,17 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the structure and
 - The **project reference graph already gives compile-time protection** for several rules. Core cannot see
   `UnityEngine`; `UnityRuntime` cannot see `FalseGods.Protocol`; only `Integration.Sulfur` can see `0Harmony`;
   `FalseGods.Plugin` cannot see the ST adapter. Using a forbidden type does not compile.
-- **Two automated checks exist and fail when run** — `FG-ARCH-002` (the plugin must not reference the optional
-  ST adapter, checked at both the MSBuild project graph and the compiled `AssemblyRef` table) and `FG-ARCH-010`
-  (every check cites a registered rule id). Run them with `.\scripts\verify.ps1`, optionally
-  `-Configuration Release`. The project graph is evaluated for every configuration declared in
-  `Directory.Build.props`, and the metadata check reads only the assembly built by that same run.
-- **The remaining eight rules have no automated check yet**, and **no CI runs any of them**. Nothing here is
-  `Required in CI`. The compiler stops you *using* a forbidden type; it does not stop you *adding the reference*.
+- **Two automated checks gate every pull request.** `FG-ARCH-002` (the plugin must not reference the optional
+  ST adapter) and `FG-ARCH-010` (every check cites a registered rule id) are **`Required in CI`** — branch
+  protection blocks a merge while either is red. CI runs the game-independent layer via
+  `.\scripts\verify.ps1 -CiSafe`: the FG-ARCH-002 **evaluated project-graph** check (evaluated for every
+  configuration declared in `Directory.Build.props`) and FG-ARCH-010.
+- **What CI cannot build stays local + pre-push.** The FG-ARCH-002 **metadata** layer (reading the compiled
+  `AssemblyRef` table of the assembly built by that same run) and a full build of the outer assemblies need the
+  game + BepInEx DLLs a CI runner does not have, so they run only in the full `.\scripts\verify.ps1` (optionally
+  `-Configuration Release`) and the pre-push hook. A green CI is therefore not a full-green.
+- **The remaining eight rules have no automated check yet** (`Planned`). The compiler stops you *using* a
+  forbidden type; it does not yet stop you *adding the reference*.
 
 ## Repository layout
 

@@ -19,8 +19,8 @@ namespace FalseGods.Probe
     /// "AstarPath exists" would capture default cell size, a null cleaner point set, zero scanned nodes, and
     /// possibly zero rooms. So the probe subscribes to the static <c>AstarPath.OnPostScan</c> that
     /// <c>BuildNavMeshNode</c> itself uses (BuildNavMeshNode.cs:65-75) — by the time it fires, the rooms are
-    /// built, the graph is scanned, and the cleaner points are set. That is a real event source, per
-    /// CLAUDE.md §6, not a timing guess.
+    /// built, the graph is scanned, and the cleaner points are set. That is the game's own canonical
+    /// scan-completion event, not a timing heuristic.
     ///
     /// The hotkey (F10) is the authoritative fallback: stand inside a loaded arena and press it. Its report
     /// is the one to trust, because you control exactly when it is taken.
