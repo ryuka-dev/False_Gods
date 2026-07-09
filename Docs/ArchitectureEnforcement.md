@@ -5,9 +5,10 @@ added, excepted, or retired.*
 
 **Partially implemented.** The module skeleton's restricted project references give the compiler protection
 described in §5; **two rules have working automated checks** — `FG-ARCH-002` and `FG-ARCH-010` — run by
-`.\scripts\verify.ps1`; and a **CI workflow** (`.github/workflows/verify.yml`) runs the game-independent subset
-on every push and PR. The other eight rules are `Planned`. **No rule is `Required in CI` yet**: CI runs but does
-not block merges until branch protection is configured (§4.1). See §5 for each rule and §13 for the picture.
+`.\scripts\verify.ps1`; a **CI workflow** (`.github/workflows/verify.yml`) runs the game-independent subset on
+every push and PR; and **branch protection now makes that CI check required to merge `master`**, so
+`FG-ARCH-010` and the `FG-ARCH-002` project-graph layer are the first rules **`Required in CI`**. The other
+eight rules are `Planned`. See §5 for each rule and §13 for the picture.
 
 ## 1. Purpose and authority
 
@@ -130,11 +131,12 @@ assemblies' compile-time protection and the FG-ARCH-002 metadata layer remain L0
 report §6.2, made concrete. Extending CI to the outer *reference graphs* (evaluation-layer checks for
 FG-ARCH-003/005/006, mirroring FG-ARCH-002) is the natural next enforcement step.
 
-**"Blocking" needs branch protection, which is separate from this file.** The workflow *runs* on every push
-and PR, but a red result does not *prevent* a merge until the repository's branch-protection settings mark the
-`verify` check as required and require PRs before merging master. Until that is configured, CI reports but does
-not gate — see §11 and the project's setup notes. That is why FG-ARCH-002/010 below are still `Implemented`,
-not `Required in CI`.
+**"Blocking" is branch protection, which is separate from this file — and is now configured.** A repository
+ruleset marks the CI `verify` check required and requires a pull request before `master` is updated, so a red
+result *prevents* the merge. Because a feature branch is pushed and GitHub merges the PR server-side, the
+local pre-push hook does not run on that merge — CI is the gate there (which is also why the hook verifies both
+Debug and Release on every feature-branch push; see the hook's own comment). The checks that CI actually runs
+(§4.1) are now `Required in CI`; the ones it cannot run stay L0/L3.
 
 ## 5. Rule registry
 
@@ -200,9 +202,10 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 
   Neither layer is a text search. The first is MSBuild's own evaluation, so imports and conditions are
   resolved; the second is CLI metadata, so generics and indirection are resolved.
-- **Check status:** `Implemented`. **In CI:** the **project-graph layer runs** in CI (`verify.ps1 -CiSafe`); the
-  **metadata layer does not** — it reads the outer `Plugin.dll`, which CI cannot build (§4.1). Not yet
-  `Required in CI` (branch protection pending); this is the first rule to promote once it is.
+- **Check status:** `Required in CI` (project-graph layer). The **project-graph layer runs** in CI and is now a
+  required merge check (`verify.ps1 -CiSafe`); the **metadata layer does not run in CI** — it reads the outer
+  `Plugin.dll`, which CI cannot build (§4.1), so that layer stays `Implemented` at L0/L3. The local pre-push
+  hook runs both layers (full verify) before every push.
 - **Compiler protection:** `Full`. `src/FalseGods.Plugin/FalseGods.Plugin.csproj` references
   `Integration.Sulfur` and not `Integration.SulfurTogether`; naming an adapter type from the Plugin fails with
   `CS0234`. **This is the rule whose residual gap matters most** — the compiler cannot stop someone from adding
@@ -339,8 +342,8 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
      authority and its machine-readable projection);
   5. every rule has an `<a id="fg-arch-0nn"></a>` anchor here, so the link each failure message prints actually
      resolves.
-- **Check status:** `Implemented`. **In CI:** yes — it needs no game and runs fully in `verify.ps1 -CiSafe`.
-  Not yet `Required in CI` (branch protection pending, §4.1).
+- **Check status:** `Required in CI`. It needs no game, runs fully in `verify.ps1 -CiSafe`, and is now a
+  required merge check (§4.1).
 - **Compiler protection:** `None`. Nothing about a missing rule id is a compile error.
 - **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/RuleRegistryChecks.cs`, with the logic in
   `Rules/RuleRegistryValidator.cs` kept as pure functions so it can be tested against a deliberately wrong
@@ -527,22 +530,22 @@ The module skeleton exists: eight projects under `src/`, a `Directory.Build.prop
 is the reference graph, and that graph is already doing work. The architecture test project, `scripts/verify.ps1`
 (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
 
-| Rule | Check status | Runs in CI? | Compiler protection |
+| Rule | Check status | In CI as a merge gate? | Compiler protection |
 |---|---|---|---|
-| FG-ARCH-001 | `Planned` | via inner build | `Full` — Core declares no reference at all |
-| **FG-ARCH-002** | **`Implemented`** — project graph **and** `AssemblyRef` | project-graph layer only | `Full` — Plugin does not reference the adapter |
+| FG-ARCH-001 | `Planned` | via inner build (not a cited check) | `Full` — Core declares no reference at all |
+| **FG-ARCH-002** | **`Required in CI`** (project-graph layer); `Implemented` (metadata layer, L0/L3) | project-graph layer ✅; metadata layer ✗ | `Full` — Plugin does not reference the adapter |
 | FG-ARCH-003 | `Planned` | ✗ (outer; compiler-only, L0) | `Full` — UnityRuntime does not reference Protocol |
 | FG-ARCH-004 | `Planned` | ✗ | `Partial`, via FG-ARCH-003 |
 | FG-ARCH-005 | `Planned` | ✗ (no check yet) | `Partial` — no project references ST/LiteNetLib/Steamworks |
 | FG-ARCH-006 | `Planned` | ✗ (outer; compiler-only, L0) | `Full` — only Integration.Sulfur references 0Harmony |
-| FG-ARCH-007 | `Planned` | via inner build | `Full` — RuntimeContracts references Core alone |
+| FG-ARCH-007 | `Planned` | via inner build (not a cited check) | `Full` — RuntimeContracts references Core alone |
 | FG-ARCH-008 | `Planned` | ✗ | `None` — needs the Protocol types to exist |
-| FG-ARCH-009 | `Planned` | project-graph layer only | `Partial`, via FG-ARCH-002 |
-| **FG-ARCH-010** | **`Implemented`** — attribute scan + registry/document agreement | ✅ | `None` |
+| FG-ARCH-009 | `Planned` | project-graph layer via FG-ARCH-002 | `Partial`, via FG-ARCH-002 |
+| **FG-ARCH-010** | **`Required in CI`** — attribute scan + registry/document agreement | ✅ | `None` |
 
-**Nothing is `Required in CI` yet** — the workflow *runs* on push and PR, but a red result does not block a
-merge until branch protection marks the `verify` check required and requires PRs before merging master (§4.1).
-Once that is configured, FG-ARCH-002 (project-graph layer) and FG-ARCH-010 become the first `Required in CI`.
+**Branch protection is configured**, so a red CI result blocks the merge: `FG-ARCH-010` and the `FG-ARCH-002`
+project-graph layer are `Required in CI`. What CI cannot run — the FG-ARCH-002 metadata layer and the outer
+assemblies' compile-time protection — remains L0 (the pre-push hook runs the full verify) and L3.
 
 Every `Full` above was checked by writing the violation and confirming the compiler rejected it (`CS0246` /
 `CS0234`), not by reading the csproj and assuming. The `-CiSafe` path was checked the same way: the inner
@@ -551,14 +554,13 @@ subset passes with **every outer DLL physically removed** (so nothing silently d
 
 Still not created:
 
-- **branch protection** (a repository setting, not a file) — without it CI reports but does not gate
 - an evaluation-layer check for FG-ARCH-003/005/006, which would let CI cover the outer *reference graphs*
-  (report §4.1) — the natural next step
+  (report §4.1) as required merge gates — the natural next step
 - Core unit tests (Core has no code to test)
 - any `.asmdef` (the Unity authoring project is separate — see
   [OriginalContentPipeline.md §8.2](OriginalContentPipeline.md))
 - any source file in any of the eight production projects
 
-**Next.** Configure branch protection (promotes FG-ARCH-002/010 to `Required in CI`), then add
-evaluation-layer checks for FG-ARCH-003/005/006 so CI covers the outer reference graphs too — each is an
-allow-list of assembly names plus a fixture, reusing the two inspectors that already exist.
+**Next.** Add evaluation-layer checks for FG-ARCH-003/005/006 so CI covers the outer reference graphs too —
+each is an allow-list of assembly names plus a fixture, reusing the two inspectors that already exist. That is
+the cheapest way to turn more of the outer-assembly rules into required merge gates.

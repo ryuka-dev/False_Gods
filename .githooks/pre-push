@@ -1,0 +1,55 @@
+#!/bin/sh
+#
+# pre-push: the local L0 gate. Runs the full scripts/verify.ps1 before any push, and blocks the push
+# (non-zero exit) if verification fails.
+#
+# Version-controlled and installed by scripts/setup-dev.ps1 (which points git at .githooks via
+# core.hooksPath). It downloads nothing and executes nothing from the network - it runs one repo-local
+# PowerShell script. It does not deploy DLLs, launch the game, or touch the Gale profile.
+#
+# This is NOT the same coverage as GitHub CI: CI runs the game-independent subset on a machine with no
+# game (verify.ps1 -CiSafe), whereas this hook runs the FULL verify - including the outer assemblies and
+# the FG-ARCH-002 metadata layer - because your machine has the game DLLs and BepInEx that CI lacks.
+# See README (Local pre-push hook) and Docs/ArchitectureEnforcement.md section 4.
+#
+# Emergency override (diagnostics only, not normal workflow): git push --no-verify
+
+# Run from the repository root so the relative script path resolves regardless of where git invoked us,
+# and so a path containing spaces or non-ASCII characters is never passed to powershell.exe as a string
+# argument - the process inherits the working directory instead.
+repo_root=$(git rev-parse --show-toplevel) || {
+    echo "pre-push: not inside a git working tree; aborting." >&2
+    exit 1
+}
+cd "$repo_root" || {
+    echo "pre-push: could not enter repo root '$repo_root'; aborting." >&2
+    exit 1
+}
+
+# Verify BOTH configurations on every push. It is tempting to verify Release only when pushing master or a
+# tag, but under branch protection nobody pushes master directly: a feature branch is pushed, and GitHub
+# merges the PR server-side, which never runs this hook. CI, in turn, runs only the Debug inner subset
+# (verify.ps1 -CiSafe). So a feature-branch push is the ONLY place a full Release build happens before code
+# reaches master. Skipping it here would let Release-only breakage merge unverified. The cost is a second
+# full build per push (~30s each); that is the price of Release being checked somewhere at all.
+#
+# The stdin ref list is consumed (git always provides it) so it does not clog the pipe, even though the ref
+# no longer changes what we run.
+while read -r local_ref local_sha remote_ref remote_sha; do :; done
+
+run_verify() {
+    # -File with a relative path resolves against the working directory set above. ExecutionPolicy Bypass
+    # covers a machine whose default policy would otherwise refuse to run a local script; nothing is
+    # downloaded. Windows PowerShell 5.1 (powershell.exe), matching what verify.ps1 targets.
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1 -Configuration "$1"
+}
+
+for configuration in Debug Release; do
+    echo "pre-push: verify.ps1 -Configuration $configuration"
+    if ! run_verify "$configuration"; then
+        echo "pre-push: $configuration verification FAILED - push blocked. (git push --no-verify overrides, emergencies only.)" >&2
+        exit 1
+    fi
+done
+
+exit 0

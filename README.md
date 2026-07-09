@@ -112,6 +112,9 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the structure and
 | `tests/Fixtures/` | Synthetic projects that prove the checks detect what they claim | ✅ |
 | `tools/FalseGods.Probe/` | Throwaway read-only PoC probe (P0/P1); outside `src/`, deleted after use | ✅ |
 | `scripts/verify.ps1` | The one-command local verification loop | ✅ |
+| `scripts/setup-dev.ps1` | One-time per-clone hook install (`core.hooksPath`) | ✅ |
+| `.githooks/pre-push` | Runs `verify.ps1` before every push; blocks on failure | ✅ |
+| `.github/workflows/verify.yml` | CI: the game-independent verify subset on push + PR | ✅ |
 | `False Gods.slnx` | Solution | ✅ |
 | `global.json` | Pins the .NET SDK the checks were verified against | ✅ |
 | `Directory.Build.props` / `.targets` | Shared build settings; machine-path guards | ✅ |
@@ -142,11 +145,36 @@ machine with no game and no BepInEx installed, which is what makes the domain un
 1. Copy `LocalPaths.props.example` → `LocalPaths.props` and fill in your paths
    (SULFUR managed dir, SULFUR Together source, BepInEx core/plugins).
    `LocalPaths.props` is gitignored — do not commit it.
-2. `.\scripts\verify.ps1` — validates the SDK and configuration, builds the solution, runs the architecture
+2. `.\scripts\setup-dev.ps1` — installs the version-controlled git hooks for this clone (see below).
+   Run it **once per clone**.
+3. `.\scripts\verify.ps1` — validates the SDK and configuration, builds the solution, runs the architecture
    checks against *that* build, and runs `git diff HEAD --check` (staged and unstaged). Takes about twenty
    seconds. Add `-Configuration Release` to verify that configuration. If a required path is missing, the build
    tells you which one.
-3. (Optional) Regenerate the decompile reference — see `Decompiled/README.md`.
+4. (Optional) Regenerate the decompile reference — see `Decompiled/README.md`.
+
+### Local pre-push hook
+
+`setup-dev.ps1` points git at the tracked `.githooks/` directory (`git config --local core.hooksPath
+.githooks`). That activates **`.githooks/pre-push`**, which runs the full `scripts/verify.ps1` **before every
+`git push`** and **blocks the push** if verification fails. It verifies **both Debug and Release on every
+push** — because under branch protection nobody pushes `master` directly (GitHub merges the PR server-side,
+which never runs this hook), and CI only builds the Debug inner subset, so a feature-branch push is the only
+place a full Release build happens before code reaches `master`. The cost is a second full build per push.
+
+- **Install once per clone.** The setting lives in this clone's `.git/config`, so re-run `setup-dev.ps1` after
+  a fresh clone, on a new machine, or if the repo's `.git` config is lost or reset. `setup-dev.ps1` is
+  idempotent — running it again is harmless.
+- **It needs a working build environment**: a valid `LocalPaths.props`, the SULFUR managed assemblies, and
+  BepInEx (see Prerequisites). The hook runs the *full* verify, including the outer assemblies — so unlike the
+  inner-only checks, it will not pass on a machine without the game DLLs.
+- **The hook and GitHub CI cover different things and do not replace each other.** CI runs the
+  game-independent subset (`verify.ps1 -CiSafe`) on a machine with no game; the hook runs the full verify
+  locally, including the outer assemblies and the FG-ARCH-002 metadata layer that CI cannot build. Passing one
+  does not imply the other ([Docs/ArchitectureEnforcement.md §4.1](Docs/ArchitectureEnforcement.md)).
+- **`git push --no-verify`** skips the hook. It exists for a deliberate emergency (e.g. pushing a diagnostic
+  branch while the build environment is broken), not for normal work — a push that skips verification is a push
+  nobody checked.
 
 ## Reference environment (verified during investigation)
 
