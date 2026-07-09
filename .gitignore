@@ -1,0 +1,21 @@
+# Machine-specific paths (never commit)
+LocalPaths.props
+LocalPaths.props.user
+
+# Reverse-engineered game code — kept locally as reference, never redistributed.
+# Ignore the decompiled contents but keep the explanatory README tracked.
+Decompiled/*
+!Decompiled/README.md
+
+# Any assets extracted from the player's local game install — never redistributed
+ExtractedAssets/
+
+# Build output
+bin/
+obj/
+
+# IDE / scratch
+.vs/
+.idea/
+*.user
+.scratch/

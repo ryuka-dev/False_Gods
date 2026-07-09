@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <!--
+      Copy this file to LocalPaths.props (gitignored) and fill in YOUR local paths.
+      LocalPaths.props must never be committed.
+    -->
+
+    <!-- SULFUR game managed assemblies (reference + decompile source). -->
+    <SulfurManagedDir>D:\SteamLibrary\steamapps\common\SULFUR\Sulfur_Data\Managed</SulfurManagedDir>
+
+    <!-- SULFUR Together mod source, for cross-referencing its host-authoritative systems. -->
+    <SulfurTogetherDir>C:\Users\YourName\source\SULFUR Together</SulfurTogetherDir>
+
+    <!-- BepInEx 5 core (Harmony / BepInEx.dll) inside the Gale profile you run. -->
+    <BepInExCoreDir>C:\Users\YourName\AppData\Roaming\com.kesomannen.gale\sulfur\profiles\Default\BepInEx\core</BepInExCoreDir>
+
+    <!-- Deploy destination: the ...\plugins dir of the Gale profile you run. -->
+    <BepInExPluginDir>C:\Users\YourName\AppData\Roaming\com.kesomannen.gale\sulfur\profiles\Default\BepInEx\plugins</BepInExPluginDir>
+  </PropertyGroup>
+</Project>
