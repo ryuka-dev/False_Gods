@@ -80,15 +80,16 @@ content agreement**, not merely to name the arena:
 
 ```
 ArenaManifest {
-  ArenaId         : string   // stable id of the arena definition ("false_gods.arena.cave01")
-  ArenaVersion    : int      // bump when layout/collision/nav/spawns change
-  ContentHash     : bytes    // hash of the realized arena content (prefab + nav + spawns + mechanism set)
-  ProtocolVersion : int      // the False Gods replication contract version
-  BundleVersion   : string   // the mod AssetBundle build identity the content came from
+  ArenaId                  : string   // stable id of the arena definition ("false_gods.arena.cave01")
+  ArenaVersion             : int      // bump when layout/collision/nav/spawns change
+  ContentHashSchemaVersion : int      // which hash definition produced ContentHash (§5.2.1)
+  ContentHash              : bytes    // canonical content hash, per §5.2.1
+  ProtocolVersion          : int      // the False Gods replication contract version
+  BundleVersion            : string   // the mod AssetBundle build identity the content came from
   // fixed arena: nothing else required
   // future procedural arena (host-authoritative only):
-  Seed            : int
-  Modules[]       : { moduleId, position, rotation, scale }   // host-decided final layout
+  Seed                     : int
+  Modules[]                : { moduleId, position, rotation, scale }   // host-decided final layout
 }
 ```
 
@@ -101,6 +102,81 @@ ArenaManifest {
   generate independently. This mirrors "host owns seed + used-sets" from `SceneTransitionAndLinkState.md`.
 - Every field is **untrusted input** on receipt. The host validates that an `ArenaReady` came from a peer that
   is a current session member, for the encounter currently being gated, with a well-formed manifest.
+
+### 5.2.1 `ContentHash` — canonical definition
+
+"A hash of the realized arena" is not a specification. Two peers must be able to compute **byte-identical**
+hashes on different machines, different GPUs, and different frame timings, or the gate becomes a random source
+of refusals. So the hash is defined over a **canonical document derived from authored data**, never over live
+scene objects or runtime scan results.
+
+**Algorithm.** SHA-256 over the canonical byte encoding below. Compared in full; never truncated. Peers compare
+the pair `(ContentHashSchemaVersion, ContentHash)`.
+
+**`ContentHashSchemaVersion`.** Bumped on **any** change to the input set, the ordering rule, the quantization
+rule, or the algorithm. A change to the schema is a protocol-compatibility change, not a refactor.
+
+**Inputs, encoded in this fixed order.** Every string is UTF-8 with a length prefix; every integer is
+little-endian:
+
+1. `ContentHashSchemaVersion`
+2. `ArenaId`, `ArenaVersion`
+3. `ArenaContentId` — the authored prefab / content-definition identity (bundle-relative address + content
+   GUID). A definition identity, never a runtime instance.
+4. **Hierarchy / markers:** for each authored node, `(StableMarkerId, NodeKind, ParentStableMarkerId,
+   quantized local transform)`
+5. **Vanilla proxies:** for each `VanillaAssetProxy`, `(StableMarkerId, AddressableKeyOrGuid,
+   quantized local transform)` — the *resolved* stable asset identity, not the loaded object
+6. **Collision authoring:** for each collider definition, `(StableMarkerId, ColliderKind, quantized geometry
+   parameters, LayerName)`
+7. **Navigation authoring:** for each nav definition, `(StableMarkerId, NavKind, quantized bounds)` — walkable
+   surface, anchor, off-mesh-link endpoint, forbidden region — plus `NavmeshPrefabContentId` when the prebaked
+   `NavmeshPrefab` path (report 4, Option 1) is used
+8. **Spawn definitions:** `(StableMarkerId, SpawnKind, DefinitionId, quantized local transform)`
+9. **Mechanism definitions:** `(StableMarkerId, MechanismDefinitionId, MechanismGroupId, quantized local
+   transform)`
+
+`StableMarkerId` is a GUID assigned in the editor and serialized into the prefab. It is not a name, not a
+hierarchy path, and not `GetInstanceID()` ([DependencyRules.md §4](DependencyRules.md)).
+
+**Ordering.** Every list is sorted by `StableMarkerId`, compared as raw UTF-8 bytes (ordinal). Hierarchy
+enumeration order, `Transform` child order, and Addressables resolution order are all forbidden as ordering
+sources — they are not stable across machines or Unity versions.
+
+**Float quantization.** Floats never enter the hash.
+
+- Positions, scales, sizes, bounds: `(long)Math.Round(value * 10_000, MidpointRounding.ToEven)` (0.1 mm),
+  encoded as `int64`.
+- Rotations: normalize the quaternion and normalize negative zero, then inspect `(w, x, y, z)` in that order.
+  Find the first non-zero component; if it is negative, multiply the **entire** quaternion by `-1`. This
+  lexicographic sign rule gives `q` and `-q` — the same rotation — one representation, including the
+  `(0, 0, 0, ±1)` case. Quantize each component with the same round-half-to-even rule at 1e-6. A zero-length
+  quaternion is a build-time export failure.
+- Negative zero is normalized to zero before quantization.
+- A `NaN` or infinity anywhere in the authored data is a **build-time export failure**, not a runtime hash.
+
+**Explicitly excluded.** Anything that varies per machine, per process, or per frame:
+
+- Unity `InstanceID`, `GetHashCode()`, and object references
+- hierarchy / component / enumeration order
+- memory addresses
+- local file paths and absolute asset paths
+- **runtime A\* node ids, node order, or recast scan output**
+- non-authoritative visual temporaries: particles, VFX instances, spawned FX, anything under `DebugRoot`
+- lighting bakes, probe data, and anything the renderer derives at load
+
+**Runtime validation vs hashing — two different jobs.** After load and proxy resolution the runtime recomputes
+the hash from the same canonical authored inputs it realized (marker ids, resolved addressable keys, authored
+transforms). Separately, it *may* verify that the realized hierarchy matches the exported manifest (RiskList
+R14) and that navigation built successfully. Those checks can abort the load — but **their output never feeds
+the hash.** In particular, an A\* recast scan is not required to be bit-identical across machines, and hashing
+its result would manufacture exactly the cross-machine determinism requirement that
+[ADR-003](ADRs/ADR-003-Network-Native-Boss-Architecture.md) refuses to take on.
+
+**Schema mismatch is its own refusal.** If two peers report different `ContentHashSchemaVersion` values, the
+host refuses with `ContentHashSchemaMismatch` and **never compares the hashes** — hashes from different schemas
+are not comparable, and an accidental collision would be worse than a clean refusal. Same schema, different
+hash → `ContentMismatch`. Both abort the encounter (§5.3.1).
 
 ## 5.3 The canonical load → ready → start sequence (proposed)
 
@@ -131,17 +207,17 @@ In full:
 
 3. RESOLVE ASSETS + NAVIGATION (each peer, locally)
    Await every Addressables handle; build/apply the arena's A* navigation via INavigationPort (report 4).
-   Compute the local ContentHash from the realized result.
+   Compute the local ContentHash from the canonical authored inputs (§5.2.1) — NOT from the nav scan result.
 
 4. REPORT READY (each peer → host)
-   ArenaReady(ArenaId, ArenaVersion, ContentHash, ProtocolVersion, BundleVersion), reliable-ordered,
-   through IEncounterChannel. A peer that failed to load sends ArenaLoadFailed(reason) instead.
+   ArenaReady(ArenaId, ArenaVersion, ContentHashSchemaVersion, ContentHash, ProtocolVersion, BundleVersion),
+   reliable-ordered, through IEncounterChannel. A peer that failed to load sends ArenaLoadFailed(reason).
 
 5. HOST VALIDATES ALL REQUIRED PEERS
    IEncounterReadyGate: the required set is every current session member from IPlayerRoster (including the
    host's own local readiness). The gate passes only when every required peer has reported ready AND every
-   reported ArenaId/ArenaVersion/ContentHash/ProtocolVersion/BundleVersion matches the host's.
-   The gate FAILS CLOSED — see §5.3.1.
+   reported ArenaId/ArenaVersion/ProtocolVersion/BundleVersion matches the host's AND every peer used the
+   host's ContentHashSchemaVersion AND every ContentHash matches. The gate FAILS CLOSED — see §5.3.1.
 
 6. SEAL + TELEPORT (host authoritative)
    Host commands the seal and the teleport through IArenaLockdownPort. Each peer applies the command to its
@@ -168,7 +244,8 @@ The gate never degrades into "start anyway". There is no timeout fallback that b
 |---|---|
 | A peer reports `ArenaLoadFailed` | Host aborts the encounter, tears the arena down on every peer, and returns everyone to the pre-arena state. The boss never starts. |
 | `ArenaId`/`ArenaVersion`/`ProtocolVersion`/`BundleVersion` mismatch | Explicit refusal to that peer with the reason; encounter aborted. This is a version-incompatibility, not a race. |
-| `ContentHash` mismatch on matching versions | Explicit refusal and abort. The peers named the same arena and built different ones; continuing would desync silently. |
+| `ContentHashSchemaVersion` mismatch | `ContentHashSchemaMismatch` refusal and abort. The hashes are **not compared** — they were produced by different definitions and mean different things (§5.2.1). |
+| `ContentHash` mismatch on a matching schema and matching versions | `ContentMismatch` refusal and abort. The peers named the same arena and built different ones; continuing would desync silently. |
 | Gate timeout (a required peer never answers) | Host **aborts** the encounter and reports which peers were outstanding. It does not start the boss with a partial roster. |
 | A required peer disconnects **during** the gate | `IMultiplayerSession` reports the departure; the peer leaves the required set and the gate re-evaluates. If a required peer is merely unresponsive, the timeout rule above applies. |
 | A peer disconnects **after** the fight starts | The fight continues for the remaining peers. On rejoin the peer receives one `EncounterBaseline` (§5.7) and resumes. |

@@ -43,8 +43,8 @@ documents describe one plan.
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
 | P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
-| P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest | P1–P7, R14 |
-| P9 | **Host+client**: both load the identical room and exchange `ContentHash` in `ArenaReady`; the gate blocks seal/teleport until both match; an NPC wakes for a client who enters first while the host is far away; a forced mismatch/timeout **aborts** instead of starting | R7, R10, R33, report 5 |
+| P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest; the canonical `ContentHash` is stable across two loads with different Addressables completion order | P1–P7, R14, R34 |
+| P9 | **Host+client**: both load the identical room and exchange `(ContentHashSchemaVersion, ContentHash)` in `ArenaReady`; the two machines produce **byte-identical** hashes; the gate blocks seal/teleport until both match; an NPC wakes for a client who enters first while the host is far away; a forced hash mismatch, schema mismatch, or timeout **aborts** instead of starting | R7, R10, R33, R34, report 5 |
 
 ### 7.3 Pass/fail criteria (the request's acceptance list)
 
@@ -52,9 +52,10 @@ documents describe one plan.
 - ✅ Materials display correctly (no pink; lighting from our `LightingRoot`).
 - ✅ Collision is correct (players/enemy don't clip walls or snag on decoration).
 - ✅ The ordinary enemy tracks the player and navigates around the pillar (A\* works on our geometry).
-- ✅ Host and client see the **same** room (`ContentHash` matches; an NPC wakes for a client who enters first —
-  which needs the activation port, not just roster registration).
-- ✅ A deliberate content mismatch or a stalled peer **aborts** the encounter; nothing seals, teleports, or spawns.
+- ✅ Host and client see the **same** room (`ContentHash` matches byte-for-byte across two machines; an NPC wakes
+  for a client who enters first — which needs the activation port, not just roster registration).
+- ✅ A deliberate content mismatch, schema mismatch, or a stalled peer **aborts** the encounter; nothing seals,
+  teleports, or spawns.
 - ✅ On exit, all arena objects **and** the arena's nav contributions are cleaned out of the *active* level, and
   the next level is unaffected.
 
@@ -83,7 +84,8 @@ module skeleton (`FalseGods.Core` / `.Protocol` / `.RuntimeContracts` / `.Applic
 `BossSimulation` in Core → one `BossPresentation` in UnityRuntime, driven through
 `PresentationState`/`PresentationEvent` → single-player → transport-neutral snapshots/events in Protocol plus
 the Application mapper → connect through the **optional, separately-loaded**
-`FalseGods.Integration.SulfurTogether` (registered via `IIntegrationRegistry`, never referenced by the Plugin)
+`FalseGods.Integration.SulfurTogether` (a companion plugin that self-registers through `FalseGodsIntegrations`,
+never referenced by `FalseGods.Plugin`)
 → host/client validation. Extract shared abstractions **only** from demonstrated repetition — do not build a
 universal boss framework up front. The three layers below map to `BossSimulation` (Core), `BossPresentation`
 (UnityRuntime), and `BossReplication` (Application over the adapter's `IEncounterChannel`).
@@ -121,8 +123,11 @@ It must have:
 
 ### 7.6.3 Test sequence
 
-- **B0.** Run the test boss in single-player with SULFUR Together **and the ST adapter DLL** absent — no
-  `TypeLoadException`, no `FileNotFoundException`.
+- **B0.** Run the test boss in single-player with SULFUR Together **and the ST adapter plugin** absent — no
+  `TypeLoadException`, no `FileNotFoundException`. Then install both and confirm the adapter registers through
+  `FalseGodsIntegrations` **exactly once**, that a second registration attempt is rejected rather than
+  replacing the first, and that disposing the registration token returns the game to the single-player
+  composition (ADR-004, RiskList R35).
 - **B1.** Host and client load the arena and agree on boss definition and protocol version. Assert
   `BossPresentation`'s public surface names no `FalseGods.Protocol` type.
 - **B2.** Host selects an attack; both peers show the same `AttackInstanceId`.

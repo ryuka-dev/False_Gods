@@ -53,8 +53,8 @@ FalseGods.Plugin  (Composition Root, BepInEx entry)
   ╎  ✗ NO compile-time reference (this is a rule, not an omission)
   ╎
   ╌╌►  FalseGods.Integration.SulfurTogether
-        OPTIONAL, loaded at runtime. References RuntimeContracts + Core + ST/LiteNetLib/Steam.
-        Registers itself into the Composition Root through IIntegrationRegistry.
+        OPTIONAL companion BepInEx plugin. References RuntimeContracts + Core + ST/LiteNetLib/Steam.
+        Registers itself through the FalseGodsIntegrations broker (RuntimeContracts).
 ```
 
 - **Core** knows nothing outer, and holds **only** the domain plus the few abstractions the domain itself calls.
@@ -74,12 +74,12 @@ FalseGods.Plugin  (Composition Root, BepInEx entry)
 |---|---|---|---|
 | **FalseGods.Core** | Boss & encounter domain: `BossSimulation`, `ArenaSimulation`, `EncounterCoordinator`, domain commands/events, stable id value types, phase/health/weak-point rules, authoritative decisions, encounter-completion rules. Abstractions **the domain itself calls**: `ISimulationClock`, `IAuthoritativeRandom`, `IEncounterParticipantQuery` | `MonoBehaviour`/`GameObject`/`Transform`, Unity vectors (except behind project-owned value types), `Time.time`, `UnityEngine.Random`, Harmony, SULFUR classes, networking APIs, Addressables, A* types — **and** asset / Addressables / navigation / scene / loading / channel / session / roster / replication ports | nothing outer |
 | **FalseGods.Protocol** | Transport-neutral wire DTOs: `BossSnapshot`, `ArenaSnapshot`, `BossEvent`, `ArenaEvent`, `EncounterBaseline`, `ArenaManifest`, stable ids, protocol versions, sequence numbers, sim ticks, serialization contracts, duplicate-suppression rules | LiteNetLib/Steamworks types, concrete sockets, `CoopConnection`, ST internal messages, Unity presentation objects, presentation contracts | Core |
-| **FalseGods.RuntimeContracts** | The stable seam shared with optional adapters. Presentation contracts (`PresentationState`, `PresentationEvent`, `IEncounterPresentation`); outer capability ports (`IPlayerRoster`, `IMultiplayerSession`, `IEncounterChannel`, `IArenaLockdownPort`, `IRemoteNpcActivationPort`, `IEncounterReadyGate`); transport-neutral carriers (`SessionPeerId`, `EncodedPayload`, `MessageDelivery`); `IIntegrationRegistry` / `IFalseGodsIntegration`; `ILogger` | `FalseGods.Protocol` DTOs, UnityEngine, ST/LiteNetLib/Steamworks, any concrete implementation | Core |
+| **FalseGods.RuntimeContracts** | The stable seam shared with optional adapters. Presentation contracts (`PresentationState`, `PresentationEvent`, `IEncounterPresentation`); outer capability ports (`IPlayerRoster`, `IMultiplayerSession`, `IEncounterChannel`, `IArenaLockdownPort`, `IRemoteNpcActivationPort`, `IEncounterReadyGate`); transport-neutral carriers (`SessionPeerId`, `EncodedPayload`, `MessageDelivery`); the optional-integration seam (`IFalseGodsIntegration`, `IIntegrationRegistration`, and the single-slot `FalseGodsIntegrations` broker); `ILogger` | `FalseGods.Protocol` DTOs, UnityEngine, ST/LiteNetLib/Steamworks, any concrete implementation, any second piece of static state | Core |
 | **FalseGods.Application** | Encounter & arena orchestration: `EncounterHost`, `ArenaLoadFlow`, ready-gate policy, teardown ordering, replication codecs over `IEncounterChannel`, and the **mappers** `Protocol DTO → PresentationState/PresentationEvent` and `domain state → PresentationState/PresentationEvent`. Ports whose consumer lives here: `IEncounterReplication`, `IDamagePort`, `ISpawnPort`, `INavigationPort`, `IArenaAssetProvider`, `IVanillaAssetProvider`, `IArenaRealization`, `ISceneLifecycleEvents` | UnityEngine, Harmony, ST/LiteNetLib/Steamworks, presentation implementations | Core, Protocol, RuntimeContracts |
 | **FalseGods.UnityRuntime** | Presentation & Unity realization: prefab instantiation, renderers/sprites, animation, VFX, audio, lighting, interpolation, arena-prefab realization, AssetBundle lifecycle, original-content loading, Unity authoring components. Implements `IEncounterPresentation` / `IArenaRealization` | authoritative damage / attack selection / phase / death / authority / RNG outcomes; **any `FalseGods.Protocol` type** | Core, RuntimeContracts, UnityEngine |
-| **FalseGods.Integration.Sulfur** | Anti-corruption layer to the base game: `Unit.ReceiveDamage`, player lookup, vanilla loot/status, level transitions, A* Recast, `AiAgent`, Addressables for vanilla assets, Harmony, reflection, private-field access, base-game lifecycle hooks. Single-player implementations of `IPlayerRoster` / `IArenaLockdownPort` / `IRemoteNpcActivationPort` | boss mechanics, wire protocol | Core, Protocol, RuntimeContracts, Application, game DLLs |
-| **FalseGods.Integration.SulfurTogether** *(optional, runtime-loaded)* | Multiplayer adapter: host/client detection, session lifecycle, peer-id mapping, message registration, reliable/unreliable channel mapping mapped onto `EncodedPayload`/`MessageDelivery`, arena-ready ACK transport, join/leave, ST managers, ST reflection. Registers its capabilities through `IIntegrationRegistry` | boss/arena gameplay decisions; `FalseGods.Protocol` DTOs; `FalseGods.Application` internals | RuntimeContracts, Core, ST + transport DLLs |
-| **FalseGods.Plugin** (Composition Root) | BepInEx entry; construction and wiring of Core/Application/UnityRuntime/`Integration.Sulfur`; the `IIntegrationRegistry` instance; startup & shutdown ordering; graceful degradation when no multiplayer integration registers | substantive boss mechanics; **any reference to `Integration.SulfurTogether`** | Core, Protocol, RuntimeContracts, Application, UnityRuntime, Integration.Sulfur, BepInEx |
+| **FalseGods.Integration.Sulfur** | Anti-corruption layer to the base game: `Unit.ReceiveDamage`, player lookup, vanilla loot/status, level transitions, A* Recast, `AiAgent`, Addressables for vanilla assets, **all Harmony patches**, **reflection into base-game internals**, private-field access, base-game lifecycle hooks. Single-player implementations of `IPlayerRoster` / `IArenaLockdownPort` / `IRemoteNpcActivationPort` | boss mechanics, wire protocol, reflection into ST internals | Core, Protocol, RuntimeContracts, Application, game DLLs |
+| **FalseGods.Integration.SulfurTogether** *(optional companion BepInEx plugin)* | Multiplayer adapter: host/client detection, session lifecycle, peer-id mapping, message registration, reliable/unreliable channel mapping onto `EncodedPayload`/`MessageDelivery`, arena-ready ACK transport, join/leave, ST managers, **reflection into ST internals**. Self-registers through `FalseGodsIntegrations` | boss/arena gameplay decisions; `FalseGods.Protocol` DTOs; `FalseGods.Application` internals; Harmony patches; reflection into base-game internals | RuntimeContracts, Core, ST + transport DLLs |
+| **FalseGods.Plugin** (Composition Root) | BepInEx entry; construction and wiring of Core/Application/UnityRuntime/`Integration.Sulfur`; **the only reader of the `FalseGodsIntegrations` broker**; startup & shutdown ordering; graceful degradation when no multiplayer integration registers | substantive boss mechanics; **any reference to `Integration.SulfurTogether`** | Core, Protocol, RuntimeContracts, Application, UnityRuntime, Integration.Sulfur, BepInEx |
 
 ## 4. Composition Root, optional integration, and the three compositions
 
@@ -95,25 +95,54 @@ with no `TypeLoadException` / `FileNotFoundException` (RiskList R20/R29).
 The dependency therefore points **from the optional adapter to the stable contract**:
 
 ```
-FalseGods.Plugin  ──creates──►  IIntegrationRegistry   (FalseGods.RuntimeContracts)
-                                        ▲
-                                        │ Register(IFalseGodsIntegration)
-                                        │
-              FalseGods.Integration.SulfurTogether  (optional assembly, loaded only if present)
+FalseGods.Plugin  ──subscribes to──►  FalseGodsIntegrations   (static broker in FalseGods.RuntimeContracts)
+                                             ▲
+                                             │ Register(IFalseGodsIntegration) → IIntegrationRegistration
+                                             │
+              FalseGods.Integration.SulfurTogether  (optional companion BepInEx plugin)
 ```
 
-Two acceptable mechanisms, in order of preference:
+#### The one preferred mechanism: a self-registering companion BepInEx plugin
 
-1. **Self-registering optional plugin (preferred).** The adapter ships as its own BepInEx plugin with a *soft*
-   dependency on the False Gods plugin and on SULFUR Together. On load it calls
-   `IIntegrationRegistry.Register(...)`, handing over implementations of the RuntimeContracts capability ports.
-   The base plugin never mentions the adapter; if the DLL is absent nothing registers and the encounter runs in
-   the single-player composition.
-2. **Reflective discovery.** The base plugin probes for a known assembly/type name, and if found invokes a
-   parameterless factory that returns `IFalseGodsIntegration`. Everything reflective stays in one small,
-   exception-guarded discovery class; failure degrades to single-player, never to a crash.
+`FalseGods.Integration.SulfurTogether` ships as **its own BepInEx plugin**, separate from `FalseGods.Plugin`.
 
-Either way, the Composition Root only ever sees `IFalseGodsIntegration` and the RuntimeContracts ports.
+- It declares a **hard** `[BepInDependency]` on the False Gods base plugin's GUID. BepInEx dependencies are
+  declared by **GUID string**, not by CLR assembly reference — so this buys deterministic load ordering (the
+  base plugin's `Awake` completes before the adapter's begins) without any type-level coupling in either
+  direction. The adapter's only False Gods CLR reference is `FalseGods.RuntimeContracts`; it never references
+  `FalseGods.Plugin`.
+- Its relationship to SULFUR Together follows the same rule, decided by what the implementation actually needs:
+  a **hard** `[BepInDependency]` on ST's GUID if the adapter is meaningless without ST (the expected case), or a
+  **soft** dependency plus an explicit capability probe if it must also load in a degraded, ST-less mode.
+  Either way, the reflective capability detection of §4.2 still runs — a present ST assembly does not guarantee
+  a reachable ST *system*.
+- Because the base plugin loaded first, the broker's subscription is already in place when the adapter calls
+  `Register(...)`. Nothing polls, nothing retries, nothing races.
+- If the adapter DLL is absent, BepInEx simply never loads it, nothing registers, and the Composition Root
+  builds the single-player composition. If ST is absent and the adapter took a hard dependency on it, BepInEx
+  skips the adapter — same outcome.
+
+**Fallback (documented, not built alongside).** If the companion-plugin path proves unworkable, the base plugin
+may instead probe for a known assembly/type name and invoke a parameterless factory returning
+`IFalseGodsIntegration`, with all reflection confined to one exception-guarded discovery class. This is an
+alternative *to* the mechanism above, not a supplement — the two are never implemented at the same time, so
+there is exactly one path by which an integration can arrive.
+
+#### `FalseGodsIntegrations`: a registration broker, not a service locator
+
+The broker lives in `FalseGods.RuntimeContracts`, and the constraints below are what keep it from decaying into
+a global lookup table:
+
+| Concern | Rule |
+|---|---|
+| **Shape** | A single slot holding at most one `IFalseGodsIntegration`, plus a registration-changed event. There is **no** `Resolve<T>()`, no `Type`-keyed dictionary, and no way to ask it for an arbitrary service. |
+| **Initialization** | Static state in a type with no BepInEx, Unity, Protocol, or ST dependency. It needs no bootstrapping and has no initialization order requirement of its own. |
+| **Readers** | **`FalseGods.Plugin` is the only permitted reader.** Every other type receives its dependencies by constructor injection from the Composition Root. A module that reads the broker is a bug, and rule `FG-ARCH-005` in [ArchitectureEnforcement.md](ArchitectureEnforcement.md) is where that gets caught. |
+| **Duplicate registration** | The **first** registration wins. A second `Register(...)` while one is live is **rejected** (it returns a failed result; it does not throw, and it does not replace). The rejected adapter logs "multiplayer integration already provided" and stays inert. Load order must never silently decide which integration is authoritative. |
+| **Unregistration** | `Register(...)` returns an `IIntegrationRegistration` token. Disposing it clears the slot and raises the change event; the Composition Root tears down the multiplayer composition in response. The adapter disposes its token on plugin unload. Only the holder of the token can revoke — there is no `Clear()` for third parties. |
+| **Testing** | Because the broker's only reader is the Composition Root, **unit tests never touch it**: they construct `IFalseGodsIntegration` fakes and inject them directly. An integration test that must exercise the seam registers, asserts, and disposes its token, leaving the slot clean. The broker exposes no other mutation, so there is no hidden reset to forget. |
+
+The Composition Root only ever sees `IFalseGodsIntegration` and the RuntimeContracts ports.
 
 ### 4.2 SULFUR Together's real surface: mostly `internal`
 

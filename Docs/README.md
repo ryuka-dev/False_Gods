@@ -30,10 +30,11 @@ unverified* until validated by the proof-of-concept.
 
 ### Architecture & process (boundaries before implementation)
 
-- **[Architecture.md](Architecture.md)** — module boundaries, inward dependency direction, ports, and the
-  Boss/Arena/Encounter split.
-- **[DependencyRules.md](DependencyRules.md)** — allowed/forbidden dependencies and the mechanical-enforcement
-  plan.
+- **[Architecture.md](Architecture.md)** — module boundaries, inward dependency direction, ports, the
+  optional-integration seam, and the Boss/Arena/Encounter split.
+- **[DependencyRules.md](DependencyRules.md)** — what is allowed and forbidden (the rules themselves).
+- **[ArchitectureEnforcement.md](ArchitectureEnforcement.md)** — how those rules get checked: the `FG-ARCH-*`
+  rule registry, CI levels, exception process, and current status (everything is `Planned`).
 - **[DefinitionOfDone.md](DefinitionOfDone.md)** — completion gates and the AI-development process rules.
 - **[ADRs/](ADRs/README.md)** — architecture decision records (ADR-001 … ADR-006).
 

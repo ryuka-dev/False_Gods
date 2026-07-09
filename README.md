@@ -74,13 +74,17 @@ coupling), False Gods establishes strict boundaries **before** implementation:
   `PresentationState` / `PresentationEvent` before reaching `BossPresentation`, so single-player and multiplayer
   drive the same presentation entry point.
 - **SULFUR Together is optional and never a CLR dependency of the base plugin.**
-  `FalseGods.Integration.SulfurTogether` is a separate optional assembly that references the stable
-  `FalseGods.RuntimeContracts` and registers itself at runtime; `FalseGods.Plugin` never names an ST adapter
-  type. Single-player runs with the adapter absent.
+  `FalseGods.Integration.SulfurTogether` is a separate **companion BepInEx plugin** that references the stable
+  `FalseGods.RuntimeContracts`, takes a hard BepInEx (GUID-string) dependency on the base plugin for load
+  ordering, and self-registers through a single-slot `FalseGodsIntegrations` broker. `FalseGods.Plugin` never
+  names an ST adapter type. Single-player runs with the adapter absent.
 - Vanilla `BossFightHelper` / `BossPhase` / `IBossEncounterAdapter` are **reverse-engineering references, not
   base classes** for original bosses.
 
-See [Docs/Architecture.md](Docs/Architecture.md) and [Docs/DependencyRules.md](Docs/DependencyRules.md).
+See [Docs/Architecture.md](Docs/Architecture.md) for the structure and
+[Docs/DependencyRules.md](Docs/DependencyRules.md) for the rules. How those rules will be checked mechanically —
+the `FG-ARCH-*` rule registry, CI levels, and exception process — lives in
+[Docs/ArchitectureEnforcement.md](Docs/ArchitectureEnforcement.md); none of it is implemented yet.
 
 ## Repository layout
 

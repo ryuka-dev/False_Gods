@@ -2,9 +2,12 @@
 
 *Completion gates and the AI-assisted development process for False Gods.* A feature is not "done" when it
 merely works once; it is done when it meets the gates below and respects the boundaries in
-[Architecture.md](Architecture.md) / [DependencyRules.md](DependencyRules.md).
+[Architecture.md](Architecture.md) / [DependencyRules.md](DependencyRules.md). How those boundaries are checked
+mechanically — and which checks exist yet — lives in
+[ArchitectureEnforcement.md](ArchitectureEnforcement.md).
 
-All gates about runtime behaviour remain **proposed** until there is code to run them against.
+All gates about runtime behaviour remain **proposed** until there is code to run them against, and every
+architecture check named below is currently `Planned`.
 
 ## 1. Per-feature-type gates
 
@@ -27,6 +30,10 @@ All gates about runtime behaviour remain **proposed** until there is code to run
   with identity + content hash → host validates all required peers → seal and teleport → publish
   `EncounterBaseline` → start simulation** ([MultiplayerLoadingContract.md §5.3](MultiplayerLoadingContract.md)).
   Players are **never** placed before the ready gate passes.
+- `ContentHash` is computed from the canonical authored inputs, in the canonical order, with the canonical
+  quantization ([MultiplayerLoadingContract.md §5.2.1](MultiplayerLoadingContract.md)), and is stamped with a
+  `ContentHashSchemaVersion`. It contains **no** `InstanceID`, enumeration order, memory address, local path, or
+  A\* scan output. Two peers on different machines produce byte-identical hashes for the same content.
 - Full teardown releases Addressables handles and removes every node, off-mesh link, and graph modifier the
   arena contributed to the **active level's** A\* graph — it does not rely on a future level change to hide a
   leak.
@@ -55,7 +62,8 @@ All gates about runtime behaviour remain **proposed** until there is code to run
 
 ### Ready gate (fail closed)
 - The boss does not start unless **every required peer** has reported `ArenaReady` with a matching `ArenaId`,
-  `ArenaVersion`, `ContentHash`, and protocol/bundle version.
+  `ArenaVersion`, `ContentHash`, and protocol/bundle version, under a matching `ContentHashSchemaVersion`.
+- A `ContentHashSchemaVersion` mismatch refuses **without comparing hashes**.
 - Load failure, content mismatch, timeout, and disconnect each have a defined, **fail-closed** outcome. There is
   no "start anyway after a timeout" path.
 
@@ -76,10 +84,20 @@ All gates about runtime behaviour remain **proposed** until there is code to run
 ### Optional SULFUR Together absence
 - The base plugin loads and plays single-player with the ST integration assembly missing.
 - `FalseGods.Plugin.dll` carries **no metadata reference** to `FalseGods.Integration.SulfurTogether`
-  ([DependencyRules.md §7](DependencyRules.md), check 3).
+  (`FG-ARCH-002`).
+- The adapter is a **companion BepInEx plugin** with a hard `[BepInDependency]` on the base plugin's GUID, and
+  it registers through `FalseGodsIntegrations` ([ADR-004](ADRs/ADR-004-Optional-Sulfur-Together-Adapter.md)).
+  It references `FalseGods.RuntimeContracts`, never `FalseGods.Plugin`.
+- Registering twice leaves the **first** integration authoritative; disposing the registration token clears the
+  slot and tears down the multiplayer composition.
 
 ### Architecture dependency scan
 - The dependency matrix ([DependencyRules.md §1–§3](DependencyRules.md)) holds; no forbidden namespace leaked.
+- Reflection stays on the right side of the split: `Integration.Sulfur` reflects into game internals,
+  `Integration.SulfurTogether` reflects into ST internals, nobody else reflects into either, and Harmony patches
+  exist only in `Integration.Sulfur` (`FG-ARCH-006`).
+- Every architecture check cited a rule id from
+  [ArchitectureEnforcement.md §5](ArchitectureEnforcement.md) (`FG-ARCH-010`).
 
 ## 2. AI-assisted development process
 

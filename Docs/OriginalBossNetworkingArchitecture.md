@@ -191,8 +191,8 @@ reflection or via a future public ST integration bridge — see
 
 - `BossSimulation` + `BossPresentation` must build and run with **no reference to any networking type**.
 - `BossReplication` lives behind an optional integration seam. `FalseGods.Plugin` holds **no CLR dependency** on
-  `FalseGods.Integration.SulfurTogether`: the adapter is a separate assembly that references the stable
-  `FalseGods.RuntimeContracts` and registers its capabilities at runtime through `IIntegrationRegistry`. If it
+  `FalseGods.Integration.SulfurTogether`: the adapter is a companion BepInEx plugin that references the stable
+  `FalseGods.RuntimeContracts` and self-registers through the single-slot `FalseGodsIntegrations` broker. If it
   is absent, nothing registers, replication is a no-op, and single-player plays
   ([ADR-004](ADRs/ADR-004-Optional-Sulfur-Together-Adapter.md), RiskList R20/R29, invariant 10).
 

@@ -60,10 +60,20 @@ The arena is authored as one `ArenaRoot` prefab (hierarchy in
   ArenaMechanisms, PhaseObjects, Exit), `DebugRoot`.
 - Carries an `ArenaId` + `ArenaVersion` (matches the `ArenaManifest` in
   [MultiplayerLoadingContract.md §5.2](MultiplayerLoadingContract.md)).
-- An **editor tool exports an authored arena manifest** (hierarchy + transforms + proxy keys) so runtime can
-  verify parity after load and proxy replacement (RiskList R14). The same export produces the `ContentHash`
-  that peers exchange in `ArenaReady` — matching `ArenaVersion` names the arena, matching `ContentHash` proves
-  two peers realized the same one.
+- Every authored node that participates in identity carries a **`StableMarkerId`** — a GUID assigned in the
+  editor and serialized into the prefab. Never a name, never a hierarchy path, never `GetInstanceID()`.
+- An **editor tool exports an authored arena manifest** (hierarchy + `StableMarkerId`s + transforms + proxy keys
+  + collision/navigation/spawn/mechanism definitions) so runtime can verify parity after load and proxy
+  replacement (RiskList R14).
+- The same export produces the canonical **`ContentHash`** peers exchange in `ArenaReady`
+  ([MultiplayerLoadingContract.md §5.2.1](MultiplayerLoadingContract.md)): SHA-256 over a canonical encoding of
+  those authored inputs, sorted by `StableMarkerId`, with all floats quantized to integers. Matching
+  `ArenaVersion` names the arena; matching `ContentHash` proves two peers realized the same one.
+- The export **fails the build** on a `NaN`/infinite transform, on a duplicate `StableMarkerId`, or on a node
+  missing one — these become non-reproducible hashes at runtime, and a build-time failure is much cheaper than a
+  ready-gate refusal in someone's session.
+- The bundle stamps `ContentHashSchemaVersion` alongside `BundleVersion`. Changing the hash inputs, ordering,
+  quantization, or algorithm bumps the schema version — it is a protocol-compatibility change, not a refactor.
 
 ## 8.4 Boss prefab spec
 
@@ -96,13 +106,15 @@ The arena is authored as one `ArenaRoot` prefab (hierarchy in
    where vanilla art is intentionally reused.
 2. **Preview** proxies in-editor via a placeholder, a local-only extracted preview mesh, or an editor tool
    that shows the referenced asset (preview assets are dev-only, never shipped).
-3. **Export** the authored arena manifest (for runtime parity checks).
+3. **Export** the authored arena manifest (for runtime parity checks) and, from the same canonical data, the
+   `ContentHash` + `ContentHashSchemaVersion`.
 4. **Build** the bundle(s) with Unity 6000.3.6f1 / URP; run the ShaderVariantCollection step.
 5. **Publish-package check** (CI/pack gate): assert the bundle contains only original + proxy references and
    **no** vanilla SULFUR assets; assert bundle/content versions are stamped.
 6. **Runtime load** (BepInEx plugin): load the bundle, instantiate the prefab, resolve `VanillaAssetProxy`
-   objects via the player's local Addressables, register roots, compute the `ContentHash`, and report
-   `ArenaReady`. Only once the gate passes do the arena/boss controllers seal, teleport, and start
+   objects via the player's local Addressables, register roots, recompute the `ContentHash` from the same
+   canonical authored inputs (never from the A\* scan or the live hierarchy order), and report `ArenaReady`.
+   Only once the gate passes do the arena/boss controllers seal, teleport, and start
    ([MultiplayerLoadingContract.md §5.3](MultiplayerLoadingContract.md)).
 7. **Runtime unload:** destroy instantiated content, **release Addressables handles**, unload the bundle, drop
    bundle dependencies, and remove the arena's own nodes/links/modifiers from the active level's A\* graph

@@ -57,9 +57,13 @@ BossPresentation MUST NOT apply authoritative gameplay damage, phase, death, tar
 FalseGods.Plugin MUST NOT reference FalseGods.Integration.SulfurTogether — no assembly
                     reference, no type in a signature, no typeof(), no static-init touch.
 
-Only Integration.Sulfur may use Harmony, reflection, or SULFUR internals.
+Only Integration.Sulfur may apply Harmony patches (any exception needs its own ADR).
+Only Integration.Sulfur may reflect into SULFUR / base-game internals.
 Only Integration.Sulfur may directly operate AstarPath or Addressables for vanilla assets.
-Only Integration.SulfurTogether may reference SULFUR Together internals, LiteNetLib, or Steamworks.
+Only Integration.SulfurTogether may reference or reflect into SULFUR Together internals,
+                    LiteNetLib, or Steamworks.
+Neither adapter reflects into the other's target system.
+No other module may reflect into ANY external system's internals.
 
 Boss and arena feature code MUST NOT send packets directly.
 Multiplayer loading and combat flows MUST NOT name GameManager.Players, ArenaLockdownManager,
@@ -78,7 +82,9 @@ Concrete ST/game type names may appear in prose **only** inside an "adapter impl
 | Namespace / API | Allowed only in |
 |---|---|
 | `UnityEngine.*` | UnityRuntime, Integration.* , Plugin (never Core/Protocol/RuntimeContracts) |
-| `HarmonyLib`, reflection into game internals | Integration.Sulfur |
+| `HarmonyLib` / `[HarmonyPatch]` | Integration.Sulfur |
+| Reflection into **SULFUR / base-game** internals | Integration.Sulfur |
+| Reflection into **SULFUR Together** internals | Integration.SulfurTogether |
 | `Pathfinding.*` (AstarPath, RichAI, recast) | Integration.Sulfur |
 | `UnityEngine.AddressableAssets.*` (vanilla assets) | Integration.Sulfur |
 | `PerfectRandom.Sulfur.*` | Integration.Sulfur |
@@ -110,8 +116,14 @@ it.
   `Integration.SulfurTogether` (or ST itself) — never `BossSimulation`, `BossPresentation`, arena content,
   boss definitions, or the Protocol contracts. The adapter sees only `EncodedPayload` + `MessageDelivery`;
   serialization of Protocol DTOs happens in `Application`.
-- **Harmony/reflection isolation:** all Harmony patches and reflection into game internals live in
-  `Integration.Sulfur` (game) or `Integration.SulfurTogether` (ST). Feature code never adds a patch.
+- **Harmony isolation:** every Harmony patch lives in `Integration.Sulfur`. Feature code never adds a patch, and
+  neither does the ST adapter — if one ever genuinely needs to, that exception gets its own ADR before the
+  patch gets written.
+- **Reflection isolation, split by target:** `Integration.Sulfur` is the only module that may reflect into
+  **SULFUR / base-game** internals; `Integration.SulfurTogether` is the only module that may reflect into
+  **SULFUR Together** internals (which is unavoidable — see §6). Neither reflects into the other's target, and
+  no other module reflects into any external system's internals. Reflection over *False Gods'* own types (e.g.
+  in tests) is not what this rule is about.
 - **Unity isolation:** Core/Protocol/RuntimeContracts contain no `UnityEngine` types. Where a Unity math type is
   genuinely needed in the domain, wrap it in a project-owned value type at the boundary.
 - **Wire/presentation isolation:** `FalseGods.Protocol` types stop at `FalseGods.Application`. Presentation is
@@ -122,11 +134,17 @@ it.
 - `FalseGods.Integration.SulfurTogether` is an **optional assembly, and the base plugin has no CLR dependency
   on it.** `FalseGods.Plugin` must contain no assembly reference, no type in any signature, no `typeof(...)`,
   and no static-initialization path that touches an adapter type.
-- The dependency runs the other way: the optional adapter references the small, stable
-  `FalseGods.RuntimeContracts` and registers its capabilities through `IIntegrationRegistry` /
-  `IFalseGodsIntegration` at runtime. Preferred shape is a self-registering optional BepInEx plugin with soft
-  dependencies; reflective discovery from the base plugin is the fallback, confined to one guarded class
-  (Architecture §4.1).
+- The dependency runs the other way. The adapter is a **companion BepInEx plugin** that references only
+  `FalseGods.RuntimeContracts` (never `FalseGods.Plugin`), declares a **hard `[BepInDependency]` on the base
+  plugin's GUID** — a string, not a CLR reference — so that the base plugin's `Awake` has already run, and then
+  calls the static `FalseGodsIntegrations.Register(IFalseGodsIntegration)` broker. Its dependency on ST itself
+  is hard or soft depending on whether it can do anything useful without ST. This is the **single** preferred
+  path; reflective discovery from the base plugin is a documented *alternative to* it, never implemented
+  alongside it (Architecture §4.1).
+- **The broker is a single-slot registration point, not a service locator.** No `Resolve<T>()`, no type-keyed
+  dictionary. `FalseGods.Plugin` is its only permitted reader; everything else is constructor-injected. The
+  first registration wins and a duplicate is rejected rather than replacing it. `Register` returns a disposable
+  token, and only the token's holder can revoke. Unit tests inject fakes and never touch the broker.
 - **Only stable project-owned contracts may cross the seam.** The registry hands the Composition Root
   `IPlayerRoster`, `IMultiplayerSession`, `IEncounterChannel`, `IArenaLockdownPort`, `IEncounterReadyGate`, and
   `IRemoteNpcActivationPort` — never an ST type.
@@ -137,29 +155,16 @@ it.
   `internal` and ST publishes no `[InternalsVisibleTo]`. The adapter must use reflection, or ST must expose a
   public integration bridge. Either way the fragility stays inside the adapter (Architecture §4.2).
 
-## 7. Mechanical enforcement plan (planned, not built this pass)
+## 7. Enforcement
 
-The boundaries above should become automated checks:
+**This document says what is allowed.** [ArchitectureEnforcement.md](ArchitectureEnforcement.md) says **how the
+rules are checked, when they run, what state each check is in, and how a rule is added, excepted, or retired.**
+Deliberately separate: a rule is a claim about the design, and a check is a program that can be wrong about it.
 
-1. **Separate `.csproj` / Unity assembly definitions** per module, with **restricted project references** — the
-   compiler rejects a forbidden reference. Core's csproj references **no** Unity/game/networking DLLs;
-   `FalseGods.Plugin.csproj` contains **no** reference to `FalseGods.Integration.SulfurTogether`;
-   `FalseGods.UnityRuntime.csproj` contains **no** reference to `FalseGods.Protocol`.
-2. **CI namespace/dependency scan** — fail the build if a forbidden namespace appears in a module (e.g.
-   `UnityEngine` in Core, `LiteNetLib` in Protocol, `SULFURTogether` outside its adapter, `FalseGods.Protocol`
-   in UnityRuntime).
-3. **Assembly-reference assertion on the shipped `FalseGods.Plugin.dll`** — read its metadata references and
-   fail if `FalseGods.Integration.SulfurTogether` appears. This is the check that a signature-level leak cannot
-   hide from.
-4. **Optional Roslyn analyzer / architecture tests** (e.g. NetArchTest-style) asserting the dependency matrix
-   in §1–§2, including "no `FalseGods.Protocol` type reachable from a `BossPresentation` public member".
-5. **Package check** at pack time — the shipped bundle/plugin contains only original + proxy references and
-   **no** vanilla SULFUR assets.
-6. **Tests that run without SULFUR Together installed** — launch with the adapter DLL deleted and assert the
-   base plugin loads and single-player plays (RiskList R29).
-7. **Build failure on forbidden namespaces** wherever practical, so the common violation is a compile error.
+The rules above are the authority. The enforcement document carries the stable rule ids (`FG-ARCH-001` …) that
+every automated check must cite, and none of the rule text is duplicated there.
 
-Implementation of these checks is a later task; this document is the specification for them.
+Nothing is enforced mechanically yet; every rule is currently `Planned`.
 
 ## 8. How to use this during development
 

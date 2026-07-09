@@ -93,8 +93,15 @@ assets. The flow:
 3. Resolve only the `VanillaAssetProxy` objects through the player's local Addressables catalog.
 4. Replace those proxies with live vanilla prefabs while preserving authored transforms.
 5. Register collision/navigation/gameplay roots.
-6. Report `ArenaReady` with the arena identity and content hash, and wait for the gate.
+6. Report `ArenaReady` with the arena identity and the canonical `ContentHash`
+   ([MultiplayerLoadingContract.md §5.2.1](MultiplayerLoadingContract.md)), and wait for the gate.
 7. Only after the gate passes: seal, teleport, publish the `EncounterBaseline`, start the encounter (§2.4).
+
+Note that the hash is derived from **authored** data — the stable marker ids, the resolved Addressables keys,
+and the quantized authored transforms — not from what the load happened to produce. A runtime parity check may
+separately confirm the realized hierarchy matches the manifest (RiskList R14), but its result never feeds the
+hash: A\* scan output and Unity's object enumeration order are not reproducible across machines, and hashing them
+would invent a determinism requirement the project explicitly refuses.
 
 The instantiated vanilla objects keep their **real materials, shaders, and Renderer setup** — this is why the
 material-loss problems from raw mesh extraction are avoided (report 3). Resolution mirrors the game's own API:
@@ -120,8 +127,10 @@ Enter:  gate/trigger fires (a real game event)
       1. instantiate our layout (VisualRoot / CollisionRoot / NavigationRoot / GameplayRoot / LightingRoot)
       2. resolve + instantiate all VanillaAssetProxy targets (Addressables)  [await all]
       3. build/apply A* navigation over the arena, via INavigationPort  (report 4)
-      4. compute the local ContentHash from the realized result
-      5. report ArenaReady(ArenaId, ArenaVersion, ContentHash, ProtocolVersion, BundleVersion)
+      4. compute the local ContentHash from the canonical authored inputs (report 5 §5.2.1) —
+         NOT from the A* scan result, the instantiated hierarchy order, or any InstanceID
+      5. report ArenaReady(ArenaId, ArenaVersion, ContentHashSchemaVersion, ContentHash,
+                           ProtocolVersion, BundleVersion)
            single-player : the required set is one local peer; the gate resolves immediately
            multiplayer   : host validates every required peer via IEncounterReadyGate (report 5)
                            mismatch / load failure / timeout  →  FAIL CLOSED, abort, tear down

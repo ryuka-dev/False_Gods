@@ -30,7 +30,7 @@ created without a present consumer**.
 | Declared in | Ports | Why there |
 |---|---|---|
 | `FalseGods.Core` | `ISimulationClock`, `IAuthoritativeRandom`, `IEncounterParticipantQuery` | Called from inside domain logic: the simulation ticks, rolls authoritative decisions, and selects a target among participants. |
-| `FalseGods.RuntimeContracts` | `IPlayerRoster`, `IMultiplayerSession`, `IEncounterChannel`, `IArenaLockdownPort`, `IEncounterReadyGate`, `IRemoteNpcActivationPort`, `IEncounterPresentation`, `ILogger` | Implemented by *either* `Integration.Sulfur` (single-player) *or* the optional ST adapter, so they must sit in the small assembly both can reference (ADR-004). |
+| `FalseGods.RuntimeContracts` | `IPlayerRoster`, `IMultiplayerSession`, `IEncounterChannel`, `IArenaLockdownPort`, `IEncounterReadyGate`, `IRemoteNpcActivationPort`, `IEncounterPresentation`, `ILogger`, plus the `IFalseGodsIntegration` / `IIntegrationRegistration` seam and the `FalseGodsIntegrations` broker | Implemented by *either* `Integration.Sulfur` (single-player) *or* the optional ST adapter, so they must sit in the small assembly both can reference (ADR-004). |
 | `FalseGods.Application` | `IEncounterReplication`, `IDamagePort`, `ISpawnPort`, `INavigationPort`, `IArenaAssetProvider`, `IVanillaAssetProvider`, `IArenaRealization`, `ISceneLifecycleEvents` | Consumed by the encounter/arena orchestration flows. Nothing in Core calls them. |
 
 Explicitly **not in Core**: assets, Addressables, navigation, scenes, loading, network channels, sessions,
@@ -55,9 +55,16 @@ Full rules in [Architecture.md](../Architecture.md) and [DependencyRules.md](../
 - **Presentation consumes wire DTOs directly** — fewer types, but a protocol version bump then edits animation
   code, and single-player needs a second presentation path. Rejected in favour of one mapper.
 
+**Enforcement.** Ports-and-adapters only survives if invalid dependencies fail a build rather than a review.
+The checks, their stable rule ids, and their current status live in
+[ArchitectureEnforcement.md](../ArchitectureEnforcement.md) — not here, and not in DependencyRules.
+
 ## Consequences
 - More projects/assemblies (Core, Protocol, RuntimeContracts, Application, UnityRuntime, two adapters, Plugin)
   and some indirection up front.
+- `FalseGods.RuntimeContracts` carries the one piece of static state in the design (the `FalseGodsIntegrations`
+  broker). It is bounded to a single slot with a single reader (ADR-004); it is not, and must not become, a
+  service locator that other modules read from.
 - One mapping layer (`Application`) that must be kept in sync with both vocabularies — accepted, because it is
   Unity-less and socket-less, therefore unit-testable.
 - Testable Unity-less Core; replaceable game/multiplayer/transport integrations; enforceable via separate
@@ -65,5 +72,6 @@ Full rules in [Architecture.md](../Architecture.md) and [DependencyRules.md](../
 - Prefabs are content only, bound to ports by the Composition Root — no service locators.
 
 ## Verification status
-Unverified (structural) — enforced later by the mechanical checks in
-[DependencyRules.md §7](../DependencyRules.md); risks R21–R31 track leakage.
+Unverified (structural) — enforced later by the checks registered in
+[ArchitectureEnforcement.md §5](../ArchitectureEnforcement.md), all currently `Planned`; risks R21–R31 and R35
+track leakage.
