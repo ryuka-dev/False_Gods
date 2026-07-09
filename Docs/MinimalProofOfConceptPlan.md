@@ -38,14 +38,17 @@ documents describe one plan.
 | P0 | BepInEx probe plugin loads; can read `AstarPath.active`, `GameManager.Instance.geometryLayer`, recast params | — |
 | P1 | Resolve + instantiate a vanilla cave prefab by Addressables key/GUID at runtime | R1 |
 
-> **P0/P1 probe built** — `tools/FalseGods.Probe` (a throwaway BepInEx plugin, outside `src/` and outside the
-> FG-ARCH rules; see its README). It compiles against the real game assemblies and covers the P0 reads and the
-> full P1 path: resolve → load → **instantiate** (under an inactive holder, then destroy — P1 requires
-> instantiation, and this keeps it free of gameplay side effects). It fires on the game's own
-> `AstarPath.OnPostScan`, so it reads *after* rooms/graph/cleaner-points are ready rather than the moment
-> `AstarPath` appears; F10 is the authoritative on-demand report. **Not yet run in-game** — that is the manual
-> pre-release step. Building it already corrected one documented fact (the recast rasterization members moved to
-> `collectionSettings`; report 4.2/4.4).
+> **P0/P1 — RUN AND PASSED.** `tools/FalseGods.Probe` was run in-game (F10, game 6000.3.6f1, A\* 5.3.8, Gale
+> profile `Bossmod开发`). Results:
+> - **P0**: geometry/recast layer masks, the full recast agent parameters, graph layout, and the live
+>   `NavMeshCleaner` point set all read successfully → transcribed into report 4.2/4.4 and RiskList R3/R5.
+>   Design-changing finding: recast rasterizes **meshes, not colliders**, on a mask that differs from
+>   `geometryLayer` (report 4.2).
+> - **P1**: the game's own room GUIDs resolve (5/5 hits), and one vanilla prefab loaded **and instantiated**
+>   with 0 null materials → RiskList **R1 verified**, R6 partly.
+>
+> The probe is a throwaway (outside `src/`, outside the FG-ARCH rules; see its README). Now that P0/P1 have
+> been captured it can be deleted per its README, or kept to re-check R5 inside our own arena at P5.
 | P2 | Load our own AssetBundle (built in the game's Unity version) with our ground mesh + layout | R2 |
 | P3 | Vanilla prefab **renders correctly** (no pink) under our lighting; test one vanilla floor material on our ground mesh | R6, R13, report 3.4 |
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |

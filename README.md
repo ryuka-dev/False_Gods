@@ -150,13 +150,15 @@ machine with no game and no BepInEx installed, which is what makes the domain un
 
 ## Reference environment (verified during investigation)
 
-- Game: SULFUR (Unity, Mono `net472`), managed assemblies under
-  `…\SULFUR\Sulfur_Data\Managed`.
+- Game: SULFUR, **Unity 6000.3.6f1** (Mono `net472`), managed assemblies under
+  `…\SULFUR\Sulfur_Data\Managed`. Unity version confirmed at runtime by the PoC probe.
 - Mod platform: **BepInEx 5 + HarmonyX**, loaded via UnityDoorstop (`winhttp.dll` + `doorstop_config.ini`),
   managed by the Gale mod manager. Same toolchain as SULFUR Together.
-- Navigation: **A\* Pathfinding Project** (recast graph, scanned at runtime) — *not* Unity NavMesh.
+- Navigation: **A\* Pathfinding Project 5.3.8** (recast graph, scanned at runtime) — *not* Unity NavMesh. The
+  graph rasterizes **meshes, not colliders** (measured; see Docs report 4.2/4.4).
 - Level content: modular **`Room` prefabs** loaded via **Addressables `AssetReference`**, assembled by a
-  MakerGraph/XNode node pipeline.
+  MakerGraph/XNode node pipeline. Runtime resolution of vanilla room GUIDs from mod code is **verified**
+  (RiskList R1).
 
 See `Docs/` for the full analysis and the proof-of-concept plan.
 

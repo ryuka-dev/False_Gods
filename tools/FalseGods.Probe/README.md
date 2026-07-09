@@ -4,9 +4,11 @@ A read-only BepInEx plugin that reads real values out of a running SULFUR, so th
 [RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0** and **P1**
 ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
 
-**This is disposable.** When P0/P1 have been run on a real game and their results transcribed back into the
-docs (below), delete `tools/FalseGods.Probe/` and this directory with it. Deleting it is a one-line change —
-it is not in `False Gods.slnx` and nothing under `src/` references it, both enforced by
+**This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
+results transcribed into report 4.2/4.4 and RiskList R1/R3/R5 — so it can be deleted now. The one reason to
+keep it a little longer: at **P5** it can re-check R5 (does *our* arena's `NavMeshAnchor` survive the cleaner)
+inside the custom arena, which is the same read it already does. Delete it after P5 at the latest. Deleting it
+is a one-line change — it is not in `False Gods.slnx` and nothing under `src/` references it, both enforced by
 `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 
 ## What it answers

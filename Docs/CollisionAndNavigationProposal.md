@@ -20,24 +20,43 @@ Rationale (from the decompile): even the vanilla game keeps *generation-time* co
 meshes. We follow the same instinct — never make the boss or players collide with decorative rock
 `MeshCollider`s.
 
-## 4.2 Collision layer
+## 4.2 Collision layer vs navigation layer — they are *not* the same thing
 
-- Give `CollisionRoot` colliders the **layer(s) the game treats as world geometry**. The game references a
-  `GameManager.geometryLayer` (used by `BatchedNPCRaycasts`, AI LOS, ground checks); the arena floor/walls
-  must be on the layer(s) that both physics and the recast graph consider solid.
-- Keep decorative vanilla rock colliders **off** the geometry/nav layer (or strip their colliders on
-  instantiate) so players/boss never snag on them.
-- Walls: a simple invisible boundary box around the play area. Floor: one flat collider. Pillars/large
-  obstacles: a handful of convex colliders. Nothing else.
+**Measured (probe P0, see §4.4).** Physics/LOS geometry and navigation-rasterized geometry are driven by
+**different layer masks and different geometry**, and the arena must satisfy both separately:
 
-> The exact geometry layer index and the recast graph's rasterization mask are **serialized on the scene's
-> `AstarPath` component**, not in code. Read them at runtime for the PoC (RiskList R3).
->
-> **Corrected against the real `AstarPathfindingProject.dll`** (via `tools/FalseGods.Probe`): in this A*
-> version the rasterization inputs live on a nested `collectionSettings` object, not as top-level `RecastGraph`
-> fields. Read `AstarPath.active.data.recastGraph.collectionSettings.{layerMask, rasterizeColliders,
-> rasterizeMeshes}` and `GameManager.Instance.geometryLayer`. `RecastGraph.mask` / `.rasterizeColliders` /
-> `.rasterizeMeshes` still exist as `[Obsolete]` shims but should not be used. The measured values go in §4.4.
+| Concern | Source | Layers (measured, Act_02_Fortress) |
+|---|---|---|
+| Physics, AI line-of-sight, ground checks | `GameManager.geometryLayer` | `Geometry(3)`, `StaticDoodad(12)`, `InvisibleGeometry(18)`, `GeometryNoNavMesh(22)`, `LevelGenBlock(26)` |
+| What the recast graph rasterizes | `recastGraph.collectionSettings.layerMask` | `Geometry(3)`, `StaticDoodad(12)`, `InvisibleGeometry(18)`, `ProjectileTrigger(30)` |
+
+Two consequences that rewrite the old advice here:
+
+- **The recast graph rasterizes MESHES, not colliders** (`rasterizeMeshes = true`, `rasterizeColliders =
+  false`). So a `CollisionRoot` collider on the right layer is **invisible to navigation** — it defines physics
+  only. The walkable surface the boss/enemies path on is built from **`MeshRenderer` meshes on a mask layer**
+  (`Geometry(3)` is the obvious one), not from colliders. `NavigationRoot` must therefore carry real geometry
+  (a floor mesh on layer 3), or a prebaked `NavmeshPrefab` (report §4.3 Option 1); a bare collider will not do.
+- **The two masks differ on purpose.** `GeometryNoNavMesh(22)` is physics-solid but deliberately excluded from
+  the nav rasterization — exactly the layer for decorative rock that players should collide with but the boss
+  should never try to walk on. `LevelGenBlock(26)` is likewise physics-only. Put arena decoration whose
+  collision matters but whose walkability must not on layer 22.
+
+Practical arena rules, updated:
+
+- **Floor**: a real floor **mesh** on `Geometry(3)` (rasterized) plus a flat floor **collider** on a physics
+  layer. The mesh makes it walkable; the collider makes it solid.
+- **Boundary walls**: an invisible collider box for physics; keep it off the nav mask (or give it no mesh) so
+  it never becomes a walkable ledge.
+- **Decoration** (vanilla rock, props): collider on `GeometryNoNavMesh(22)` if it should block movement but not
+  navigation, or strip its colliders entirely. Never let decorative meshes land on `Geometry(3)`, or the recast
+  scan will treat their surfaces as walkable and produce corner-sticking.
+
+> The layer indices and the rasterization settings are **serialized on the scene's `AstarPath` component**, not
+> in code. The values above were read at runtime by `tools/FalseGods.Probe` (RiskList R3). Note the members
+> moved in this A* version: read `recastGraph.collectionSettings.{layerMask, rasterizeColliders,
+> rasterizeMeshes}` — `RecastGraph.mask` / `.rasterizeColliders` / `.rasterizeMeshes` are now `[Obsolete]`
+> shims. Full agent parameters in §4.4.
 
 ## 4.3 Navigation — the A\* recast graph (the real system)
 
@@ -76,6 +95,14 @@ Verified facts (`BuildNavMeshNode`, `NavMeshManager`, `NavMeshCleaner`, `RecastT
   `navMeshAnchors`) and marks **only nodes in those areas as walkable**; everything else becomes unwalkable.
   ⚠️ **This is the single most important gotcha for a custom arena**: if our arena's walkable island is not
   represented in `validNavMeshPoints`, the cleaner will mark it unwalkable and the boss/enemies won't move.
+  **Measured (probe P0):** on a live level the cleaner is real and populated — the active `NavMeshManager(Clone)`
+  had exactly **3** `validNavMeshPoints`, sourced from the single loaded `Room`'s **3** `navMeshAnchors`
+  (`Room.NAVMESH_ANCHOR_TAG = "NavMeshAnchor"`). With those 3 points the scan produced 1492 nodes, **all
+  walkable** — so the cleaner keeps everything reachable from an anchored area and would erase anything else.
+  An additive arena contributes **zero** anchors unless we add them, which is exactly the R5 failure mode:
+  place at least one `NavMeshAnchor`-tagged transform inside the arena island, or drive nav via a prebaked
+  `NavmeshPrefab` (Option 1) that side-steps the cleaner. (A second, inactive `NavMeshManager` instance with a
+  null point set also exists in the scene; the live clone is the one that matters.)
 
 ### Recommended approach for the arena's nav
 
@@ -103,17 +130,30 @@ if the arena needs disconnected walkable areas. A single flat arena floor needs 
 - `cellSize` (voxel size) is the one nav parameter set **from game code** per environment:
   `WorldEnvironment.navMeshVoxelSize = 0.1`. Match this for the arena's environment so agent fit is
   consistent.
-- The rest of the recast parameters — **character radius, walkable height, max slope, max step/climb** — are
-  **serialized on the scene `AstarPath` RecastGraph**, not in code, and the rasterization inputs are on its
-  nested `collectionSettings`. Obtain the real values at runtime for the PoC by reading
-  `AstarPath.active.data.recastGraph.{characterRadius, walkableHeight, walkableClimb, maxSlope}` and
-  `…recastGraph.collectionSettings.{layerMask, rasterizeColliders, rasterizeMeshes}`. Design arena slopes/steps
-  within those limits (keep the main floor flat, per the arena design requirements).
+- The rest of the recast parameters are **serialized on the scene `AstarPath` RecastGraph**, not in code.
+  **Measured** by probe P0 on a real level (Act_02_Fortress), so these are the real limits to design within,
+  no longer estimates:
 
-> **Measured values — pending.** `tools/FalseGods.Probe` (PoC P0) reads exactly these members and writes them to
-> a report. Once it has run against a real level, replace this note with the measured `characterRadius`,
-> `walkableHeight`, `walkableClimb`, `maxSlope`, `cellSize`, `layerMask`, and `geometryLayer`, citing the probe
-> report. Until then these remain *proposed / unverified*.
+  | Parameter | Measured | Design implication |
+  |---|---|---|
+  | `cellSize` (voxel size) | **0.1** | matches `WorldEnvironment.navMeshVoxelSize`; keep arena voxel scale here |
+  | `characterRadius` | **0.5** | agents keep ~0.5 m from walls; corridors narrower than ~1 m may not path |
+  | `walkableHeight` | **1.5** | ceilings/overhangs below 1.5 m are not walkable underneath |
+  | `walkableClimb` | **0.6** | steps up to 0.6 m are traversable without an off-mesh link |
+  | `maxSlope` | **45°** | keep the main floor flat; ramps must stay ≤ 45° |
+  | `maxEdgeLength` | **20** | tiling detail; not a design constraint |
+  | `contourMaxError` | **2** | mesh simplification tolerance |
+  | `minRegionSize` | **1** | tiny isolated islands are discarded |
+
+  Graph tiling: `useTiles = true`, tile size 128×128, `Dimension3D`. Two graphs exist —
+  **`RecastGraph` at index 0** (confirmed; `NNConstraint.graphMask = 1` targets it) and a `PointGraph` at
+  index 1 (off-mesh links). Design arena slopes/steps within the limits above; keep the main floor flat, per
+  the arena design requirements.
+
+> Source: `tools/FalseGods.Probe` report, game **6000.3.6f1**, **A\* Pathfinding Project 5.3.8**, probe 0.1.0,
+> Gale profile `Bossmod开发`. Values are from one real level; a second level should be spot-checked before
+> treating them as universal, but the agent parameters are set per `RecastGraph` and are not expected to vary
+> by environment (only `cellSize` is set per environment, and it already matches).
 
 ## 4.5 Boss / enemy pathing
 

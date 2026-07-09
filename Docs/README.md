@@ -81,5 +81,7 @@ unverified* until validated by the proof-of-concept.
   a custom mesh cleanly into the recast scan without the `NavMeshCleaner` flood-fill discarding it; and clean
   teardown so arena nav/objects don't leak into the next level. Validate these first (see RiskList + PoC).
 
-> Reference environment (verified from game files): **Unity 6000.3.6f1**, **URP** (Universal Render
-> Pipeline), with URP 2D renderer, ShaderGraph, VFX Graph, 2D Animation, and Timeline available.
+> Reference environment: **Unity 6000.3.6f1** (confirmed at runtime by the PoC probe), **URP** (Universal
+> Render Pipeline), with URP 2D renderer, ShaderGraph, VFX Graph, 2D Animation, and Timeline available;
+> **A\* Pathfinding Project 5.3.8**. PoC steps P0/P1 have been run in-game — RiskList R1 verified, R3 verified
+> (with a design-changing finding), R5 mechanism confirmed; see report 4.2/4.4.
