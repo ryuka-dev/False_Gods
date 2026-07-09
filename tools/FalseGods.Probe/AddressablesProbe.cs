@@ -161,8 +161,16 @@ namespace FalseGods.Probe
                 ? "  R1 LOOKS GOOD: the game's own room GUIDs resolve from mod code."
                 : "  R1 NEEDS ATTENTION: see misses above.");
 
-            // ── actually load one prefab, the way ArenaLoadingProposal §2.3 intends to ────────────────
-            report.Section("P1 — load one vanilla room prefab (no instantiation)");
+            // ── load AND instantiate one prefab, the way ArenaLoadingProposal §2.3 intends to ─────────
+            // P1's acceptance is "resolve + INSTANTIATE a vanilla prefab at runtime", so loading the asset
+            // is only half of it: instantiation is what proves the prefab becomes a live GameObject with its
+            // renderers and colliders intact, and it exercises failures that a bare load never does.
+            //
+            // Read-only is preserved by construction: the instance is created under an INACTIVE holder, so
+            // none of its component Awake/OnEnable/Start run (Unity does not run those on an object that is
+            // inactive in the hierarchy). Nothing registers with a manager, spawns, or mutates world state.
+            // The holder — and the instance with it — is destroyed immediately after inspection.
+            report.Section("P1 — load + instantiate one vanilla room prefab (isolated, then destroyed)");
 
             var loadGuid = guids.FirstOrDefault();
             if (loadGuid == null)
@@ -196,16 +204,30 @@ namespace FalseGods.Probe
             {
                 report.Line($"  FAILED to load {loadGuid}: status={load.Status}");
                 report.Value("exception", load.OperationException?.Message);
+                reference2.ReleaseAsset();
+                yield break;
             }
-            else
-            {
-                var prefab = load.Result;
-                report.Value("prefab name", prefab.name);
-                report.Value("child count", prefab.transform.childCount);
 
-                report.Try("renderer/shader survey (feeds R6)", () =>
+            var prefab = load.Result;
+            report.Value("prefab name", prefab.name);
+            report.Value("prefab child count", prefab.transform.childCount);
+
+            // The instantiation and inspection cannot throw across the yield boundary, so guard them here.
+            report.Try("instantiate + inspect (isolated, no lifecycle)", () =>
+            {
+                GameObject holder = null;
+                try
                 {
-                    var renderers = prefab.GetComponentsInChildren<Renderer>(includeInactive: true);
+                    holder = new GameObject("FalseGodsProbe_IsolatedHolder");
+                    holder.SetActive(false); // inactive parent ⇒ instance is inactive ⇒ no Awake/OnEnable/Start
+
+                    var instance = UnityEngine.Object.Instantiate(prefab, holder.transform);
+
+                    report.Value("instantiated", instance != null ? "yes" : "no");
+                    report.Value("instance activeInHierarchy", instance.activeInHierarchy); // expected: false
+                    report.Value("instance child count", instance.transform.childCount);
+
+                    var renderers = instance.GetComponentsInChildren<Renderer>(includeInactive: true);
                     report.Value("renderers", renderers.Length);
 
                     var shaders = renderers
@@ -215,18 +237,26 @@ namespace FalseGods.Probe
                         .Distinct()
                         .Take(10)
                         .ToList();
+                    report.Value("distinct shaders (max 10, feeds R6)", shaders);
 
-                    report.Value("distinct shaders (max 10)", shaders);
+                    var nullMaterials = renderers.Count(r => (r.sharedMaterials ?? Array.Empty<Material>()).Any(m => m == null));
+                    report.Value("renderers with a null material", nullMaterials);
 
-                    var colliders = prefab.GetComponentsInChildren<Collider>(includeInactive: true);
+                    var colliders = instance.GetComponentsInChildren<Collider>(includeInactive: true);
                     report.Value("colliders", colliders.Length);
                     report.Value("collider layers", colliders.Select(c => c.gameObject.layer.ToString()).Distinct());
-                });
 
-                report.Line("  Loaded and inspected without instantiating. Releasing.");
-            }
+                    report.Line("  Instantiated under an inactive holder (no component lifecycle ran), inspected, destroying.");
+                }
+                finally
+                {
+                    if (holder != null)
+                        UnityEngine.Object.Destroy(holder); // takes the instance with it
+                }
+            });
 
             reference2.ReleaseAsset();
+            report.Line("  Addressables handle released.");
         }
     }
 }

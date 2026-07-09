@@ -17,11 +17,24 @@ it is not in `False Gods.slnx` and nothing under `src/` references it, both enfo
 | P0 / §4.4 | The real recast agent parameters (serialized on the component, in no source file) | `recast.cellSize / characterRadius / walkableHeight / walkableClimb / maxSlope`, … |
 | P0 / **R5** | Does `NavMeshCleaner` have `validNavMeshPoints`, and how many? (its flood-fill erases any island not represented there) | `NavMeshCleaner.validNavMeshPoints`, `Room.navMeshAnchors` |
 | P0 | Is `AstarPath.active` really rebuilt per level? (lifecycle claim behind ADR-002 / R8) | `AstarPath.active.GetInstanceID()` changing across levels |
-| P1 / **R1** | Can mod code resolve and load vanilla room prefabs by the GUIDs the game itself holds? | `LevelBlock.roomPrefabsAddressable` → `Addressables.LoadResourceLocationsAsync` → `LoadAssetAsync<GameObject>` |
-| P1 / R6 | (bonus) What shaders and collider layers does a vanilla room prefab carry? | renderers / colliders on the loaded prefab |
+| P1 / **R1** | Can mod code resolve, load **and instantiate** a vanilla room prefab by the GUIDs the game itself holds? | `LevelBlock.roomPrefabsAddressable` → `LoadResourceLocationsAsync` → `LoadAssetAsync<GameObject>` → `Instantiate` |
+| P1 / R6 | (bonus) What shaders and collider layers does a vanilla room prefab carry? | renderers / colliders on the instantiated prefab |
 
-It is **read-only**: no Harmony patches, no game-state mutation, no instantiation. The one prefab it loads is
-released.
+It mutates **no authoritative game state**: no Harmony patches, no manager registration, no world spawn. P1's
+acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so no
+component `Awake`/`OnEnable`/`Start` runs (Unity does not run those on an object inactive in the hierarchy), and
+the instance is destroyed immediately after inspection. The Addressables handle is released.
+
+## When it runs (timing matters)
+
+`AstarPath.active` exists early, but the graph is not configured or scanned until the MakerGraph pipeline
+reaches `BuildNavMeshNode` — which sets the cell size, fills `NavMeshCleaner.validNavMeshPoints`, then scans.
+Reading at "AstarPath exists" would capture default values, a null cleaner point set, and zero scanned nodes.
+
+So the probe fires on the game's own **`AstarPath.OnPostScan`** (the same static event `BuildNavMeshNode` uses),
+by which point rooms, graph and cleaner points are all ready. **F10 is the authoritative fallback**: stand
+inside a loaded arena and press it — that report is the one to trust, because you control when it is taken. Auto
+reports are labelled by trigger in the file, so a too-early one is identifiable.
 
 ## Correction it already forced
 
@@ -41,9 +54,9 @@ dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj
 dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj -p:DeployProbe=true
 ```
 
-Then launch the game. The probe runs automatically once per level (when the level's `AstarPath` appears), and
-on demand with **F10**. Each run writes a timestamped `probe-YYYYMMDD-HHMMSS.txt` under
-`BepInEx/FalseGods.Probe/` (gitignored) and echoes to the BepInEx console.
+Then launch the game, **enter a normal level**, and either let the automatic post-scan report fire or press
+**F10** once you are standing in the arena. Each run writes a timestamped `probe-YYYYMMDD-HHMMSS.txt` under
+`BepInEx/FalseGods.Probe/` (gitignored) and echoes to the BepInEx console. Prefer the F10 report.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.

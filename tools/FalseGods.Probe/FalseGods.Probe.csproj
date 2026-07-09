@@ -11,7 +11,9 @@
       - Nothing in src/ may reference it. A test asserts this.
       - It answers to none of the module boundaries: it reads AstarPath, Addressables and game
         singletons directly, because that is the entire point of a probe.
-      - It applies NO Harmony patches and mutates NO game state. Read-only.
+      - It applies NO Harmony patches and mutates NO authoritative game state. It does instantiate one
+        vanilla prefab (P1 requires it), but under an inactive holder so no component lifecycle runs, and
+        it destroys the instance immediately — no manager registration, no spawn, no world change.
       - It is DISPOSABLE. When P0/P1 have been run and their results written back into
         CollisionAndNavigationProposal.md §4.4 and RiskList R1/R3/R5, delete this project.
 

@@ -9,13 +9,21 @@ using UnityEngine.InputSystem;
 namespace FalseGods.Probe
 {
     /// <summary>
-    /// Read-only diagnostic plugin for PoC steps P0 and P1. Applies no Harmony patches and mutates no game
-    /// state; it reads values and writes a report.
+    /// Read-only diagnostic plugin for PoC steps P0 and P1. Applies no Harmony patches and mutates no
+    /// authoritative game state.
     ///
-    /// It runs automatically once per <c>AstarPath</c> instance. That is not a timing heuristic dressed up
-    /// as an event — a fresh <c>AstarPath</c> IS the level's graph: <c>GameManager</c> destroys the old one
-    /// and instantiates <c>astarPathPrefab</c> on every level change (GameManager.cs:1097 / :1137). So one
-    /// run per instance is exactly one run per level, which is what we want to capture.
+    /// Timing is driven by the game's own canonical "navigation scan finished" event, not by polling for
+    /// objects to appear. <c>AstarPath.active</c> exists early (GameManager.cs:1137), but the graph is not
+    /// configured or scanned until the MakerGraph pipeline reaches <c>BuildNavMeshNode</c>, which sets the
+    /// cell size, fills <c>NavMeshCleaner.validNavMeshPoints</c>, then calls <c>ScanAsync()</c>. Reading at
+    /// "AstarPath exists" would capture default cell size, a null cleaner point set, zero scanned nodes, and
+    /// possibly zero rooms. So the probe subscribes to the static <c>AstarPath.OnPostScan</c> that
+    /// <c>BuildNavMeshNode</c> itself uses (BuildNavMeshNode.cs:65-75) — by the time it fires, the rooms are
+    /// built, the graph is scanned, and the cleaner points are set. That is a real event source, per
+    /// CLAUDE.md §6, not a timing guess.
+    ///
+    /// The hotkey (F10) is the authoritative fallback: stand inside a loaded arena and press it. Its report
+    /// is the one to trust, because you control exactly when it is taken.
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public sealed class ProbePlugin : BaseUnityPlugin
@@ -24,25 +32,44 @@ namespace FalseGods.Probe
         public const string PluginName = "False Gods Probe";
         public const string PluginVersion = "0.1.0";
 
-        private ConfigEntry<bool> _runOnEachLevel;
+        private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
 
-        /// <summary>Identifies the graph we last reported on, so a new level triggers a new report.</summary>
-        private int _reportedAstarInstanceId;
+        private OnScanDelegate _scanHandler;
+
+        /// <summary>Set on the (main-thread) scan-complete callback; consumed in Update so the coroutine
+        /// starts from a clean main-thread frame rather than inside A*'s callback.</summary>
+        private volatile bool _scanCompletePending;
 
         private bool _running;
 
         private void Awake()
         {
-            _runOnEachLevel = Config.Bind("Probe", "RunOnEachLevel", true,
-                "Run the probe automatically once per level, when the level's AstarPath graph appears.");
+            _runAfterEachScan = Config.Bind("Probe", "RunAfterEachScan", true,
+                "Run the probe automatically after each navigation scan completes (AstarPath.OnPostScan). " +
+                "This is the earliest point at which the level's rooms, graph and cleaner points are all ready.");
 
             _hotkey = Config.Bind("Probe", "Hotkey", Key.F10,
-                "Re-run the probe on demand. The game uses the new Input System; legacy UnityEngine.Input would throw.");
+                "Run the probe on demand — the authoritative report, taken when you choose. " +
+                "The game uses the new Input System; legacy UnityEngine.Input would throw.");
+
+            // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
+            // (the field is static), so one subscription covers every level; removed in OnDestroy.
+            _scanHandler = OnNavigationScanComplete;
+            AstarPath.OnPostScan = (OnScanDelegate)Delegate.Combine(AstarPath.OnPostScan, _scanHandler);
 
             Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Read-only. " +
-                              $"Auto-run per level: {_runOnEachLevel.Value}. Hotkey: {_hotkey.Value}.");
+                              $"Auto-run after each nav scan: {_runAfterEachScan.Value}. Hotkey: {_hotkey.Value}.");
         }
+
+        private void OnDestroy()
+        {
+            if (_scanHandler != null)
+                AstarPath.OnPostScan = (OnScanDelegate)Delegate.Remove(AstarPath.OnPostScan, _scanHandler);
+        }
+
+        /// <summary>Called by A* on the main thread when a scan finishes (BuildNavMeshNode's ScanAsync path).</summary>
+        private void OnNavigationScanComplete(AstarPath script) => _scanCompletePending = true;
 
         private void Update()
         {
@@ -51,23 +78,18 @@ namespace FalseGods.Probe
 
             if (HotkeyPressed())
             {
-                StartCoroutine(RunProbe("hotkey"));
+                _scanCompletePending = false;
+                StartCoroutine(RunProbe("hotkey (authoritative — taken on demand)"));
                 return;
             }
 
-            if (!_runOnEachLevel.Value)
-                return;
+            if (_scanCompletePending)
+            {
+                _scanCompletePending = false;
 
-            var astar = AstarPath.active;
-            if (astar == null || GameManager.Instance == null)
-                return;
-
-            var instanceId = astar.GetInstanceID();
-            if (instanceId == _reportedAstarInstanceId)
-                return;
-
-            _reportedAstarInstanceId = instanceId;
-            StartCoroutine(RunProbe("new AstarPath instance (level loaded)"));
+                if (_runAfterEachScan.Value)
+                    StartCoroutine(RunProbe("AstarPath.OnPostScan (navigation scan complete)"));
+            }
         }
 
         private bool HotkeyPressed()
