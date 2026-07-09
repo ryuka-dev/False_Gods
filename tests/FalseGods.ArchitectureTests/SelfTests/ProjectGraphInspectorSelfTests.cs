@@ -7,17 +7,29 @@ using Xunit;
 namespace FalseGods.ArchitectureTests.SelfTests;
 
 /// <summary>
-/// Proves the project-graph layer of FG-ARCH-002 detects the two violations that no compiled-metadata
-/// check could see, and stays quiet on a conforming graph.
+/// Proves the project-graph layer of FG-ARCH-002 detects the violations that no compiled-metadata check
+/// could see, covers every declared configuration, and stays quiet on a conforming graph.
 /// </summary>
 public sealed class ProjectGraphInspectorSelfTests
 {
     private const string ForbiddenAssembly = "FalseGods.Integration.SulfurTogether";
 
+    private static readonly string[] ProductionProjects =
+    {
+        "FalseGods.Core",
+        "FalseGods.Protocol",
+        "FalseGods.RuntimeContracts",
+        "FalseGods.Application",
+        "FalseGods.UnityRuntime",
+        "FalseGods.Integration.Sulfur",
+        "FalseGods.Integration.SulfurTogether",
+        "FalseGods.Plugin",
+    };
+
     [Fact]
     public void A_conforming_graph_reports_no_violation()
     {
-        var evaluated = ProjectGraphInspector.Evaluate(RepoLayout.FixtureProjectFile("AllowedGraph"));
+        var evaluated = ProjectGraphInspector.Evaluate(RepoLayout.FixtureProjectFile("AllowedGraph"), "Debug");
 
         Assert.False(evaluated.ReferencesAssemblyNamed(ForbiddenAssembly));
 
@@ -36,7 +48,7 @@ public sealed class ProjectGraphInspectorSelfTests
         var sourceFiles = Directory.GetFiles(Path.GetDirectoryName(fixturePath)!, "*.cs", SearchOption.AllDirectories);
         Assert.Empty(sourceFiles);
 
-        var evaluated = ProjectGraphInspector.Evaluate(fixturePath);
+        var evaluated = ProjectGraphInspector.Evaluate(fixturePath, "Debug");
 
         Assert.True(evaluated.ReferencesAssemblyNamed(ForbiddenAssembly));
 
@@ -54,7 +66,7 @@ public sealed class ProjectGraphInspectorSelfTests
         var csprojText = File.ReadAllText(fixturePath);
         Assert.DoesNotContain(ForbiddenAssembly, csprojText, StringComparison.OrdinalIgnoreCase);
 
-        var evaluated = ProjectGraphInspector.Evaluate(fixturePath);
+        var evaluated = ProjectGraphInspector.Evaluate(fixturePath, "Debug");
 
         Assert.True(evaluated.ReferencesAssemblyNamed(ForbiddenAssembly));
 
@@ -66,13 +78,71 @@ public sealed class ProjectGraphInspectorSelfTests
     }
 
     [Fact]
-    public void Evaluation_covers_every_configuration_a_reference_could_hide_behind()
+    public void A_forbidden_reference_present_only_in_a_non_default_configuration_is_detected()
     {
-        var evaluated = ProjectGraphInspector.EvaluateAllConfigurations(RepoLayout.ProjectFile("FalseGods.Plugin"));
+        var fixturePath = RepoLayout.FixtureProjectFile("ForbiddenReferenceInReleaseOnly");
 
-        Assert.Equal(ProjectGraphInspector.AllConfigurations.Count, evaluated.Count);
-        Assert.Contains(evaluated, e => e.Configuration == "Debug");
-        Assert.Contains(evaluated, e => e.Configuration == "Release");
+        // Invisible under MSBuild's default configuration…
+        var debug = ProjectGraphInspector.Evaluate(fixturePath, "Debug");
+        Assert.False(debug.ReferencesAssemblyNamed(ForbiddenAssembly));
+
+        // …and present under Release.
+        var release = ProjectGraphInspector.Evaluate(fixturePath, "Release");
+        Assert.True(release.ReferencesAssemblyNamed(ForbiddenAssembly));
+
+        // Which is precisely why the check evaluates every declared configuration, not just the default.
+        var all = ProjectGraphInspector.EvaluateAllConfigurations(fixturePath);
+        Assert.Contains(all, e => e.ReferencesAssemblyNamed(ForbiddenAssembly));
+    }
+
+    [Fact]
+    public void Configurations_are_read_from_msbuild_not_hardcoded()
+    {
+        var declared = ProjectGraphInspector.GetDeclaredConfigurations(RepoLayout.ProjectFile("FalseGods.Plugin"));
+
+        Assert.NotEmpty(declared);
+        Assert.Contains("Debug", declared);
+        Assert.Contains("Release", declared);
+    }
+
+    [Fact]
+    public void Every_production_project_declares_the_same_configurations()
+    {
+        // The shared declaration lives in Directory.Build.props. If one project overrode it, the
+        // per-project evaluation would silently cover a different set than verify.ps1 validates against.
+        var baseline = ProjectGraphInspector.GetDeclaredConfigurations(RepoLayout.ProjectFile(ProductionProjects[0]));
+
+        foreach (var project in ProductionProjects)
+        {
+            var declared = ProjectGraphInspector.GetDeclaredConfigurations(RepoLayout.ProjectFile(project));
+            Assert.Equal(baseline, declared);
+        }
+    }
+
+    [Fact]
+    public void Evaluation_covers_every_declared_configuration()
+    {
+        var projectFile = RepoLayout.ProjectFile("FalseGods.Plugin");
+
+        var declared = ProjectGraphInspector.GetDeclaredConfigurations(projectFile);
+        var evaluated = ProjectGraphInspector.EvaluateAllConfigurations(projectFile);
+
+        Assert.Equal(declared.Count, evaluated.Count);
+        Assert.Equal(declared.OrderBy(c => c), evaluated.Select(e => e.Configuration).OrderBy(c => c));
+    }
+
+    [Fact]
+    public void An_undeclared_configuration_is_rejected_rather_than_silently_evaluated()
+    {
+        var projectFile = RepoLayout.ProjectFile("FalseGods.Plugin");
+
+        // MSBuild itself would happily evaluate `-p:Configuration=Nonsense` and return a graph. Accepting
+        // it would mean every reference guarded by a real configuration goes unchecked, with a green result.
+        var exception = Assert.Throws<UnknownConfigurationException>(
+            () => ProjectGraphInspector.Evaluate(projectFile, "Nonsense"));
+
+        Assert.Equal("Nonsense", exception.Configuration);
+        Assert.Contains("Debug", exception.DeclaredConfigurations);
     }
 
     [Fact]
@@ -80,6 +150,7 @@ public sealed class ProjectGraphInspectorSelfTests
     {
         var missing = RepoLayout.FixtureProjectFile("ThisFixtureDoesNotExist");
 
-        Assert.Throws<FileNotFoundException>(() => ProjectGraphInspector.Evaluate(missing));
+        Assert.Throws<FileNotFoundException>(() => ProjectGraphInspector.Evaluate(missing, "Debug"));
+        Assert.Throws<FileNotFoundException>(() => ProjectGraphInspector.EvaluateAllConfigurations(missing));
     }
 }

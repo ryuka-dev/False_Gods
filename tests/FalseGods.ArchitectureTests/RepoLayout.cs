@@ -19,23 +19,16 @@ public static class RepoLayout
     public static string Doc(string relativePath) =>
         Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
-    /// <summary>
-    /// The built assembly for a production project, in whichever configuration exists.
-    ///
-    /// Returns null rather than throwing: the caller decides whether "not built" is a failure, and
-    /// says so with a message that tells you to build first, instead of an opaque FileNotFound.
-    /// </summary>
-    public static string? FindBuiltAssembly(string projectName)
-    {
-        foreach (var configuration in new[] { "Debug", "Release" })
-        {
-            var candidate = Path.Combine(Root, "src", projectName, "bin", configuration, projectName + ".dll");
-            if (File.Exists(candidate))
-                return candidate;
-        }
+    /// <summary>Where a production project's assembly is expected for the given configuration.</summary>
+    public static string ExpectedAssemblyPath(string projectName, string configuration) =>
+        Inspection.BuildOutputLocator.AssemblyPath(Root, projectName, configuration);
 
-        return null;
-    }
+    /// <summary>
+    /// The built assembly for a production project in EXACTLY the given configuration, or null.
+    /// Never falls back to another configuration — see <see cref="Inspection.BuildOutputLocator"/>.
+    /// </summary>
+    public static string? FindBuiltAssembly(string projectName, string configuration) =>
+        Inspection.BuildOutputLocator.FindBuiltAssembly(Root, projectName, configuration);
 
     private static string FindRoot()
     {

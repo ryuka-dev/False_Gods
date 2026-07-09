@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    The forbidden reference exists ONLY when Configuration is Release. Evaluate this project with MSBuild's
+    default configuration (Debug) and it is spotless.
+
+    This is the violation a hardcoded `new[] { "Debug", "Release" }` would happen to catch today and would
+    silently stop catching the day someone adds a third configuration. The inspector reads the declared
+    $(Configurations) from MSBuild instead, so coverage follows the declaration.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>ForbiddenReferenceInReleaseOnly</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\FalseGods.Core\FalseGods.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Reference Include="FalseGods.Integration.SulfurTogether">
+      <HintPath>..\..\..\src\FalseGods.Integration.SulfurTogether\bin\Release\FalseGods.Integration.SulfurTogether.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

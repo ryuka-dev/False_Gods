@@ -53,20 +53,36 @@ One command:
 .\scripts\verify.ps1
 ```
 
-It runs, in order, and stops at the first failure:
+Optionally `-Configuration Release`; the default is `Debug`. It runs, in order, and stops at the first failure:
 
 ```text
-1. SDK check              (the version pinned by global.json is installed)
+1. SDK + configuration    (the version pinned by global.json; -Configuration is one the projects declare)
 2. dotnet build           (restricted project references — the compiler catches most violations)
-3. Architecture tests     (the FG-ARCH-* checks; Core unit tests will join them when Core has code)
-4. git diff --check       (whitespace damage / conflict markers)
+3. Architecture tests     (the FG-ARCH-* checks, told which configuration was just built)
+4. git diff HEAD --check  (whitespace damage / conflict markers, staged AND unstaged)
 ```
 
-**Success and failure are decided by process exit codes, never by searching output for the word "error".**
-This is not pedantry. This repository's build prints `0 个错误` on success, so a grep for `错误` reports a
-passing build as broken — and a check that is wrong about its subject is worse than no check (§12).
+A few details that are load-bearing rather than incidental:
 
-**Budget: about one minute.** It currently takes about ten seconds. Anything slower does not belong in the
+- **Success and failure are decided by process exit codes, never by searching output for the word "error".**
+  This repository's build prints `0 个错误` on success, so a grep for `错误` reports a passing build as broken —
+  and a check that is wrong about its subject is worse than no check (§12).
+- **The configuration is validated, not assumed.** The allowed set is read from MSBuild's evaluated
+  `$(Configurations)` (declared in `Directory.Build.props`), and an undeclared one is rejected. MSBuild will
+  cheerfully build `-c Nonsense`, and every reference guarded by a real configuration would then go unchecked
+  while the run stayed green.
+- **The configuration is passed to the tests** through `FALSEGODS_VERIFY_CONFIGURATION`, so the metadata check
+  inspects the assembly that was just built and never a stale one from the other configuration (§6.2).
+- **`git diff HEAD --check`, not `git diff --check`.** The latter sees only *unstaged* changes, so whitespace
+  damage that was already `git add`-ed passes the very check meant to catch it before a commit. `HEAD` covers
+  staged and unstaged modifications to tracked files. It does **not** cover untracked files — they have no
+  diff; `git add` brings them into scope. CI will instead diff a base commit against `HEAD`.
+- Native commands are judged only by exit code, with `$ErrorActionPreference` relaxed around them. In Windows
+  PowerShell 5.1 a native command's redirected stderr becomes a terminating error, and `git` writes harmless
+  CRLF advisories there — so the script would "fail" on a clean tree, but only when its output was piped. A
+  verification script whose result depends on whether someone redirected it is not a verification script.
+
+**Budget: about one minute.** It currently takes roughly twenty seconds. Anything slower does not belong in the
 pre-commit loop; it belongs in §4's higher levels. When this budget is threatened, move a check outward — do
 not let the loop grow until people stop running it.
 
@@ -305,7 +321,7 @@ The backbone (FG-ARCH-001/002/003/005/007). **Two layers, and neither alone is s
 central lesson of implementing FG-ARCH-002, and every later dependency rule should copy the shape:
 
 1. **Evaluated project graph.** Ask MSBuild what the project's references actually are, via
-   `dotnet msbuild <proj> -getItem:ProjectReference -getItem:Reference`, for every `Configuration`.
+   `dotnet msbuild <proj> -getProperty:Configurations -getItem:ProjectReference -getItem:Reference`.
 
    Not a regex over the `.csproj`. The XML is not the graph: items arrive from imported files
    (`Directory.Build.props`, the SDK) and item conditions depend on evaluated properties, so a text search sees
@@ -331,6 +347,29 @@ their compiled metadata — not a special case.
 Implementation: `tests/FalseGods.ArchitectureTests/Inspection/ProjectGraphInspector.cs` and
 `Inspection/AssemblyReferenceInspector.cs`.
 
+### 6.2 Two ways a dependency check quietly stops checking
+
+Both were real defects in the first implementation, and both produce a green result while inspecting nothing:
+
+**Evaluating the wrong set of configurations.** A reference behind `Condition="'$(Configuration)' == 'Release'"`
+is invisible in a Debug evaluation. The configuration list is therefore **read from MSBuild's evaluated
+`$(Configurations)`** — declared once in `Directory.Build.props` — and never hardcoded in the checks. Every
+declared configuration is evaluated; an undeclared one is rejected rather than evaluated, because MSBuild will
+evaluate `Nonsense` without complaint and report a graph with none of the real conditions satisfied. A test
+asserts every production project declares the same set.
+
+**Inspecting the wrong build output.** `verify.ps1 -Configuration Release` builds Release; a lookup that tries
+`bin/Debug` first and falls back would then read a stale Debug DLL from a previous run and report on an artefact
+nobody just built. So `BuildOutputLocator` takes the configuration explicitly and **never falls back**, the
+configuration reaches the tests through `FALSEGODS_VERIFY_CONFIGURATION`, and a missing assembly is a failure
+naming the exact path and where the configuration came from.
+
+Both are covered by fixtures in §6.1. A third defect of the same family — a "timeout" placed *after* a blocking
+`ReadToEnd`, so it can never fire — is why `Inspection/ProcessRunner.cs` exists: it drains stdout and stderr
+concurrently, enforces a real deadline, kills the whole process tree, and still recovers the output produced
+before the kill. Killing only the direct child leaves grandchildren holding the inherited pipe handles, and the
+reads never complete.
+
 ### 6.1 The checkers are themselves tested
 
 A check that has never been shown to fail is a check nobody has tested. The obvious way to test one — briefly
@@ -345,10 +384,13 @@ So each layer is proven against fixtures instead, and nothing temporary is ever 
 | `tests/Fixtures/AllowedGraph` | A conforming graph passes — the checker is not always-fail. |
 | `tests/Fixtures/ForbiddenProjectReference` | An **unused** forbidden `ProjectReference` is caught. The fixture has no source files, so nothing about it could ever reach an `AssemblyRef` table. This is the case only layer 1 can see. |
 | `tests/Fixtures/ForbiddenReferenceViaImport` | A forbidden `Reference` injected by an **imported** `.props`, behind a **condition**, is caught — and the failure names the `.props` file. This is the case a regex over the `.csproj` would pass. |
+| `tests/Fixtures/ForbiddenReferenceInReleaseOnly` | A forbidden `Reference` present **only when `Configuration == Release`** is caught. Invisible under MSBuild's default configuration; found because the checks evaluate every *declared* configuration. |
 | Roslyn, in memory (`SelfTests/SyntheticAssembly.cs`) | A synthetic assembly whose `AssemblyRef` table contains the forbidden name is caught; a clean one is not. Nothing touches disk. |
+| Synthetic directory tree (`SelfTests/BuildOutputLocatorSelfTests.cs`) | Verifying Release does not read an existing Debug DLL, and vice versa; each configuration is found independently; a missing one reports the expected path. |
+| Child processes (`SelfTests/ProcessRunnerSelfTests.cs`) | Normal exit, non-zero exit, ~1 MB on **both** streams without deadlocking, and a timeout that kills a grandchild process. |
 
-The fixtures are never built. They are only *evaluated*, which needs no compilation and does not even require
-the referenced projects to exist.
+The project fixtures are never built. They are only *evaluated*, which needs no compilation and does not even
+require the referenced projects to exist.
 
 The FG-ARCH-010 logic is tested the same way, against deliberately wrong registries: the real registry, being
 correct, can never demonstrate that the validator would notice if it were not.

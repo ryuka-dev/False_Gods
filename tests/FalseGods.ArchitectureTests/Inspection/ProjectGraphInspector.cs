@@ -1,17 +1,37 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 
 namespace FalseGods.ArchitectureTests.Inspection;
 
+/// <summary>Thrown when a configuration is requested that the project does not declare.</summary>
+public sealed class UnknownConfigurationException : Exception
+{
+    public UnknownConfigurationException(string projectPath, string configuration, IReadOnlyList<string> declared)
+        : base($"Configuration '{configuration}' is not declared by {Path.GetFileName(projectPath)}. " +
+               $"Declared configurations: {string.Join(", ", declared)}. " +
+               $"An undeclared configuration must be rejected, not evaluated — MSBuild happily evaluates one, " +
+               $"and every conditional reference guarded by a real configuration would then go unchecked. " +
+               $"Declare it in Directory.Build.props <Configurations> if it is genuinely supported.")
+    {
+        ProjectPath = projectPath;
+        Configuration = configuration;
+        DeclaredConfigurations = declared;
+    }
+
+    public string ProjectPath { get; }
+    public string Configuration { get; }
+    public IReadOnlyList<string> DeclaredConfigurations { get; }
+}
+
 /// <summary>A project's references as MSBuild actually evaluated them, for one configuration.</summary>
 public sealed record EvaluatedReferences(
     string ProjectPath,
     string Configuration,
+    IReadOnlyList<string> DeclaredConfigurations,
     IReadOnlyList<EvaluatedProjectReference> ProjectReferences,
     IReadOnlyList<EvaluatedAssemblyReference> AssemblyReferences)
 {
@@ -42,7 +62,7 @@ public sealed record EvaluatedProjectReference(string Identity, string ProjectNa
 public sealed record EvaluatedAssemblyReference(string Identity, string AssemblyName, string? HintPathFileName, string DefiningProject);
 
 /// <summary>
-/// Reads a project's references from MSBuild's own evaluation, via <c>dotnet msbuild -getItem:...</c>.
+/// Reads a project's references from MSBuild's own evaluation, via <c>dotnet msbuild -getProperty/-getItem</c>.
 ///
 /// Why not parse the XML? Because the XML is not the graph. Items arrive from imported files
 /// (Directory.Build.props, the SDK), and item conditions depend on evaluated properties. A regex over
@@ -52,31 +72,57 @@ public sealed record EvaluatedAssemblyReference(string Identity, string Assembly
 ///
 /// This also catches a reference that is present but UNUSED, which no amount of assembly-metadata
 /// inspection can: an unused reference never reaches the compiled AssemblyRef table.
+///
+/// The set of configurations is read from the project's evaluated <c>Configurations</c> property, not
+/// hardcoded. A reference hidden behind <c>Condition="'$(Configuration)' == 'Release'"</c> is only found
+/// if Release is actually evaluated, and a hardcoded list silently stops covering a configuration the
+/// day someone adds one.
 /// </summary>
 public static class ProjectGraphInspector
 {
-    /// <summary>Configurations worth evaluating: a reference can be added behind a Configuration condition.</summary>
-    public static readonly IReadOnlyList<string> AllConfigurations = new[] { "Debug", "Release" };
+    private static readonly TimeSpan EvaluationTimeout = TimeSpan.FromSeconds(120);
 
     private static readonly ConcurrentDictionary<(string Project, string Configuration), EvaluatedReferences> Cache = new();
+    private static readonly ConcurrentDictionary<string, IReadOnlyList<string>> DeclaredConfigurationsCache = new();
 
-    public static EvaluatedReferences Evaluate(string projectPath, string configuration = "Debug") =>
-        Cache.GetOrAdd((projectPath, configuration), key => EvaluateCore(key.Project, key.Configuration));
+    /// <summary>The configurations the project declares, from MSBuild evaluation of <c>$(Configurations)</c>.</summary>
+    public static IReadOnlyList<string> GetDeclaredConfigurations(string projectPath) =>
+        DeclaredConfigurationsCache.GetOrAdd(projectPath, path => EvaluateCore(path, configuration: null).DeclaredConfigurations);
 
-    /// <summary>Evaluates every configuration in <see cref="AllConfigurations"/>.</summary>
-    public static IReadOnlyList<EvaluatedReferences> EvaluateAllConfigurations(string projectPath) =>
-        AllConfigurations.Select(c => Evaluate(projectPath, c)).ToList();
-
-    private static EvaluatedReferences EvaluateCore(string projectPath, string configuration)
+    /// <summary>Evaluates one configuration. Throws <see cref="UnknownConfigurationException"/> for an undeclared one.</summary>
+    public static EvaluatedReferences Evaluate(string projectPath, string configuration)
     {
         if (!File.Exists(projectPath))
             throw new FileNotFoundException($"Project to evaluate does not exist: {projectPath}", projectPath);
 
+        var declared = GetDeclaredConfigurations(projectPath);
+
+        if (!declared.Contains(configuration, StringComparer.OrdinalIgnoreCase))
+            throw new UnknownConfigurationException(projectPath, configuration, declared);
+
+        return Cache.GetOrAdd((projectPath, configuration), key => EvaluateCore(key.Project, key.Configuration));
+    }
+
+    /// <summary>Evaluates every configuration the project declares.</summary>
+    public static IReadOnlyList<EvaluatedReferences> EvaluateAllConfigurations(string projectPath)
+    {
+        if (!File.Exists(projectPath))
+            throw new FileNotFoundException($"Project to evaluate does not exist: {projectPath}", projectPath);
+
+        return GetDeclaredConfigurations(projectPath)
+            .Select(configuration => Evaluate(projectPath, configuration))
+            .ToList();
+    }
+
+    private static EvaluatedReferences EvaluateCore(string projectPath, string? configuration)
+    {
         var json = RunMsBuild(projectPath, configuration);
 
         using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
 
-        var items = document.RootElement.TryGetProperty("Items", out var i) ? i : default;
+        var declared = ReadDeclaredConfigurations(root);
+        var items = root.TryGetProperty("Items", out var i) ? i : default;
 
         var projectReferences = ReadItems(items, "ProjectReference")
             .Select(e => new EvaluatedProjectReference(
@@ -99,7 +145,26 @@ public static class ProjectGraphInspector
             })
             .ToList();
 
-        return new EvaluatedReferences(projectPath, configuration, projectReferences, assemblyReferences);
+        return new EvaluatedReferences(
+            projectPath,
+            configuration ?? "(msbuild default)",
+            declared,
+            projectReferences,
+            assemblyReferences);
+    }
+
+    private static IReadOnlyList<string> ReadDeclaredConfigurations(JsonElement root)
+    {
+        if (!root.TryGetProperty("Properties", out var properties) ||
+            !properties.TryGetProperty("Configurations", out var value) ||
+            value.ValueKind != JsonValueKind.String)
+        {
+            return Array.Empty<string>();
+        }
+
+        return (value.GetString() ?? string.Empty)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
     }
 
     private static IEnumerable<JsonElement> ReadItems(JsonElement items, string itemType)
@@ -119,45 +184,50 @@ public static class ProjectGraphInspector
             ? value.GetString() ?? string.Empty
             : string.Empty;
 
-    private static string RunMsBuild(string projectPath, string configuration)
+    private static string RunMsBuild(string projectPath, string? configuration)
     {
-        var startInfo = new ProcessStartInfo("dotnet")
+        var arguments = new List<string>
         {
-            WorkingDirectory = RepoLayout.Root,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
+            "msbuild",
+            projectPath,
+            // Requesting a property alongside items makes the output JSON, and gets the declared
+            // configurations in the same evaluation rather than a second process.
+            "-getProperty:Configurations",
+            "-getItem:ProjectReference",
+            "-getItem:Reference",
+            "-nologo",
+            // Keep the checks usable in constrained/sandboxed environments.
+            "--disable-build-servers",
         };
 
-        startInfo.ArgumentList.Add("msbuild");
-        startInfo.ArgumentList.Add(projectPath);
-        startInfo.ArgumentList.Add("-getItem:ProjectReference");
-        startInfo.ArgumentList.Add("-getItem:Reference");
-        startInfo.ArgumentList.Add($"-p:Configuration={configuration}");
-        startInfo.ArgumentList.Add("-nologo");
-        // Keep the checks usable in constrained/sandboxed environments.
-        startInfo.ArgumentList.Add("--disable-build-servers");
+        if (configuration is not null)
+            arguments.Add($"-p:Configuration={configuration}");
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start 'dotnet msbuild'.");
+        var result = ProcessRunner.Run("dotnet", arguments, RepoLayout.Root, EvaluationTimeout);
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+        var describedConfiguration = configuration ?? "(msbuild default)";
 
-        if (!process.WaitForExit(milliseconds: 120_000))
+        if (result.TimedOut)
         {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException($"'dotnet msbuild -getItem' timed out evaluating {projectPath}.");
+            throw new TimeoutException(
+                $"'dotnet msbuild -getItem' timed out after {EvaluationTimeout.TotalSeconds:0}s " +
+                $"evaluating {projectPath} ({describedConfiguration}).{Environment.NewLine}" +
+                Describe(result));
         }
 
         // Exit code, never text matching: an evaluation that failed says so by failing.
-        if (process.ExitCode != 0)
+        if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
-                $"'dotnet msbuild -getItem' failed with exit code {process.ExitCode} for {projectPath} ({configuration}).{Environment.NewLine}" +
-                $"stdout:{Environment.NewLine}{stdout}{Environment.NewLine}stderr:{Environment.NewLine}{stderr}");
+                $"'dotnet msbuild -getItem' failed with exit code {result.ExitCode} " +
+                $"for {projectPath} ({describedConfiguration}).{Environment.NewLine}" +
+                Describe(result));
         }
 
-        return stdout;
+        return result.StandardOutput;
     }
+
+    private static string Describe(ProcessResult result) =>
+        $"stdout:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}" +
+        $"stderr:{Environment.NewLine}{result.StandardError}";
 }

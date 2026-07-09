@@ -15,6 +15,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
 
+    <!--
+      The configurations this repository supports, declared explicitly rather than left to the SDK's
+      default. The architecture checks and scripts/verify.ps1 both READ this list from MSBuild
+      evaluation instead of hardcoding one, so adding a configuration here is enough to make every
+      project-graph check cover it — and an unknown configuration is rejected rather than silently
+      going unchecked.
+    -->
+    <Configurations>Debug;Release</Configurations>
+
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>

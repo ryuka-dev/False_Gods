@@ -96,7 +96,9 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the structure and
   `FalseGods.Plugin` cannot see the ST adapter. Using a forbidden type does not compile.
 - **Two automated checks exist and fail when run** — `FG-ARCH-002` (the plugin must not reference the optional
   ST adapter, checked at both the MSBuild project graph and the compiled `AssemblyRef` table) and `FG-ARCH-010`
-  (every check cites a registered rule id). Run them with `.\scripts\verify.ps1`.
+  (every check cites a registered rule id). Run them with `.\scripts\verify.ps1`, optionally
+  `-Configuration Release`. The project graph is evaluated for every configuration declared in
+  `Directory.Build.props`, and the metadata check reads only the assembly built by that same run.
 - **The remaining eight rules have no automated check yet**, and **no CI runs any of them**. Nothing here is
   `Required in CI`. The compiler stops you *using* a forbidden type; it does not stop you *adding the reference*.
 
@@ -139,8 +141,10 @@ machine with no game and no BepInEx installed, which is what makes the domain un
 1. Copy `LocalPaths.props.example` → `LocalPaths.props` and fill in your paths
    (SULFUR managed dir, SULFUR Together source, BepInEx core/plugins).
    `LocalPaths.props` is gitignored — do not commit it.
-2. `.\scripts\verify.ps1` — checks the SDK, builds the solution, runs the architecture checks, and runs
-   `git diff --check`. Takes about ten seconds. If a required path is missing, the build tells you which one.
+2. `.\scripts\verify.ps1` — validates the SDK and configuration, builds the solution, runs the architecture
+   checks against *that* build, and runs `git diff HEAD --check` (staged and unstaged). Takes about twenty
+   seconds. Add `-Configuration Release` to verify that configuration. If a required path is missing, the build
+   tells you which one.
 3. (Optional) Regenerate the decompile reference — see `Decompiled/README.md`.
 
 ## Reference environment (verified during investigation)

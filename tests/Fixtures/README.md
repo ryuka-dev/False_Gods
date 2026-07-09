@@ -12,6 +12,7 @@ eyeballing the output.
 | `AllowedGraph` | A conforming graph passes — the checker is not simply always-fail. |
 | `ForbiddenProjectReference` | An **unused** `ProjectReference` to the ST adapter is still caught. It has no source files at all, so nothing about it could reach a compiled `AssemblyRef` table. This is the case only the project-graph layer can see. |
 | `ForbiddenReferenceViaImport` | A `Reference` injected by an **imported** `.props` behind a **condition** is still caught. This is the case a regex over the `.csproj` would miss. |
+| `ForbiddenReferenceInReleaseOnly` | A `Reference` that exists **only when `Configuration == Release`** is still caught. Under MSBuild's default configuration the project is spotless. Found because the checks evaluate every configuration declared in `$(Configurations)`, read from MSBuild rather than hardcoded. |
 
 `ForbiddenProjectReference` deliberately points at the real
 `src/FalseGods.Integration.SulfurTogether` project, so the fixture stays honest if that project moves.
