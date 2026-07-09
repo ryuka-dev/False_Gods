@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    FG-ARCH-003's violation, in the form the compiled-metadata layer cannot see: an UNUSED ProjectReference
+    from a presentation-shaped project to FalseGods.Protocol.
+
+    This project contains NO source files. Were it compiled, its AssemblyRef table would name neither
+    Protocol nor anything else — an unused reference is never emitted. It would look clean in metadata and
+    still put a wire DTO one `using` away from presentation code.
+
+    It points at the real src/FalseGods.Protocol project, so the fixture stays honest if that project moves.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>ForbiddenProtocolReference</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+    <ProjectReference Include="..\..\..\src\FalseGods.Protocol\FalseGods.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>
