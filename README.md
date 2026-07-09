@@ -6,9 +6,12 @@ A SULFUR mod that adds original bosses and dedicated boss-arena maps. It is desi
 - **[SULFUR Together](../SULFUR%20Together)** multiplayer, where the **host is authoritative** over the
   boss, the arena, and the combat flow.
 
-> **Status: feasibility investigation only.** This repository currently contains research documents and a
-> local reverse-engineering reference. No plugin code, boss, or arena assets exist yet. The first
-> implementation target is a single boss in a **fixed** arena; procedural arena assembly is a later goal.
+> **Status: research + an empty module skeleton.** This repository contains the design documents, a local
+> reverse-engineering reference, and the eight project files that encode the architecture's dependency graph.
+> **The projects contain no source files**: there is no plugin, boss, arena, or asset yet. The skeleton exists
+> first on purpose — the compiler enforces the module boundaries the moment the reference lists exist, so the
+> first boss grows inside them rather than being retrofitted into them later. The first implementation target
+> is a single boss in a **fixed** arena; procedural arena assembly is a later goal.
 
 ## Goals & principles
 
@@ -90,17 +93,26 @@ the `FG-ARCH-*` rule registry, CI levels, and exception process — lives in
 
 | Path | Purpose | Committed? |
 |------|---------|-----------|
-| `Docs/` | Research reports (see `Docs/README.md`) | ✅ |
+| `Docs/` | Research reports and architecture (see `Docs/README.md`) | ✅ |
+| `src/` | The eight module projects — reference lists only, no source yet | ✅ |
+| `False Gods.slnx` | Solution | ✅ |
+| `Directory.Build.props` / `.targets` | Shared build settings; machine-path guards | ✅ |
 | `LocalPaths.props.example` | Template for machine-specific paths | ✅ |
 | `LocalPaths.props` | Your real paths (copy of the example) | ❌ gitignored |
 | `Decompiled/` | Local reverse-engineering reference (see `Decompiled/README.md`) | ❌ gitignored |
 | `ExtractedAssets/` | Any assets pulled from your local game install | ❌ gitignored |
 
+The `src/` projects map one-to-one onto [Docs/Architecture.md §2](Docs/Architecture.md), and their reference
+lists *are* the dependency rules — a forbidden dependency is a compile error, not a review comment.
+`FalseGods.Core`, `.Protocol`, `.RuntimeContracts`, and `.Application` build with no game installed at all.
+
 ## Setup
 
 1. Copy `LocalPaths.props.example` → `LocalPaths.props` and fill in your paths
    (SULFUR managed dir, SULFUR Together source, BepInEx core/plugins).
-2. (Optional) Regenerate the decompile reference — see `Decompiled/README.md`.
+2. `dotnet build "False Gods.slnx"`.
+   The four inner projects need nothing; the four outer ones will tell you which path is missing.
+3. (Optional) Regenerate the decompile reference — see `Decompiled/README.md`.
 
 ## Reference environment (verified during investigation)
 

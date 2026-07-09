@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FalseGods.Application/FalseGods.Application.csproj" />
+    <Project Path="src/FalseGods.Core/FalseGods.Core.csproj" />
+    <Project Path="src/FalseGods.Integration.Sulfur/FalseGods.Integration.Sulfur.csproj" />
+    <Project Path="src/FalseGods.Integration.SulfurTogether/FalseGods.Integration.SulfurTogether.csproj" />
+    <Project Path="src/FalseGods.Plugin/FalseGods.Plugin.csproj" />
+    <Project Path="src/FalseGods.Protocol/FalseGods.Protocol.csproj" />
+    <Project Path="src/FalseGods.RuntimeContracts/FalseGods.RuntimeContracts.csproj" />
+    <Project Path="src/FalseGods.UnityRuntime/FalseGods.UnityRuntime.csproj" />
+  </Folder>
+</Solution>

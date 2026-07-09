@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FG-ARCH-001 — Core references the .NET base class library and NOTHING else.
+
+    Not UnityEngine. Not the game DLLs. Not BepInEx or Harmony. Not A* or Addressables.
+    Not LiteNetLib or Steamworks. Not FalseGods.Protocol, and not FalseGods.RuntimeContracts.
+
+    Adding any <Reference> or <ProjectReference> to this file IS the violation. There is no
+    legitimate exception. See Docs/DependencyRules.md §1-§2 and Docs/Architecture.md §3.
+
+    Core owns the boss/encounter domain and only the abstractions the domain itself calls
+    (ISimulationClock, IAuthoritativeRandom, IEncounterParticipantQuery). Asset, navigation,
+    scene, loading, channel, session, roster and replication ports live further out — see
+    Docs/Architecture.md §6.
+
+    The practical consequence, and the point of the whole exercise: this project compiles and its
+    tests run on a machine with no SULFUR installed and no Unity anywhere.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Core</AssemblyName>
+    <RootNamespace>FalseGods.Core</RootNamespace>
+  </PropertyGroup>
+
+</Project>

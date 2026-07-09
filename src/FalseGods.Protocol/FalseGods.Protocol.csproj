@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FalseGods.Protocol — the transport-neutral wire contract.
+
+    May reference: FalseGods.Core.
+    Must NOT reference: LiteNetLib, Steamworks, concrete SULFUR Together message types,
+    UnityEngine presentation objects, or FalseGods.RuntimeContracts.
+
+    Must NOT contain PresentationState / PresentationEvent — those are presentation contracts and
+    live in FalseGods.RuntimeContracts (Docs/Architecture.md §7).
+
+    Boss and arena wire state stay separate here (FG-ARCH-008): BossSnapshot vs ArenaSnapshot,
+    BossEvent vs ArenaEvent, composed only by EncounterBaseline. See Docs/ADRs/ADR-005.
+
+    Protocol stops at FalseGods.Application. Nothing further out may reference it —
+    in particular FalseGods.UnityRuntime (FG-ARCH-003).
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Protocol</AssemblyName>
+    <RootNamespace>FalseGods.Protocol</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FalseGods.Core\FalseGods.Core.csproj" />
+  </ItemGroup>
+
+</Project>

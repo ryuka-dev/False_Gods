@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FalseGods.Integration.SulfurTogether — the OPTIONAL multiplayer adapter.
+
+    This is a COMPANION BepInEx plugin, shipped and installed separately from FalseGods.Plugin.
+    It declares a hard [BepInDependency] on the base plugin's GUID — a string, not a CLR reference —
+    which pins load order (the base plugin's Awake completes first) while coupling nothing. It then
+    self-registers through the FalseGodsIntegrations broker in RuntimeContracts.
+
+    Note what is NOT referenced below:
+
+      - FalseGods.Plugin        The dependency runs the other way. This project references only the
+                                stable contract assembly. See Docs/ADRs/ADR-004.
+      - FalseGods.Protocol      IEncounterChannel carries EncodedPayload + MessageDelivery. The
+                                adapter ships bytes; it never sees a wire DTO.
+      - FalseGods.Application   The seam is the RuntimeContracts capability ports, nothing wider.
+      - SULFUR Together itself  In the current ST source, ~189 types are `internal` to 38 `public`,
+                                with no [InternalsVisibleTo]. CoopConnection, ArenaLockdownManager,
+                                NetBossEncounterManager, NetLoadBarrier and RemotePlayerRegistryManager
+                                are all internal. There is nothing useful to compile against, so this
+                                adapter reaches them by guarded reflection — until ST exposes a public
+                                integration bridge, which is the preferred long-term path and an open
+                                coordination item. See Docs/MultiplayerLoadingContract.md §5.1.1.
+      - 0Harmony                Harmony patches belong in Integration.Sulfur (FG-ARCH-006).
+                                Reflection is not a patch: this adapter reflects into ST internals,
+                                and ONLY into ST internals.
+
+    That the adapter compiles without SULFUR Together present is not an accident of the skeleton —
+    it is the shape of the design.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Integration.SulfurTogether</AssemblyName>
+    <RootNamespace>FalseGods.Integration.SulfurTogether</RootNamespace>
+    <RequiresGameAssemblies>true</RequiresGameAssemblies>
+    <RequiresBepInEx>true</RequiresBepInEx>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Its own BepInEx plugin entry point. -->
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- BaseUnityPlugin derives from MonoBehaviour. -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

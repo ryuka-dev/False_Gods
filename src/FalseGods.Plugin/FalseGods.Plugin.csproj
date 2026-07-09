@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FalseGods.Plugin — the BepInEx entry point and Composition Root.
+
+    ██ FG-ARCH-002 ██  DO NOT ADD A REFERENCE TO FalseGods.Integration.SulfurTogether.
+
+    Not a ProjectReference. Not a Reference. Not a type in a field, parameter or return signature.
+    Not a typeof(). Not a type touched on a static-initialization path.
+
+    An assembly reference is resolved at type-load, not at a runtime null check. The moment this
+    project references the adapter, a player without SULFUR Together installed gets a
+    FileNotFoundException at startup — and you will not see it, because your machine has ST.
+    Single-player dies silently, on someone else's computer. That is why the rule is enforced by
+    the absence below and not by a comment in a method.
+
+    The adapter arrives the other way round: it is a separate companion BepInEx plugin that
+    references FalseGods.RuntimeContracts and self-registers through the FalseGodsIntegrations
+    broker. This project is that broker's ONLY permitted reader. Everything else is
+    constructor-injected from here. See Docs/ADRs/ADR-004 and Docs/Architecture.md §4.
+
+    May reference: Core, Protocol, RuntimeContracts, Application, UnityRuntime,
+                   Integration.Sulfur, BepInEx.
+    Must NOT contain: substantive boss mechanics.
+
+    Integration.Sulfur IS referenced, and that is correct: the base game is always present.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Plugin</AssemblyName>
+    <RootNamespace>FalseGods.Plugin</RootNamespace>
+    <RequiresGameAssemblies>true</RequiresGameAssemblies>
+    <RequiresBepInEx>true</RequiresBepInEx>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\FalseGods.Protocol\FalseGods.Protocol.csproj" />
+    <ProjectReference Include="..\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+    <ProjectReference Include="..\FalseGods.Application\FalseGods.Application.csproj" />
+    <ProjectReference Include="..\FalseGods.UnityRuntime\FalseGods.UnityRuntime.csproj" />
+    <ProjectReference Include="..\FalseGods.Integration.Sulfur\FalseGods.Integration.Sulfur.csproj" />
+    <!-- ↑ There is deliberately no FalseGods.Integration.SulfurTogether here. See FG-ARCH-002 above. -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- BaseUnityPlugin derives from MonoBehaviour. -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -164,7 +164,13 @@ Deliberately separate: a rule is a claim about the design, and a check is a prog
 The rules above are the authority. The enforcement document carries the stable rule ids (`FG-ARCH-001` …) that
 every automated check must cite, and none of the rule text is duplicated there.
 
-Nothing is enforced mechanically yet; every rule is currently `Planned`.
+**The module skeleton now exists**, so §1's allow-list is expressed as real `.csproj` reference lists and the
+compiler already rejects the common violations: Core cannot see `UnityEngine`, `UnityRuntime` cannot see
+`FalseGods.Protocol`, `RuntimeContracts` cannot see anything but Core, only `Integration.Sulfur` can see
+`0Harmony`, and `FalseGods.Plugin` cannot see the ST adapter. No automated *check* runs yet — every rule's
+check is still `Planned` — and the compiler cannot stop someone from adding a forbidden reference in the first
+place. See [ArchitectureEnforcement.md §13](ArchitectureEnforcement.md) for exactly what is and is not
+protected today.
 
 ## 8. How to use this during development
 

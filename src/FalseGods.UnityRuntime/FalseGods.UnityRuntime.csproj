@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FG-ARCH-003 — UnityRuntime does NOT reference FalseGods.Protocol.
+
+    Look at the ProjectReference list below: Core and RuntimeContracts, and no Protocol. That
+    absence is the rule. Presentation is driven by PresentationState / PresentationEvent, produced
+    by the mapper in FalseGods.Application (Docs/Architecture.md §7).
+
+    The moment a BossPresentation method takes a BossSnapshot, this project stops compiling. That is
+    the entire reason the reference is missing rather than merely discouraged: a wire DTO carries
+    authoritative fields, and reading one "just for display" is one line away from acting on it.
+
+    May reference: FalseGods.Core, FalseGods.RuntimeContracts, UnityEngine.
+    Must NOT contain: authoritative damage / attack selection / phase / death / RNG outcomes.
+
+    Unity module references are added here as presentation actually needs them — start minimal.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.UnityRuntime</AssemblyName>
+    <RootNamespace>FalseGods.UnityRuntime</RootNamespace>
+    <RequiresGameAssemblies>true</RequiresGameAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityEngine">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

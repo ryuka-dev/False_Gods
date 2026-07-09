@@ -1,8 +1,9 @@
 # False Gods — Investigation Docs
 
 Feasibility investigation for building an original boss **arena map** for SULFUR that works in vanilla
-single-player and in host-authoritative SULFUR Together multiplayer. **Investigation only** — no
-implementation yet.
+single-player and in host-authoritative SULFUR Together multiplayer. **No gameplay implementation yet** — the
+repository holds these reports plus an empty module skeleton under `src/`, whose project reference lists encode
+the boundaries below ([ArchitectureEnforcement.md §13](ArchitectureEnforcement.md)).
 
 All claims are grounded in the decompiled game assemblies (`../Decompiled/`, gitignored) and in SULFUR
 Together's own docs/source. Concrete type/method names are cited; runtime behaviour is marked *proposed /

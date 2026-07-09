@@ -1,0 +1,24 @@
+<Project>
+
+  <!--
+    Fail early, with a message that says what to do, when a project that needs the game or BepInEx
+    cannot find them. A project opts in by setting RequiresGameAssemblies / RequiresBepInEx.
+  -->
+
+  <Target Name="FalseGodsCheckLocalPaths" BeforeTargets="ResolveAssemblyReferences">
+
+    <Error Condition="'$(RequiresGameAssemblies)' == 'true' AND '$(SulfurManagedDir)' == ''"
+           Text="$(MSBuildProjectName) needs the game's managed assemblies, but SulfurManagedDir is not set. Copy LocalPaths.props.example to LocalPaths.props and fill in your SULFUR install path." />
+
+    <Error Condition="'$(RequiresGameAssemblies)' == 'true' AND '$(SulfurManagedDir)' != '' AND !Exists('$(SulfurManagedDir)\UnityEngine.CoreModule.dll')"
+           Text="SulfurManagedDir is set to '$(SulfurManagedDir)' but UnityEngine.CoreModule.dll is not there. Point it at &lt;SULFUR&gt;\Sulfur_Data\Managed." />
+
+    <Error Condition="'$(RequiresBepInEx)' == 'true' AND '$(BepInExCoreDir)' == ''"
+           Text="$(MSBuildProjectName) needs BepInEx, but BepInExCoreDir is not set. Copy LocalPaths.props.example to LocalPaths.props and fill in your BepInEx core path." />
+
+    <Error Condition="'$(RequiresBepInEx)' == 'true' AND '$(BepInExCoreDir)' != '' AND !Exists('$(BepInExCoreDir)\BepInEx.dll')"
+           Text="BepInExCoreDir is set to '$(BepInExCoreDir)' but BepInEx.dll is not there. Point it at the BepInEx\core folder of the profile you run." />
+
+  </Target>
+
+</Project>

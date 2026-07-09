@@ -1,0 +1,41 @@
+<Project>
+
+  <!--
+    Settings shared by every False Gods assembly.
+
+    This file deliberately does NOT add any <Reference> or <ProjectReference>. Each project declares
+    exactly what it is allowed to see, and nothing more, so that a forbidden dependency is a compile
+    error rather than a review comment. The allow-list is Docs/DependencyRules.md §1.
+  -->
+
+  <PropertyGroup>
+    <!-- SULFUR is Unity + Mono; BepInEx plugins target the game's profile. Same as SULFUR Together. -->
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+
+    <!--
+      An unresolved <Reference> is a broken build, not a footnote. Without this, a typo'd HintPath
+      degrades to warning MSB3245 and the assembly silently compiles against nothing.
+    -->
+    <MSBuildWarningsAsErrors>$(MSBuildWarningsAsErrors);MSB3245</MSBuildWarningsAsErrors>
+  </PropertyGroup>
+
+  <!--
+    Machine-specific paths (game install, BepInEx core). Gitignored.
+    Copy LocalPaths.props.example → LocalPaths.props and fill in your own.
+
+    Only the four OUTER projects need these. FalseGods.Core, .Protocol, .RuntimeContracts and
+    .Application build on any machine with no game installed at all — that is the boundary working.
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)LocalPaths.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)LocalPaths.props')" />
+
+</Project>

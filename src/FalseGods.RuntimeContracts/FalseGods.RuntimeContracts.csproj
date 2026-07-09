@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FG-ARCH-007 — RuntimeContracts stays dependency-light.
+
+    May reference: FalseGods.Core.
+    Must NOT reference: FalseGods.Protocol, UnityEngine, BepInEx, SULFUR Together, LiteNetLib,
+    Steamworks, or any concrete implementation.
+
+    This assembly is the stable seam that the OPTIONAL SULFUR Together adapter references. Every
+    dependency added here is a dependency that adapter is forced to carry, so the emptiness of this
+    reference list is a feature, not an oversight. See Docs/ADRs/ADR-004 and ADR-006.
+
+    It holds:
+      - presentation contracts  : PresentationState, PresentationEvent, IEncounterPresentation
+      - outer capability ports  : IPlayerRoster, IMultiplayerSession, IEncounterChannel,
+                                  IArenaLockdownPort, IRemoteNpcActivationPort, IEncounterReadyGate
+      - transport-neutral types : SessionPeerId, EncodedPayload, MessageDelivery
+      - the integration seam    : IFalseGodsIntegration, IIntegrationRegistration,
+                                  and the single-slot FalseGodsIntegrations broker
+      - ILogger
+
+    The broker is the ONE piece of static mutable state in the design, and it is bounded to:
+    one slot, one type, one reader (FalseGods.Plugin), no Resolve<T>(), token-scoped revocation.
+    Relaxing any of those five is what "violating ADR-004" means. Nothing else static goes here.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.RuntimeContracts</AssemblyName>
+    <RootNamespace>FalseGods.RuntimeContracts</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FalseGods.Core\FalseGods.Core.csproj" />
+  </ItemGroup>
+
+</Project>

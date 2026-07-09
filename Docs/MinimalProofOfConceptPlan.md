@@ -80,7 +80,9 @@ This is not the final first boss. It is a temporary test actor proving the False
 
 **Follow the vertical-slice order** ([DefinitionOfDone.md §3](DefinitionOfDone.md)): establish the minimum
 module skeleton (`FalseGods.Core` / `.Protocol` / `.RuntimeContracts` / `.Application` / `.UnityRuntime` /
-`.Plugin` + `Integration.Sulfur`, per [Architecture.md](Architecture.md)) → arena PoC (Phase A) → one temporary
+`.Plugin` + `Integration.Sulfur`, per [Architecture.md](Architecture.md)) — **done: `src/`, project reference
+lists only, no source files** ([ArchitectureEnforcement.md §13](ArchitectureEnforcement.md)) → arena PoC
+(Phase A) → one temporary
 `BossSimulation` in Core → one `BossPresentation` in UnityRuntime, driven through
 `PresentationState`/`PresentationEvent` → single-player → transport-neutral snapshots/events in Protocol plus
 the Application mapper → connect through the **optional, separately-loaded**

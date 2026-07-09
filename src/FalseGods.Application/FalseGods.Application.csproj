@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FalseGods.Application — encounter and arena orchestration.
+
+    May reference: FalseGods.Core, FalseGods.Protocol, FalseGods.RuntimeContracts.
+    Must NOT reference: UnityEngine, Harmony, SULFUR Together, LiteNetLib, Steamworks,
+    or any presentation implementation.
+
+    This is the only place that knows BOTH vocabularies, and therefore the only place the mapper
+    can live (Docs/Architecture.md §7):
+
+        Network DTO (Protocol) ─┐
+                                ├─► mapper ─► PresentationState / PresentationEvent ─► presentation
+        Core domain state ──────┘
+
+    It also owns the ports whose consumer lives here: IEncounterReplication, IDamagePort, ISpawnPort,
+    INavigationPort, IArenaAssetProvider, IVanillaAssetProvider, IArenaRealization,
+    ISceneLifecycleEvents. Note it has no Unity reference — the arena/encounter flow is testable
+    without an engine, which is the dividend of drawing the boundary.
+
+    Replication is application logic over an opaque channel: Protocol DTOs are serialized here into
+    EncodedPayload, so the transport adapter never sees a DTO and never references Protocol.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Application</AssemblyName>
+    <RootNamespace>FalseGods.Application</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\FalseGods.Protocol\FalseGods.Protocol.csproj" />
+    <ProjectReference Include="..\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,102 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FalseGods.Integration.Sulfur — the anti-corruption layer to the base game.
+
+    This is the ONLY assembly that may:
+      - apply Harmony patches                       (FG-ARCH-006; an exception needs its own ADR)
+      - reflect into SULFUR / base-game internals   (Docs/DependencyRules.md §5)
+      - operate AstarPath directly                  (behind INavigationPort)
+      - operate Addressables for vanilla assets     (behind IVanillaAssetProvider)
+
+    It may NOT reflect into SULFUR Together internals — that is the other adapter's job, and the
+    split is by TARGET, not by "adapters may reflect". Note the absence of any ST reference below.
+
+    It implements ports declared in FalseGods.Application (IDamagePort, ISpawnPort, INavigationPort,
+    IArenaAssetProvider, IVanillaAssetProvider, IArenaRealization, ISceneLifecycleEvents) and the
+    single-player implementations of the RuntimeContracts capability ports (IPlayerRoster,
+    IArenaLockdownPort, IRemoteNpcActivationPort).
+
+    It must NOT contain boss mechanics or the wire protocol.
+
+    0Harmony lives in the BepInEx core folder, hence RequiresBepInEx — but note there is no
+    reference to BepInEx.dll itself: this adapter is a library, not a plugin entry point.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Integration.Sulfur</AssemblyName>
+    <RootNamespace>FalseGods.Integration.Sulfur</RootNamespace>
+    <RequiresGameAssemblies>true</RequiresGameAssemblies>
+    <RequiresBepInEx>true</RequiresBepInEx>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\FalseGods.Protocol\FalseGods.Protocol.csproj" />
+    <ProjectReference Include="..\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+    <ProjectReference Include="..\FalseGods.Application\FalseGods.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Harmony (from BepInEx core) — the only project allowed to reference it. -->
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCoreDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Game assemblies -->
+    <Reference Include="PerfectRandom.Sulfur.Core">
+      <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PerfectRandom.Sulfur.Gameplay">
+      <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.Gameplay.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PerfectRandom.Sulfur.LevelGeneration">
+      <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.LevelGeneration.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(SulfurManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="netstandard">
+      <HintPath>$(SulfurManagedDir)\netstandard.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Navigation: A* Pathfinding Project (NOT Unity NavMesh) — see Docs/ADRs/ADR-002. -->
+    <Reference Include="AstarPathfindingProject">
+      <HintPath>$(SulfurManagedDir)\AstarPathfindingProject.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Addressables: how vanilla content is resolved from the player's own install. -->
+    <Reference Include="Unity.Addressables">
+      <HintPath>$(SulfurManagedDir)\Unity.Addressables.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.ResourceManager">
+      <HintPath>$(SulfurManagedDir)\Unity.ResourceManager.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity engine modules -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
