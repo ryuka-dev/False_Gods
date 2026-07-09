@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    The violation the AssemblyRef layer is blind to: a forbidden ProjectReference that nothing uses.
+
+    This project contains NO source files. Were it compiled, its AssemblyRef table would be empty of the
+    adapter, because an unused reference is never emitted. It would ship looking clean, and then fail at
+    type-load on a machine where the adapter DLL is absent — which is exactly the bug FG-ARCH-002 exists
+    to prevent, and exactly why the project-graph layer is not optional.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>ForbiddenProjectReference</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\FalseGods.Integration.SulfurTogether\FalseGods.Integration.SulfurTogether.csproj" />
+  </ItemGroup>
+
+</Project>

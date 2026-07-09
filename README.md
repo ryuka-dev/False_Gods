@@ -85,9 +85,20 @@ coupling), False Gods establishes strict boundaries **before** implementation:
   base classes** for original bosses.
 
 See [Docs/Architecture.md](Docs/Architecture.md) for the structure and
-[Docs/DependencyRules.md](Docs/DependencyRules.md) for the rules. How those rules will be checked mechanically —
-the `FG-ARCH-*` rule registry, CI levels, and exception process — lives in
-[Docs/ArchitectureEnforcement.md](Docs/ArchitectureEnforcement.md); none of it is implemented yet.
+[Docs/DependencyRules.md](Docs/DependencyRules.md) for the rules. How those rules are checked mechanically — the
+`FG-ARCH-*` rule registry, CI levels, and exception process — lives in
+[Docs/ArchitectureEnforcement.md](Docs/ArchitectureEnforcement.md).
+
+**Enforcement status.** Partial, and the document is precise about which part:
+
+- The **project reference graph already gives compile-time protection** for several rules. Core cannot see
+  `UnityEngine`; `UnityRuntime` cannot see `FalseGods.Protocol`; only `Integration.Sulfur` can see `0Harmony`;
+  `FalseGods.Plugin` cannot see the ST adapter. Using a forbidden type does not compile.
+- **Two automated checks exist and fail when run** — `FG-ARCH-002` (the plugin must not reference the optional
+  ST adapter, checked at both the MSBuild project graph and the compiled `AssemblyRef` table) and `FG-ARCH-010`
+  (every check cites a registered rule id). Run them with `.\scripts\verify.ps1`.
+- **The remaining eight rules have no automated check yet**, and **no CI runs any of them**. Nothing here is
+  `Required in CI`. The compiler stops you *using* a forbidden type; it does not stop you *adding the reference*.
 
 ## Repository layout
 
@@ -95,7 +106,11 @@ the `FG-ARCH-*` rule registry, CI levels, and exception process — lives in
 |------|---------|-----------|
 | `Docs/` | Research reports and architecture (see `Docs/README.md`) | ✅ |
 | `src/` | The eight module projects — reference lists only, no source yet | ✅ |
+| `tests/FalseGods.ArchitectureTests/` | The `FG-ARCH-*` boundary checks | ✅ |
+| `tests/Fixtures/` | Synthetic projects that prove the checks detect what they claim | ✅ |
+| `scripts/verify.ps1` | The one-command local verification loop | ✅ |
 | `False Gods.slnx` | Solution | ✅ |
+| `global.json` | Pins the .NET SDK the checks were verified against | ✅ |
 | `Directory.Build.props` / `.targets` | Shared build settings; machine-path guards | ✅ |
 | `LocalPaths.props.example` | Template for machine-specific paths | ✅ |
 | `LocalPaths.props` | Your real paths (copy of the example) | ❌ gitignored |
@@ -106,12 +121,26 @@ The `src/` projects map one-to-one onto [Docs/Architecture.md §2](Docs/Architec
 lists *are* the dependency rules — a forbidden dependency is a compile error, not a review comment.
 `FalseGods.Core`, `.Protocol`, `.RuntimeContracts`, and `.Application` build with no game installed at all.
 
+## Prerequisites
+
+| Requirement | Why | Needed by |
+|---|---|---|
+| **.NET SDK pinned by `global.json`** (10.0.301) | `.slnx` solutions, and MSBuild's `-getItem` evaluated-item output that the architecture checks read | everything |
+| **.NET Framework 4.7.2 Developer Pack** (targeting pack) | the plugins target `net472`, matching the game's Unity + Mono profile | building `src/` |
+| **SULFUR managed assemblies** (`<SULFUR>\Sulfur_Data\Managed`) | UnityEngine, the game DLLs, A\*, Addressables | the four outer projects |
+| **BepInEx 5 core** (`BepInEx\core` of the profile you run) | `BepInEx.dll`, `0Harmony.dll` | the four outer projects |
+| **`LocalPaths.props`** | tells the build where the two above live; gitignored, never committed | the four outer projects |
+
+`FalseGods.Core`, `.Protocol`, `.RuntimeContracts`, and `.Application` need only the first two — they build on a
+machine with no game and no BepInEx installed, which is what makes the domain unit-testable.
+
 ## Setup
 
 1. Copy `LocalPaths.props.example` → `LocalPaths.props` and fill in your paths
    (SULFUR managed dir, SULFUR Together source, BepInEx core/plugins).
-2. `dotnet build "False Gods.slnx"`.
-   The four inner projects need nothing; the four outer ones will tell you which path is missing.
+   `LocalPaths.props` is gitignored — do not commit it.
+2. `.\scripts\verify.ps1` — checks the SDK, builds the solution, runs the architecture checks, and runs
+   `git diff --check`. Takes about ten seconds. If a required path is missing, the build tells you which one.
 3. (Optional) Regenerate the decompile reference — see `Decompiled/README.md`.
 
 ## Reference environment (verified during investigation)

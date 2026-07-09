@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    A conforming Composition-Root-shaped graph: it references the production modules a plugin is allowed
+    to reference, and it does NOT reference FalseGods.Integration.SulfurTogether.
+
+    Its job is to fail the day the checker starts reporting violations that are not there.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>AllowedGraph</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\FalseGods.Core\FalseGods.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+    <ProjectReference Include="..\..\..\src\FalseGods.Integration.Sulfur\FalseGods.Integration.Sulfur.csproj" />
+  </ItemGroup>
+
+</Project>

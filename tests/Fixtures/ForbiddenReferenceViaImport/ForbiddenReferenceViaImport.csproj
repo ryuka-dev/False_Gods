@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    Nothing in THIS file names the forbidden assembly. The reference arrives through the import below,
+    behind a property condition. Grep the csproj and it is clean; evaluate the project and it is not.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>ForbiddenReferenceViaImport</AssemblyName>
+  </PropertyGroup>
+
+  <Import Project="ForbiddenReference.props" />
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\FalseGods.Core\FalseGods.Core.csproj" />
+  </ItemGroup>
+
+</Project>

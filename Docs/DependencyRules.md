@@ -167,9 +167,13 @@ every automated check must cite, and none of the rule text is duplicated there.
 **The module skeleton now exists**, so §1's allow-list is expressed as real `.csproj` reference lists and the
 compiler already rejects the common violations: Core cannot see `UnityEngine`, `UnityRuntime` cannot see
 `FalseGods.Protocol`, `RuntimeContracts` cannot see anything but Core, only `Integration.Sulfur` can see
-`0Harmony`, and `FalseGods.Plugin` cannot see the ST adapter. No automated *check* runs yet — every rule's
-check is still `Planned` — and the compiler cannot stop someone from adding a forbidden reference in the first
-place. See [ArchitectureEnforcement.md §13](ArchitectureEnforcement.md) for exactly what is and is not
+`0Harmony`, and `FalseGods.Plugin` cannot see the ST adapter.
+
+**Two automated checks now exist** — `FG-ARCH-002` and `FG-ARCH-010` — and they fail when run
+(`.\scripts\verify.ps1`). The other eight rules have no check, and **no rule is `Required in CI`**, because
+there is no CI. Remember what the compiler does and does not do: it stops you *using* a forbidden type, and it
+does not stop you *adding the reference*, which is why `FG-ARCH-002` also inspects the evaluated MSBuild
+project graph. See [ArchitectureEnforcement.md §13](ArchitectureEnforcement.md) for exactly what is and is not
 protected today.
 
 ## 8. How to use this during development

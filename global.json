@@ -1,0 +1,8 @@
+{
+  "//": "Pins the SDK the architecture checks were verified against. 10.0.301 is the newest installed 10.0.3xx feature band; it supports .slnx solutions and MSBuild's -getItem evaluated-item output, both of which the checks rely on. rollForward=latestPatch keeps the feature band fixed so an evaluation-behaviour change cannot arrive silently.",
+  "sdk": {
+    "version": "10.0.301",
+    "rollForward": "latestPatch",
+    "allowPrerelease": false
+  }
+}

@@ -9,4 +9,7 @@
     <Project Path="src/FalseGods.RuntimeContracts/FalseGods.RuntimeContracts.csproj" />
     <Project Path="src/FalseGods.UnityRuntime/FalseGods.UnityRuntime.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FalseGods.ArchitectureTests/FalseGods.ArchitectureTests.csproj" />
+  </Folder>
 </Solution>

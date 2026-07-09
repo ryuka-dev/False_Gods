@@ -35,7 +35,8 @@ unverified* until validated by the proof-of-concept.
   optional-integration seam, and the Boss/Arena/Encounter split.
 - **[DependencyRules.md](DependencyRules.md)** — what is allowed and forbidden (the rules themselves).
 - **[ArchitectureEnforcement.md](ArchitectureEnforcement.md)** — how those rules get checked: the `FG-ARCH-*`
-  rule registry, CI levels, exception process, and current status (everything is `Planned`).
+  rule registry, CI levels, exception process, and current status. `FG-ARCH-002` and `FG-ARCH-010` have working
+  checks (`.\scripts\verify.ps1`); the other eight are `Planned`, and no rule is `Required in CI` yet.
 - **[DefinitionOfDone.md](DefinitionOfDone.md)** — completion gates and the AI-development process rules.
 - **[ADRs/](ADRs/README.md)** — architecture decision records (ADR-001 … ADR-006).
 

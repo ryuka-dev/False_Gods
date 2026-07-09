@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Architecture checks. These assert the boundaries registered in Docs/ArchitectureEnforcement.md §5.
+
+    This project targets a modern runtime rather than the production net472, because it is a build-time
+    tool: it inspects the production projects, it is never loaded by the game.
+
+    It must NEVER become a dependency of a production module. The dependency runs one way only:
+    the tests read src/, and nothing in src/ knows this project exists.
+
+    Note there is no ProjectReference to any production project. The checks read the production
+    projects the same way an outside auditor would — by evaluating their MSBuild graph and by reading
+    their compiled metadata — so they cannot be fooled by a reference this project itself introduced.
+  -->
+
+  <PropertyGroup>
+    <!-- Overrides the repo-wide net472. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>FalseGods.ArchitectureTests</AssemblyName>
+    <RootNamespace>FalseGods.ArchitectureTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <!--
+      The repo-wide default is CopyLocalLockFileAssemblies=false, which is correct for the production
+      plugins (BepInEx supplies their dependencies, and we must not litter the plugins folder). A test
+      host is the opposite case: it must carry the test platform and Roslyn into its own output, or it
+      cannot start.
+    -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Used only to emit synthetic assemblies in memory, so the metadata checker can be tested
+         against a known-bad AssemblyRef without touching a real project. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
+  </ItemGroup>
+
+</Project>

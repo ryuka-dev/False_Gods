@@ -1,0 +1,22 @@
+<Project>
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    The forbidden Reference lives here rather than in the csproj, and behind a condition, because that is
+    the shape a regex over the project file cannot see. MSBuild's evaluated-item output can: it reports
+    this file as the item's DefiningProjectFullPath.
+  -->
+
+  <PropertyGroup>
+    <FixtureInjectsForbiddenReference>true</FixtureInjectsForbiddenReference>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(FixtureInjectsForbiddenReference)' == 'true'">
+    <Reference Include="FalseGods.Integration.SulfurTogether">
+      <HintPath>..\..\..\src\FalseGods.Integration.SulfurTogether\bin\Debug\FalseGods.Integration.SulfurTogether.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
