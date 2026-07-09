@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# pre-push: the local L0 gate. Runs the full scripts/verify.ps1 before any push, and blocks the push
+# (non-zero exit) if verification fails.
+#
+# Version-controlled and installed by scripts/setup-dev.ps1 (which points git at .githooks via
+# core.hooksPath). It downloads nothing and executes nothing from the network - it runs one repo-local
+# PowerShell script. It does not deploy DLLs, launch the game, or touch the Gale profile.
+#
+# This is NOT the same coverage as GitHub CI: CI runs the game-independent subset on a machine with no
+# game (verify.ps1 -CiSafe), whereas this hook runs the FULL verify - including the outer assemblies and
+# the FG-ARCH-002 metadata layer - because your machine has the game DLLs and BepInEx that CI lacks.
+# See README (Local pre-push hook) and Docs/ArchitectureEnforcement.md section 4.
+#
+# Emergency override (diagnostics only, not normal workflow): git push --no-verify
+
+# Run from the repository root so the relative script path resolves regardless of where git invoked us,
+# and so a path containing spaces or non-ASCII characters is never passed to powershell.exe as a string
+# argument - the process inherits the working directory instead.
+repo_root=$(git rev-parse --show-toplevel) || {
+    echo "pre-push: not inside a git working tree; aborting." >&2
+    exit 1
+}
+cd "$repo_root" || {
+    echo "pre-push: could not enter repo root '$repo_root'; aborting." >&2
+    exit 1
+}
+
+# Decide whether this push also warrants a Release verification. Normal pushes verify Debug; pushes that
+# reach the default branch, a release branch, or a tag additionally verify Release, since those are the
+# refs other people (and CI) build from.
+run_release=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/master|refs/heads/main|refs/heads/release*|refs/tags/*)
+            run_release=1
+            ;;
+    esac
+done
+
+run_verify() {
+    # -File with a relative path resolves against the working directory set above. ExecutionPolicy Bypass
+    # covers a machine whose default policy would otherwise refuse to run a local script; nothing is
+    # downloaded. Windows PowerShell 5.1 (powershell.exe), matching what verify.ps1 targets.
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1 -Configuration "$1"
+}
+
+echo "pre-push: verify.ps1 -Configuration Debug"
+if ! run_verify Debug; then
+    echo "pre-push: Debug verification FAILED - push blocked. (git push --no-verify overrides, emergencies only.)" >&2
+    exit 1
+fi
+
+if [ "$run_release" = "1" ]; then
+    echo "pre-push: pushing master/release/tag - additionally verify.ps1 -Configuration Release"
+    if ! run_verify Release; then
+        echo "pre-push: Release verification FAILED - push blocked. (git push --no-verify overrides, emergencies only.)" >&2
+        exit 1
+    fi
+fi
+
+exit 0

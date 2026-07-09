@@ -1,0 +1,6 @@
+# Git hooks and shell scripts must be LF: a hook with CRLF fails to run as `#!/bin/sh\r`.
+.githooks/pre-push text eol=lf
+*.sh               text eol=lf
+
+# PowerShell scripts are invoked by Windows PowerShell; CRLF is the native convention there.
+*.ps1              text eol=crlf
