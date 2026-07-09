@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    FG-ARCH-006's violation, hidden behind a name the forbidden list does not contain.
+
+    The Reference identity is "VendorHarmonyRepack" — not "0Harmony", not "HarmonyLib". Only the HintPath
+    reveals what is actually being referenced. A check that compared Include identities alone would report
+    this project clean; the inspector also matches the HintPath's file name, so it does not.
+
+    The HintPath is fictional. Nothing is compiled, so nothing has to resolve.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>ForbiddenHarmonyReference</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\FalseGods.Core\FalseGods.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="VendorHarmonyRepack">
+      <HintPath>..\..\..\vendor\repack\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

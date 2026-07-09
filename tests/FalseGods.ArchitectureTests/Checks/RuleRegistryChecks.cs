@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FalseGods.ArchitectureTests.Rules;
@@ -87,5 +88,33 @@ public sealed class RuleRegistryChecks
         Assert.True(missing.Count == 0, Failure(
             $"these rules have no <a id=\"fg-arch-nnn\"></a> anchor in {ArchitectureRuleRegistry.DocumentPath}, " +
             $"so the link printed by their failure message does not resolve: {string.Join(", ", missing)}."));
+    }
+
+    [Fact]
+    [ArchitectureRule(RuleId)]
+    public void The_layer_status_table_matches_the_registry()
+    {
+        // Rule ids agreeing is not enough. Before this check existed, the document said FG-ARCH-002 was
+        // "Required in CI" while the registry called it "Implemented", for weeks, and nothing noticed —
+        // the two only ever compared their id sets. A status nobody verifies is a status nobody can trust,
+        // and "what is actually enforced" is the one question this document exists to answer.
+        var documentRows = RuleRegistryValidator.ParseLayerStatusTable(EnforcementDocument());
+
+        Assert.True(documentRows.Count > 0, Failure(
+            $"no layer-status table was found in {ArchitectureRuleRegistry.DocumentPath} between " +
+            $"{RuleRegistryValidator.LayerTableBeginMarker} and {RuleRegistryValidator.LayerTableEndMarker}. " +
+            $"An absent table would compare equal to an empty registry projection and silently check nothing."));
+
+        var registryRows = RuleRegistryValidator.ProjectRegistryOntoLayerStatusRows(ArchitectureRuleRegistry.All);
+        var (onlyInDocument, onlyInRegistry) = RuleRegistryValidator.DiffLayerStatusRows(documentRows, registryRows);
+
+        Assert.True(onlyInDocument.Count == 0 && onlyInRegistry.Count == 0, Failure(
+            $"the layer-status table in {ArchitectureRuleRegistry.DocumentPath} and ArchitectureRuleRegistry " +
+            $"disagree about what is enforced.{Environment.NewLine}" +
+            $"  only in the document: {Describe(onlyInDocument)}{Environment.NewLine}" +
+            $"  only in the registry: {Describe(onlyInRegistry)}"));
+
+        static string Describe(IReadOnlyList<string> rows) =>
+            rows.Count == 0 ? "(none)" : Environment.NewLine + "    " + string.Join(Environment.NewLine + "    ", rows);
     }
 }

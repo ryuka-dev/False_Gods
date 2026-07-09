@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace FalseGods.ArchitectureTests;
 
@@ -12,6 +14,25 @@ public static class RepoLayout
 
     public static string ProjectFile(string projectName) =>
         Path.Combine(Root, "src", projectName, projectName + ".csproj");
+
+    /// <summary>
+    /// Every production project, discovered from <c>src/</c> rather than listed here.
+    ///
+    /// A rule of the form "no project except X may reference Y" must cover projects that do not exist yet.
+    /// A hardcoded list silently stops covering the ninth project the day someone adds it, and nothing
+    /// fails — the check just quietly inspects less than it claims to.
+    /// </summary>
+    public static IReadOnlyList<string> ProductionProjectNames()
+    {
+        var sourceRoot = Path.Combine(Root, "src");
+
+        return Directory.EnumerateDirectories(sourceRoot)
+            .Select(directory => Path.GetFileName(directory))
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Where(name => File.Exists(Path.Combine(sourceRoot, name!, name + ".csproj")))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToList()!;
+    }
 
     public static string FixtureProjectFile(string fixtureName) =>
         Path.Combine(Root, "tests", "Fixtures", fixtureName, fixtureName + ".csproj");

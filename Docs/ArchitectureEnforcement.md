@@ -4,11 +4,18 @@
 added, excepted, or retired.*
 
 **Partially implemented.** The module skeleton's restricted project references give the compiler protection
-described in §5; **two rules have working automated checks** — `FG-ARCH-002` and `FG-ARCH-010` — run by
-`.\scripts\verify.ps1`; a **CI workflow** (`.github/workflows/verify.yml`) runs the game-independent subset on
-every push and PR; and **branch protection now makes that CI check required to merge `master`**, so
-`FG-ARCH-010` and the `FG-ARCH-002` project-graph layer are the first rules **`Required in CI`**. The other
-eight rules are `Planned`. See §5 for each rule and §13 for the picture.
+described in §5; **five rules have working automated checks** — `FG-ARCH-002`, `FG-ARCH-003`, `FG-ARCH-005`,
+`FG-ARCH-006` and `FG-ARCH-010` — run by `.\scripts\verify.ps1`; a **CI workflow**
+(`.github/workflows/verify.yml`) runs the game-independent subset on every push and PR; and **branch
+protection makes that CI check required to merge `master`**, so each of those five has at least one layer
+**`Required in CI`**.
+
+**A rule is not a single check, and its status is not a single word.** Most rules are verified at more than
+one layer — the evaluated project graph, the compiled assembly metadata, a public-API scan — and the layers
+run in different places and get promoted at different times. `FG-ARCH-006`'s reference layer gates every
+merge while the `[HarmonyPatch]` scan its rule also demands does not exist. Statuses are therefore recorded
+**per layer** (§5.1), never per rule, so that "checked" can never be read as more than it is. Five rules have
+an enforced layer; **no rule is fully enforced end-to-end.** See §5 for each rule and §13 for the picture.
 
 ## 1. Purpose and authority
 
@@ -120,16 +127,23 @@ so it cannot build UnityRuntime / Integration.* / Plugin.
 | | Covered by CI | Why / why not |
 |---|---|---|
 | Inner assemblies build with no game | ✅ | The property CI exists to guard; the compiler enforces FG-ARCH-001/007 there. |
-| **FG-ARCH-002 project-graph layer** | ✅ | MSBuild *evaluation* needs no DLLs (report §6, §6.2); it catches an added-but-unused reference — the common mistake. |
+| **Project-graph layer of FG-ARCH-002/003/005/006** | ✅ | MSBuild *evaluation* needs no DLLs (report §6, §6.2); it catches an added-but-unused reference — the common mistake. Evaluation runs no targets, so the outer projects' `RequiresGameAssemblies` guard in `Directory.Build.targets` never fires and their graphs are readable with no game installed. |
 | **FG-ARCH-010** and all self-tests | ✅ | Pure logic / evaluation / in-memory Roslyn; no game. |
 | Probe isolation checks | ✅ | Project-graph evaluation only. |
 | **FG-ARCH-002 metadata layer** | ❌ | Reads `FalseGods.Plugin.dll`, an outer assembly CI cannot build. Stays L0 + L3. |
-| Outer-assembly compiler protection (FG-ARCH-003/006) | ❌ | CI does not build the outer assemblies, so their *compile-time* protection is a **local-only** guarantee (L0's full build). CI would only regain it via an evaluation-layer check per rule — not yet written. |
+| **Metadata layer of FG-ARCH-003/005/006** | ❌ | Not written. It is what would catch a *transitive* dependency, which no evaluated project graph can see (§6). Reads outer DLLs, so it would be L0/L3 anyway. |
+| Outer-assembly compiler protection (FG-ARCH-003/006) | ❌ | CI does not build the outer assemblies, so their *compile-time* protection is a **local-only** guarantee (L0's full build). The reference-graph checks now cover the gap the compiler leaves — *adding* a forbidden reference — but not the gap only compilation closes. |
 
 So CI enforces the **first line of defence** for the rules it can (evaluation + inner build); the outer
-assemblies' compile-time protection and the FG-ARCH-002 metadata layer remain L0/L3. This is the split from
-report §6.2, made concrete. Extending CI to the outer *reference graphs* (evaluation-layer checks for
-FG-ARCH-003/005/006, mirroring FG-ARCH-002) is the natural next enforcement step.
+assemblies' compile-time protection and every metadata layer remain L0/L3. This is the split from report
+§6.2, made concrete.
+
+**What the project-graph layer does and does not prove.** It reads the references a project *itself*
+declares. It is the layer that sees a reference which is present but unused — which compiles green, emits no
+`AssemblyRef`, ships, and fails at type-load on a machine without the DLL. It is blind to a dependency
+reached *through* another assembly's references. So "FG-ARCH-006 is `Required in CI`" means CI rejects a
+project that names `0Harmony`; it does not mean CI would notice a `[HarmonyPatch]` attribute, and the
+registry says so in as many words (§5.1).
 
 **"Blocking" is branch protection, which is separate from this file — and is now configured.** A repository
 ruleset marks the CI `verify` check required and requires a pull request before `master` is updated, so a red
@@ -145,12 +159,66 @@ Stable ids. **Every automated check must cite one** (`FG-ARCH-010`). Ids are nev
 Each rule carries **two independent facts**, because they protect against different things and change at
 different times.
 
-**Check status** — the state of the rule's automated check:
+**Check status** — the state of one **check layer**. A rule is checked at one or more layers, and each layer
+carries its own status:
 
 - `Planned` — agreed, no check exists.
 - `Implemented` — **a check exists and fails when explicitly run** (via `.\scripts\verify.ps1` or `dotnet test`).
   It is not yet mandatory on every PR.
 - `Required in CI` — the check is **mandatory on every pull request**.
+
+A rule's status is the list of its layers' statuses, never a single word. Collapsing them forces a choice
+between two lies: call `FG-ARCH-002` `Required in CI` and you claim CI catches a `typeof()` it cannot see;
+call it `Implemented` and you hide that a red CI already blocks the merge. Layer names are shared across rules
+wherever the technique is shared, because those layers fail for the same reasons and are promoted for the same
+reasons:
+
+| Layer | What it reads | Sees | Blind to |
+|---|---|---|---|
+| `project graph` | MSBuild's evaluated `ProjectReference` / `Reference` / `HintPath` | a reference that is present but **unused**; one added via an import or behind a condition | anything reached *through* another assembly |
+| `assembly metadata` | the compiled `AssemblyRef` table | a real CLR dependency from a signature, `typeof()`, base class, or a transitive drag | a reference that is present but unused |
+| `public API signatures` | reflection over public/protected members | a wire DTO in a presentation signature, including inside `List<T>` | anything non-public |
+| `broker access` | member references and call sites | who registers with, revokes, or reads `FalseGodsIntegrations` | — (not written) |
+| `patch attribute scan` | attributes on types | `[HarmonyPatch]` outside `Integration.Sulfur` | — (not written) |
+| `composition root behaviour` | a running Composition Root | degradation with no integration registered | BepInEx load ordering (that is L3) |
+| `registry consistency` | this document and the registry | drift between rule text, registry, and checks | whether a rule is *right* |
+
+### 5.1 Layer status (machine-checked)
+
+The authoritative, machine-readable projection of every rule's layers. `FG-ARCH-010` asserts that this table
+and `ArchitectureRuleRegistry` agree **row for row** — a layer promoted in code but not here, or here but not
+in code, fails the build. The markers around the table are load-bearing; the check fails if it cannot find
+them, because an absent table would otherwise compare equal to an empty registry and silently verify nothing.
+
+That check exists because the drift it catches had already happened: this document called `FG-ARCH-002`
+`Required in CI` while the registry called it `Implemented`, and nothing noticed, because the two only ever
+compared their sets of rule *ids*.
+
+<!-- BEGIN FG-ARCH-LAYER-STATUS -->
+
+| Rule | Check layer | Check status |
+|---|---|---|
+| FG-ARCH-001 | assembly metadata | Planned |
+| FG-ARCH-002 | project graph | Required in CI |
+| FG-ARCH-002 | assembly metadata | Implemented |
+| FG-ARCH-003 | project graph | Required in CI |
+| FG-ARCH-003 | assembly metadata | Planned |
+| FG-ARCH-004 | public API signatures | Planned |
+| FG-ARCH-005 | project graph | Required in CI |
+| FG-ARCH-005 | assembly metadata | Planned |
+| FG-ARCH-005 | broker access | Planned |
+| FG-ARCH-006 | project graph | Required in CI |
+| FG-ARCH-006 | assembly metadata | Planned |
+| FG-ARCH-006 | patch attribute scan | Planned |
+| FG-ARCH-007 | assembly metadata | Planned |
+| FG-ARCH-008 | public API signatures | Planned |
+| FG-ARCH-009 | composition root behaviour | Planned |
+| FG-ARCH-010 | registry consistency | Required in CI |
+
+<!-- END FG-ARCH-LAYER-STATUS -->
+
+**Read this table as the answer to "what would actually stop me".** Of the sixteen layers, five are
+`Required in CI`, one is `Implemented`, and ten are `Planned`. **No rule is enforced at every layer it names.**
 
 **Compiler protection** — what the `.csproj` reference graph gives you for free today, independent of any check:
 
@@ -202,10 +270,9 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 
   Neither layer is a text search. The first is MSBuild's own evaluation, so imports and conditions are
   resolved; the second is CLI metadata, so generics and indirection are resolved.
-- **Check status:** `Required in CI` (project-graph layer). The **project-graph layer runs** in CI and is now a
-  required merge check (`verify.ps1 -CiSafe`); the **metadata layer does not run in CI** — it reads the outer
-  `Plugin.dll`, which CI cannot build (§4.1), so that layer stays `Implemented` at L0/L3. The local pre-push
-  hook runs both layers (full verify) before every push.
+- **Check status:** `project graph` = `Required in CI`; `assembly metadata` = `Implemented` (§5.1). The
+  metadata layer does not run in CI — it reads the outer `Plugin.dll`, which CI cannot build (§4.1) — so it
+  stays at L0/L3. The local pre-push hook runs both layers (full verify) before every push.
 - **Compiler protection:** `Full`. `src/FalseGods.Plugin/FalseGods.Plugin.csproj` references
   `Integration.Sulfur` and not `Integration.SulfurTogether`; naming an adapter type from the Plugin fails with
   `CS0234`. **This is the rule whose residual gap matters most** — the compiler cannot stop someone from adding
@@ -221,13 +288,25 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 ### FG-ARCH-003 — UnityRuntime does not reference Protocol
 
 - **Authority:** [DependencyRules.md §2](DependencyRules.md), [Architecture.md §7](Architecture.md)
-- **Check:** `FalseGods.UnityRuntime.dll` has no assembly reference to `FalseGods.Protocol`.
-- **Check status:** `Planned`
+- **Check:** two layers.
+  1. **Project graph.** `FalseGods.UnityRuntime.csproj`, evaluated for every declared `Configuration`,
+     declares no `ProjectReference`, `Reference`, or `HintPath` resolving to `FalseGods.Protocol` — including
+     one added through an import or behind a condition.
+  2. **Assembly metadata.** `FalseGods.UnityRuntime.dll`'s `AssemblyRef` table does not name
+     `FalseGods.Protocol`. This is the layer that would see a Protocol type dragged in transitively, which no
+     project-graph evaluation can.
+- **Check status:** `project graph` = `Required in CI`; `assembly metadata` = `Planned` (§5.1). The metadata
+  layer would read an outer assembly CI cannot build, so it belongs to L0/L3 when written.
 - **Compiler protection:** `Full`. `src/FalseGods.UnityRuntime/FalseGods.UnityRuntime.csproj` references Core
   and RuntimeContracts only. `BossPresentation.Apply(BossSnapshot)` — the exact signature FG-ARCH-004 exists to
-  reject — fails with `CS0234`.
-- **Expected failure message:** `FG-ARCH-003: FalseGods.UnityRuntime references FalseGods.Protocol. Presentation
-  is driven by PresentationState/PresentationEvent — see Docs/Architecture.md §7.`
+  reject — fails with `CS0234`. The compiler cannot stop someone *adding* the reference; the project-graph
+  layer is what closes that gap.
+- **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/UnityRuntimeDoesNotReferenceProtocolChecks.cs`,
+  over the shared `Inspection/ForbiddenReferenceScanner.cs`. Proven by the `ForbiddenProtocolReference`
+  fixture, not by temporarily breaking the real project.
+- **Expected failure message:** `FG-ARCH-003: FalseGods.UnityRuntime's evaluated MSBuild project graph
+  references FalseGods.Protocol … Presentation is driven by PresentationState/PresentationEvent, mapped in
+  FalseGods.Application — see Docs/Architecture.md §7.`
 - **Exceptions:** None.
 
 <a id="fg-arch-004"></a>
@@ -250,18 +329,39 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 ### FG-ARCH-005 — ST types and broker access stay at their seams
 
 - **Authority:** [DependencyRules.md §2–§3](DependencyRules.md)
-- **Check:** no assembly other than `FalseGods.Integration.SulfurTogether` references `SULFURTogether`,
-  `LiteNetLib`, or `Steamworks`. Outside the defining `FalseGods.RuntimeContracts` assembly, only
-  `FalseGods.Plugin` and `FalseGods.Integration.SulfurTogether` may reference the `FalseGodsIntegrations`
-  broker type. Inspect their member references/call sites as well: the Plugin may subscribe to/read the
-  single slot but may not register or revoke; the ST adapter may call `Register(...)` and dispose only its own
-  registration token but may not read/resolve the slot. No other assembly may access the broker.
-- **Check status:** `Planned`
+- **Check:** three layers, and only the first exists.
+  1. **Project graph.** No project under `src/` other than `FalseGods.Integration.SulfurTogether` declares a
+     `ProjectReference`, `Reference`, or `HintPath` resolving to SULFUR Together, LiteNetLib, or Steamworks,
+     in any declared `Configuration`. The scanned set is **read from `src/` on disk**, so a project added
+     tomorrow is covered without editing the check.
+
+     The forbidden names are **assembly identities**, verified against the real projects rather than copied
+     from prose — and prose is where this goes wrong. `SULFURTogether` and `Steamworks` are *namespaces*;
+     no assembly is called either. ST's `AssemblyName` is **`SULFUR Together`**, with a space, and the
+     Steamworks.NET assembly shipped in SULFUR's `Managed` directory is **`com.rlabrecque.steamworks.net`**.
+     A check that forbade only the namespace spellings would match nothing, forever, while reporting green.
+     Both spellings are forbidden anyway, as cheap aliases: a hand-written `<Reference Include="Steamworks">`
+     should fail this rule, not `MSB3245`.
+  2. **Assembly metadata.** No compiled assembly but the adapter has an `AssemblyRef` to those identities.
+     This is the layer that would see a transitive drag. `Planned`.
+  3. **Broker access.** Outside the defining `FalseGods.RuntimeContracts` assembly, only `FalseGods.Plugin`
+     and `FalseGods.Integration.SulfurTogether` may reference the `FalseGodsIntegrations` broker type.
+     Inspect their member references/call sites as well: the Plugin may subscribe to/read the single slot but
+     may not register or revoke; the ST adapter may call `Register(...)` and dispose only its own registration
+     token but may not read/resolve the slot. No other assembly may access the broker. `Planned` — the broker
+     type does not exist yet.
+- **Check status:** `project graph` = `Required in CI`; `assembly metadata` = `Planned`; `broker access` =
+  `Planned` (§5.1). **A green project-graph layer is not a green rule.** It says no project outside the
+  adapter *names* a transport assembly. It says nothing about the broker.
 - **Compiler protection:** `Partial`. The *assembly* half is currently true by construction — no project
   references ST, LiteNetLib, or Steamworks, not even `Integration.SulfurTogether`, which reaches ST's
   `internal` types by reflection. The *broker access* half cannot be checked until the broker type exists.
-- **Expected failure message:** `FG-ARCH-005: FalseGods.Application references LiteNetLib. Transport is invisible
-  above the adapter — see Docs/DependencyRules.md §5.`
+- **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/TransportTypesStayInTheStAdapterChecks.cs`,
+  over the shared `Inspection/ForbiddenReferenceScanner.cs`. Proven by the `ForbiddenTransportReference`
+  fixture, which carries LiteNetLib in every configuration and `SULFUR Together` only under Release.
+- **Expected failure message:** `FG-ARCH-005: a project outside FalseGods.Integration.SulfurTogether references
+  a transport or SULFUR Together assembly. … FalseGods.Application [Debug] references LiteNetLib … Transport is
+  invisible above the adapter — see Docs/DependencyRules.md §5.`
 - **Exceptions:** None.
 
 <a id="fg-arch-006"></a>
@@ -269,14 +369,31 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 ### FG-ARCH-006 — Harmony patches live only in Integration.Sulfur
 
 - **Authority:** [DependencyRules.md §5](DependencyRules.md)
-- **Check:** no type outside `FalseGods.Integration.Sulfur` carries `[HarmonyPatch]`, and no other assembly
-  references `HarmonyLib` (0Harmony).
-- **Check status:** `Planned`
+- **Check:** three layers, and only the first exists. The rule makes **two distinct claims**, and it is worth
+  separating them: *no other project references Harmony*, and *no type outside `Integration.Sulfur` carries
+  `[HarmonyPatch]`*. The second does not follow from the first.
+  1. **Project graph.** No project under `src/` other than `FalseGods.Integration.Sulfur` declares a reference
+     resolving to `0Harmony` (assembly) or `HarmonyLib` (its namespace, forbidden as an alias), in any declared
+     `Configuration`. A `HintPath` ending in `0Harmony.dll` is matched whatever the `Include` identity says.
+     The scanned set is read from `src/` on disk, so a new project is covered automatically.
+  2. **Assembly metadata.** No compiled assembly but `Integration.Sulfur` has an `AssemblyRef` to `0Harmony`.
+     `Planned`.
+  3. **Patch attribute scan.** No type outside `FalseGods.Integration.Sulfur` carries `[HarmonyPatch]`.
+     `Planned`. Today no other project can even resolve the attribute — precisely because layer 1 holds — but
+     "cannot resolve it" and "does not carry it" are different claims, and only the first is checked.
+- **Check status:** `project graph` = `Required in CI`; `assembly metadata` = `Planned`; `patch attribute scan`
+  = `Planned` (§5.1). **CI rejects a project that names `0Harmony`. CI does not look for `[HarmonyPatch]`.**
 - **Compiler protection:** `Full`. `0Harmony.dll` is referenced by `FalseGods.Integration.Sulfur` alone, so
   `[HarmonyPatch]` does not resolve anywhere else. Note `Integration.SulfurTogether` does **not** reference
   0Harmony — it reflects into ST, and reflection is not a patch.
-- **Expected failure message:** `FG-ARCH-006: [HarmonyPatch] found in FalseGods.Integration.SulfurTogether.
-  Patches belong in Integration.Sulfur — see Docs/DependencyRules.md §5.`
+- **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/HarmonyStaysInIntegrationSulfurChecks.cs`, over
+  the shared `Inspection/ForbiddenReferenceScanner.cs`. Proven by the `ForbiddenHarmonyReference` fixture,
+  whose `Reference` identity names something else entirely and betrays itself only through its `HintPath`. A
+  further check asserts `Integration.Sulfur` *does* reference `0Harmony`: were Harmony renamed or dropped, the
+  forbidden name would match nothing anywhere and the rule would pass while checking for a ghost.
+- **Expected failure message:** `FG-ARCH-006: a project outside FalseGods.Integration.Sulfur references Harmony.
+  … FalseGods.Plugin [Release] references 0Harmony … Patches belong in Integration.Sulfur — see
+  Docs/DependencyRules.md §5.`
 - **Exceptions:** **Requires a new ADR**, not a suppression comment. The ST adapter reflecting into ST internals
   is *not* an exception to this rule — reflection is not a patch (§5, FG-ARCH-005).
 
@@ -335,15 +452,18 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 - **Check:** each architecture check declares its rule id **structurally** — an
   `[ArchitectureRule("FG-ARCH-0NN")]` attribute, never a substring of a test name — and the check asserts:
   1. every cited id exists in the registry (catches *a check enforcing a rule nobody wrote down*);
-  2. every rule whose **check status** is `Implemented` or `Required in CI` is cited by at least one check
+  2. every rule with **at least one layer** at `Implemented` or `Required in CI` is cited by at least one check
      (catches *a rule quietly declared done that nothing enforces*);
   3. ids are well-formed and never reused;
   4. the registry and this document's §5 headings contain **the same set of ids** (catches drift between the
      authority and its machine-readable projection);
   5. every rule has an `<a id="fg-arch-0nn"></a>` anchor here, so the link each failure message prints actually
-     resolves.
-- **Check status:** `Required in CI`. It needs no game, runs fully in `verify.ps1 -CiSafe`, and is now a
-  required merge check (§4.1).
+     resolves;
+  6. §5.1's layer-status table and the registry agree **row for row** — same rules, same layers, same statuses
+     (catches *a layer promoted in one place and not the other*, which had already happened once). The table
+     must be found between its markers; an absent table fails rather than comparing equal to nothing.
+- **Check status:** `registry consistency` = `Required in CI` (§5.1). It needs no game, runs fully in
+  `verify.ps1 -CiSafe`, and is a required merge check (§4.1).
 - **Compiler protection:** `None`. Nothing about a missing rule id is a compile error.
 - **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/RuleRegistryChecks.cs`, with the logic in
   `Rules/RuleRegistryValidator.cs` kept as pure functions so it can be tested against a deliberately wrong
@@ -422,6 +542,10 @@ So each layer is proven against fixtures instead, and nothing temporary is ever 
 | `tests/Fixtures/ForbiddenProjectReference` | An **unused** forbidden `ProjectReference` is caught. The fixture has no source files, so nothing about it could ever reach an `AssemblyRef` table. This is the case only layer 1 can see. |
 | `tests/Fixtures/ForbiddenReferenceViaImport` | A forbidden `Reference` injected by an **imported** `.props`, behind a **condition**, is caught — and the failure names the `.props` file. This is the case a regex over the `.csproj` would pass. |
 | `tests/Fixtures/ForbiddenReferenceInReleaseOnly` | A forbidden `Reference` present **only when `Configuration == Release`** is caught. Invisible under MSBuild's default configuration; found because the checks evaluate every *declared* configuration. |
+| `tests/Fixtures/ForbiddenProtocolReference` | FG-ARCH-003: an **unused** `ProjectReference` from a presentation-shaped project to `FalseGods.Protocol`. No source files, so nothing could reach an `AssemblyRef` table. |
+| `tests/Fixtures/ForbiddenTransportReference` | FG-ARCH-005: `LiteNetLib` in every configuration, and `SULFUR Together` — the real assembly identity, **with a space** — only under Release. |
+| `tests/Fixtures/ForbiddenHarmonyReference` | FG-ARCH-006: a `Reference` whose `Include` identity names something unrelated and whose **`HintPath` alone** reveals `0Harmony.dll`. An identity-only comparison would pass it. |
+| Hand-built graphs (`SelfTests/ForbiddenReferenceScannerSelfTests.cs`) | The scanner's reporting logic, with no MSBuild and no disk: case-insensitivity, an identity containing a space, every configuration and every forbidden name reported rather than the first, and an **empty forbidden list throwing** instead of passing. |
 | Roslyn, in memory (`SelfTests/SyntheticAssembly.cs`) | A synthetic assembly whose `AssemblyRef` table contains the forbidden name is caught; a clean one is not. Nothing touches disk. |
 | Synthetic directory tree (`SelfTests/BuildOutputLocatorSelfTests.cs`) | Verifying Release does not read an existing Debug DLL, and vice versa; each configuration is found independently; a missing one reports the expected path. |
 | Child processes (`SelfTests/ProcessRunnerSelfTests.cs`) | Normal exit, non-zero exit, ~1 MB on **both** streams without deadlocking, and a timeout that kills a grandchild process. |
@@ -530,37 +654,52 @@ The module skeleton exists: eight projects under `src/`, a `Directory.Build.prop
 is the reference graph, and that graph is already doing work. The architecture test project, `scripts/verify.ps1`
 (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
 
-| Rule | Check status | In CI as a merge gate? | Compiler protection |
-|---|---|---|---|
-| FG-ARCH-001 | `Planned` | via inner build (not a cited check) | `Full` — Core declares no reference at all |
-| **FG-ARCH-002** | **`Required in CI`** (project-graph layer); `Implemented` (metadata layer, L0/L3) | project-graph layer ✅; metadata layer ✗ | `Full` — Plugin does not reference the adapter |
-| FG-ARCH-003 | `Planned` | ✗ (outer; compiler-only, L0) | `Full` — UnityRuntime does not reference Protocol |
-| FG-ARCH-004 | `Planned` | ✗ | `Partial`, via FG-ARCH-003 |
-| FG-ARCH-005 | `Planned` | ✗ (no check yet) | `Partial` — no project references ST/LiteNetLib/Steamworks |
-| FG-ARCH-006 | `Planned` | ✗ (outer; compiler-only, L0) | `Full` — only Integration.Sulfur references 0Harmony |
-| FG-ARCH-007 | `Planned` | via inner build (not a cited check) | `Full` — RuntimeContracts references Core alone |
-| FG-ARCH-008 | `Planned` | ✗ | `None` — needs the Protocol types to exist |
-| FG-ARCH-009 | `Planned` | project-graph layer via FG-ARCH-002 | `Partial`, via FG-ARCH-002 |
-| **FG-ARCH-010** | **`Required in CI`** — attribute scan + registry/document agreement | ✅ | `None` |
+Per-layer statuses are in **§5.1**, which is the machine-checked authority. This table adds what a status
+cannot say: what each rule's *enforced* layer actually buys, and what it leaves open.
 
-**Branch protection is configured**, so a red CI result blocks the merge: `FG-ARCH-010` and the `FG-ARCH-002`
-project-graph layer are `Required in CI`. What CI cannot run — the FG-ARCH-002 metadata layer and the outer
-assemblies' compile-time protection — remains L0 (the pre-push hook runs the full verify) and L3.
+| Rule | Enforced layer(s) | What is still unchecked | Compiler protection |
+|---|---|---|---|
+| FG-ARCH-001 | — (inner build only; not a cited check) | the whole rule | `Full` — Core declares no reference at all |
+| **FG-ARCH-002** | `project graph` ✅ CI; `assembly metadata` (L0/L3) | — (both layers exist) | `Full` — Plugin does not reference the adapter |
+| **FG-ARCH-003** | `project graph` ✅ CI | a Protocol type reached transitively | `Full` — UnityRuntime does not reference Protocol |
+| FG-ARCH-004 | — | the whole rule | `Partial`, via FG-ARCH-003 |
+| **FG-ARCH-005** | `project graph` ✅ CI | transitive drags; **the entire broker-access half** | `Partial` — no project references ST/LiteNetLib/Steamworks |
+| **FG-ARCH-006** | `project graph` ✅ CI | transitive drags; **`[HarmonyPatch]` outside Integration.Sulfur** | `Full` — only Integration.Sulfur references 0Harmony |
+| FG-ARCH-007 | — (inner build only; not a cited check) | the whole rule | `Full` — RuntimeContracts references Core alone |
+| FG-ARCH-008 | — | the whole rule | `None` — needs the Protocol types to exist |
+| FG-ARCH-009 | `project graph` of FG-ARCH-002 | the behavioural half (needs a Composition Root) | `Partial`, via FG-ARCH-002 |
+| **FG-ARCH-010** | `registry consistency` ✅ CI | whether a rule is *right* | `None` |
+
+**Branch protection is configured**, so a red CI result blocks the merge. Five rules now have a layer that is
+`Required in CI`. What CI cannot run — every metadata layer, and the outer assemblies' compile-time protection
+— remains L0 (the pre-push hook runs the full verify, Debug and Release) and L3.
+
+**Say it precisely: five rules have an enforced layer; zero rules are fully enforced.** FG-ARCH-005 and
+FG-ARCH-006 in particular each have a second half — broker access, and the `[HarmonyPatch]` scan — that
+nothing checks. "The reference graph is checked" is the claim these entries support. It is not the same
+sentence as "the rule holds".
 
 Every `Full` above was checked by writing the violation and confirming the compiler rejected it (`CS0246` /
 `CS0234`), not by reading the csproj and assuming. The `-CiSafe` path was checked the same way: the inner
 assemblies and the test project build with `SulfurManagedDir`/`BepInExCoreDir` empty, and the CI-safe test
 subset passes with **every outer DLL physically removed** (so nothing silently depends on one).
 
+The FG-ARCH-003/005/006 reference-graph checks read the outer projects' *evaluated graphs*, which needs no
+game: `dotnet msbuild -getItem` evaluates without running targets, so `Directory.Build.targets`'
+`RequiresGameAssemblies` guard never fires and the unresolvable `HintPath`s are never resolved. That is the
+same property the FG-ARCH-002 project-graph layer and the probe-isolation checks already rely on in CI.
+
 Still not created:
 
-- an evaluation-layer check for FG-ARCH-003/005/006, which would let CI cover the outer *reference graphs*
-  (report §4.1) as required merge gates — the natural next step
+- the `assembly metadata` layer for FG-ARCH-003/005/006 — the only layer that can see a *transitive* drag.
+  It reads outer DLLs, so it would be L0/L3, not CI.
+- FG-ARCH-005's `broker access` layer and FG-ARCH-006's `patch attribute scan` — each is the unchecked half of
+  a rule whose other half is now a merge gate.
 - Core unit tests (Core has no code to test)
 - any `.asmdef` (the Unity authoring project is separate — see
   [OriginalContentPipeline.md §8.2](OriginalContentPipeline.md))
 - any source file in any of the eight production projects
 
-**Next.** Add evaluation-layer checks for FG-ARCH-003/005/006 so CI covers the outer reference graphs too —
-each is an allow-list of assembly names plus a fixture, reusing the two inspectors that already exist. That is
-the cheapest way to turn more of the outer-assembly rules into required merge gates.
+**Next.** The cheapest remaining win is the `assembly metadata` layer for FG-ARCH-001/003/007 — one allow-list
+of assembly names each, over `AssemblyReferenceInspector`, which already exists and is already fixture-tested.
+FG-ARCH-001 and FG-ARCH-007 read *inner* assemblies, so unlike the outer-assembly layers they can run in CI.

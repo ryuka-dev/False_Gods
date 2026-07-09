@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FIXTURE — never built, only evaluated. See ../README.md.
+
+    FG-ARCH-005's violation, in two shapes at once:
+
+      LiteNetLib        an ordinary <Reference>, present in every configuration.
+      SULFUR Together   present ONLY under Release, and named by its real AssemblyName — which contains a
+                        space. The identity a Reference carries is "SULFUR Together", not the namespace
+                        "SULFURTogether" that prose tends to use. A check written from the prose would
+                        match nothing here and report a clean graph.
+
+    Both HintPaths are fictional. Nothing is compiled, so nothing has to resolve.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>ForbiddenTransportReference</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\FalseGods.Core\FalseGods.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="LiteNetLib">
+      <HintPath>..\..\..\packages\LiteNetLib\LiteNetLib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Reference Include="SULFUR Together">
+      <HintPath>..\..\..\plugins\SULFUR Together.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
