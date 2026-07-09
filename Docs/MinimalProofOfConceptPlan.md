@@ -3,6 +3,17 @@
 *A minimal test room that validates the risky mechanics — **not** the full cave arena.* Build this first; the
 large square cave arena only makes sense after every check below passes.
 
+The PoC is split into two phases:
+
+- **Phase A — Arena Pipeline PoC** (§7.1–7.5 below): proves the map, materials, collision, navigation, and
+  teardown. Mostly single-player, with a final host+client parity check.
+- **Phase B — Original Boss Networking Vertical Slice** (§7.6): proves the network-native boss architecture
+  with a throwaway test actor. Needs a host + client.
+
+---
+
+# Phase A — Arena Pipeline PoC
+
 ## 7.1 The test room
 
 - Size: **~20×20 m**, flat.
@@ -51,4 +62,72 @@ large square cave arena only makes sense after every check below passes.
 - Runtime rendering/nav/teardown claims are **unverified** until P0–P8 actually run in-game; this document is
   a plan, not a result.
 - Multiplayer parity/activation (P9) requires **two game instances** (host + client). Full boss-authority
-  parity cannot be tested until a boss exists — deferred to a later milestone.
+  parity cannot be tested until a boss exists — deferred to Phase B below.
+
+---
+
+# Phase B — Original Boss Networking Vertical Slice
+
+This is not the final first boss. It is a temporary test actor proving the False Gods boss architecture.
+
+## 7.6.1 Test boss
+
+Use either:
+
+- a simple cube;
+- or a temporary billboarded 2D image.
+
+It must have:
+
+- idle;
+- simple host-authoritative movement;
+- one aimed projectile attack;
+- one area telegraph attack;
+- two phases;
+- one weak-point or stagger state;
+- death;
+- arena completion.
+
+## 7.6.2 Required architecture
+
+- `BossSimulation`
+- `BossPresentation`
+- `BossReplication`
+- stable boss instance id
+- stable attack instance id
+- host simulation tick/time
+- full baseline snapshot
+- reliable discrete events
+- unreliable movement/state correction
+- duplicate suppression
+- join-in-progress restoration
+
+## 7.6.3 Test sequence
+
+- **B0.** Run the test boss in single-player without SULFUR Together.
+- **B1.** Host and client load the arena and receive the same boss definition/protocol version.
+- **B2.** Host selects an attack; both peers show the same `AttackInstanceId`.
+- **B3.** Telegraph begins from host simulation time on both machines.
+- **B4.** Host commits the projectile/area attack; client presentation does not decide damage.
+- **B5.** Drop several continuous state packets; the discrete attack still completes exactly once.
+- **B6.** Deliver one duplicate reliable event; no duplicate projectile, mechanism, or damage occurs.
+- **B7.** Enter phase 2; all peers agree on phase and current state.
+- **B8.** Start a client during phase 2; it reconstructs the current boss, attack, weak point, and arena state
+  from a baseline snapshot.
+- **B9.** Kill the boss; death, reward, unlock, and teardown occur exactly once.
+- **B10.** Return to a normal level and verify no boss, arena, event subscription, or navigation state
+  survives.
+
+## 7.6.4 Pass criteria
+
+- Single-player and host use the same simulation rules.
+- The client never executes authoritative AI or damage.
+- Phase, attack, and death events happen exactly once.
+- Visual timing is tied to host simulation time.
+- A late join reconstructs the current encounter.
+- Packet duplication and snapshot loss do not duplicate gameplay.
+- The complete arena and boss teardown is clean.
+
+> Everything in Phase B is **proposed / unverified** until it runs in-game with a host + client; this is a
+> test plan, not a result. The architecture it exercises is defined in
+> [OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitecture.md).

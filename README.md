@@ -19,6 +19,37 @@ A SULFUR mod that adds original bosses and dedicated boss-arena maps. It is desi
   redistributing vanilla scenes, meshes, textures, or shaders.
 - Keep visual geometry, physics collision, and navigation as **decoupled layers**.
 
+## Content-authoring goals
+
+False Gods is not limited to remixing vanilla SULFUR rooms or bosses.
+
+Arena layouts are authored visually in a dedicated Unity project and exported as mod-owned prefabs /
+AssetBundles. An arena may freely combine:
+
+- original geometry, materials, shaders, lighting, collision, and gameplay markers;
+- runtime-resolved vanilla SULFUR environment prefabs through proxy references;
+- original 2D or 3D boss assets;
+- original arena mechanisms and phase-specific set pieces.
+
+The Unity-authored arena prefab is the source of truth for the fixed arena layout. Runtime code loads and
+realizes that authored content; it should not require hand-writing the full layout as transform data.
+
+## Multiplayer quality goal
+
+SULFUR Together's existing boss support is an interoperability layer for vanilla bosses and is not assumed
+to be the final replication model for original False Gods bosses.
+
+False Gods bosses are authored as network-native encounters from the beginning:
+
+- one deterministic host-authoritative simulation;
+- a separate presentation layer;
+- explicit replicated state and discrete events;
+- snapshot and join-in-progress recovery;
+- no client-authoritative phase, damage, death, or attack selection.
+
+The project reuses SULFUR Together's transport, session, player registry, arena readiness, and lockdown
+infrastructure, while defining a purpose-built replication contract for original bosses.
+
 ## Repository layout
 
 | Path | Purpose | Committed? |

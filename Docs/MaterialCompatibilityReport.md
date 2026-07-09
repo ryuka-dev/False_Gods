@@ -52,9 +52,11 @@ large filler surfaces after confirming the shader is projection-based.
 
 ## 3.5 AssetBundle / Unity-version constraints
 
-- Our own AssetBundle (arena layout, our meshes, our lights) **must be built with the same Unity version the
-  game runs**, or load/shader compatibility is unreliable. Determine the exact version from the game before
-  building bundles (RiskList R2).
+- **The AssetBundle is the primary carrier for original False Gods content** — original meshes, materials,
+  shaders, sprites, VFX, animation, audio, lights, and the arena prefab itself. It is *not* limited to
+  "layout + simple mesh + lights"; it simply **must never redistribute vanilla SULFUR assets**.
+- Our own AssetBundle **must be built with the same Unity version the game runs** — verified from the game
+  files as **Unity 6000.3.6f1 with URP** (RiskList R2) — or load/shader compatibility is unreliable.
 - Our bundle should **not** contain vanilla shaders/materials at all (legal + variant-stripping reasons); it
   relies on the game's already-loaded shaders via the runtime-instantiated vanilla objects.
 - If we ever must ship an original shader, include it in a shader-variant collection so its variants aren't
@@ -66,3 +68,66 @@ large filler surfaces after confirming the shader is projection-based.
 2. Take one vanilla cave floor material and assign it to our own flat ground mesh → observe whether it needs
    projection/vertex-color/UV2. Record the result; choose floor strategy accordingly.
 3. Confirm no reliance on the source scene's baked lightmaps (lighting comes from our `LightingRoot`).
+
+## 3.7 Original False Gods content is a first-class path
+
+Runtime reuse of vanilla materials is optional. False Gods must also support fully original:
+
+- meshes;
+- terrain/floor materials;
+- boss materials;
+- sprites and sprite sheets;
+- shaders;
+- particle effects;
+- animations;
+- audio;
+- phase-specific arena visuals.
+
+The asset pipeline must not assume every renderer ultimately receives a vanilla material.
+
+## 3.8 Original shader requirements
+
+The PoC must identify the game's exact Unity version and render pipeline before production shaders are
+authored. *(Verified from the game files: **Unity 6000.3.6f1**, **URP**. Author shaders against this URP
+version — prefer ShaderGraph, which the game ships.)*
+
+For every custom shader, verify:
+
+- compatibility with the game's render pipeline;
+- forward/deferred pass expectations;
+- transparency and render-queue behaviour;
+- fog and lighting integration;
+- GPU instancing requirements;
+- shader keyword and variant stripping;
+- inclusion through a ShaderVariantCollection or equivalent preservation mechanism;
+- correct behaviour when loaded from an AssetBundle;
+- correct behaviour on both host and client.
+
+## 3.9 2D boss rendering path
+
+False Gods may use large 2D bosses or multi-part 2D mechanical characters.
+
+Investigate and compare:
+
+- `SpriteRenderer`;
+- billboarded quad with `MeshRenderer`;
+- layered sprite parts;
+- sprite-sheet animation;
+- skeletal 2D animation;
+- hybrid 2D body + 3D projectiles/VFX.
+
+The chosen path must define:
+
+- camera-facing rules;
+- world scale;
+- pivot conventions;
+- sorting and transparency;
+- lighting response;
+- hitbox attachment;
+- muzzle/weak-point transforms;
+- animation-state replication;
+- multiplayer interpolation.
+
+> The game ships URP's 2D renderer (`Unity.RenderPipelines.Universal.2D.Runtime`), `SpriteShape`, and 2D
+> Animation (`Unity.2D.Animation.Runtime`, skeletal 2D), so all of the above paths are technically available
+> in-engine (feasibility still to be validated in the PoC).

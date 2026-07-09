@@ -30,29 +30,75 @@ custom trigger/warp rather than the normal level-transition selection.
 **Recommendation:** **Strategy B** for the first fixed boss arena. Reassess Strategy A only when moving to
 procedural/random arenas, where the pipeline's placement logic earns its integration cost.
 
-## 2.2 The proxy → runtime-asset flow (is it viable for SULFUR? Yes)
+Strategy B remains the recommendation for the first boss, but "standalone additive arena" means a fully
+Unity-authored False Gods prefab, not a code-generated arrangement of placeholder transforms.
+
+## 2.2 Authoring model: Unity prefab first
+
+The proxy system is not the arena-layout format by itself.
+
+The fixed arena is authored as a complete Unity prefab in the False Gods Unity project. The prefab contains
+the real hierarchy, transforms, original geometry, original materials, collision, lights, gameplay markers,
+phase objects, and editor-only debug helpers.
+
+`VanillaAssetProxy` is only used at positions where the arena intentionally reuses content from the player's
+local SULFUR installation.
+
+Therefore the authored prefab can be previewed and iterated visually without reconstructing the arena from
+hard-coded transform lists at runtime.
+
+The recommended prefab hierarchy (authored in Unity, see [OriginalContentPipeline.md](OriginalContentPipeline.md)):
+
+```text
+ArenaRoot
+├─ VisualRoot
+│  ├─ OriginalGeometry
+│  ├─ OriginalProps
+│  ├─ OriginalBossSetPieces
+│  └─ VanillaAssetProxies
+├─ CollisionRoot
+├─ NavigationRoot
+├─ LightingRoot
+├─ GameplayRoot
+│  ├─ PlayerSpawns
+│  ├─ BossSpawn
+│  ├─ ArenaBoundary
+│  ├─ ArenaMechanisms
+│  ├─ PhaseObjects
+│  └─ Exit
+└─ DebugRoot
+```
+
+## 2.3 The proxy → runtime-asset flow (is it viable for SULFUR? Yes)
 
 Because vanilla content is **Addressables** (report 1.2), the editor project never has to contain vanilla
 assets. The flow:
 
-**Editor (our own Unity project, matching the game's Unity version):**
-1. Build the arena layout using **lightweight proxy objects** — e.g. an empty/gizmo or a cheap placeholder
-   mesh — each carrying a small component, say `VanillaAssetProxy { string addressableKeyOrGuid; }`, plus
-   its transform (position/rotation/scale).
-2. Author our own **`CollisionRoot`** (simple box/plane colliders) and **`NavigationRoot`** hints
-   (report 4). These are the pieces the proxies do *not* provide.
-3. Pack the arena layout (proxies + our collision/nav + our own meshes/lights) into our mod's own
-   AssetBundle. **No vanilla assets are included.**
+**Editor:**
 
-**Runtime (in-game, BepInEx plugin):**
-1. Load our arena layout bundle and instantiate the layout root.
-2. For each `VanillaAssetProxy`, resolve the real vanilla asset via the game's own API —
-   `new AssetReference(guid).LoadAssetAsync<GameObject>()` or `Addressables.LoadAssetAsync<GameObject>(key)`
-   (mirroring `LevelGenGraphUtilities`). Cache/refcount handles; `Addressables.Release` on teardown.
-3. `Instantiate` the real vanilla prefab, apply the proxy's transform, parent under `VisualRoot`, then
-   destroy/disable the proxy.
-4. The instantiated vanilla object keeps its **real materials, shaders, and Renderer setup** — this is why
-   the material-loss problems from raw mesh extraction are avoided (report 3).
+1. Author the complete fixed arena as a Unity prefab.
+2. Place original False Gods meshes, materials, lights, colliders, markers, and phase objects directly.
+3. Where vanilla SULFUR art is desired, place a `VanillaAssetProxy`.
+4. Give the proxy an editor preview:
+   - a simplified placeholder;
+   - an extracted local-only preview mesh;
+   - or an editor tool that previews the referenced asset.
+5. Build the arena prefab and original dependencies into a False Gods AssetBundle.
+6. Never include redistributed vanilla SULFUR assets in the published bundle.
+
+**Runtime:**
+
+1. Load and instantiate the complete False Gods arena prefab.
+2. Preserve all original False Gods geometry/materials/lights/components already contained in it.
+3. Resolve only the `VanillaAssetProxy` objects through the player's local Addressables catalog.
+4. Replace those proxies with live vanilla prefabs while preserving authored transforms.
+5. Register collision/navigation/gameplay roots.
+6. Enter the ready-gate and start the encounter.
+
+The instantiated vanilla objects keep their **real materials, shaders, and Renderer setup** — this is why the
+material-loss problems from raw mesh extraction are avoided (report 3). Resolution mirrors the game's own API:
+`new AssetReference(guid).LoadAssetAsync<GameObject>()` / `Addressables.LoadAssetAsync<GameObject>(key)` (as in
+`LevelGenGraphUtilities`); cache/refcount handles and `Addressables.Release` on teardown.
 
 ### Two levels of "vanilla reuse"
 - **Whole vanilla `Room` prefab** as backdrop — simplest, most robust (materials guaranteed wired). Strip or
@@ -60,7 +106,7 @@ assets. The flow:
 - **Individual vanilla props** (pillar, rock, wood support) — if a prop is separately addressable, resolve it
   directly; otherwise resolve its parent room once and pluck the named child at runtime.
 
-## 2.3 Proposed runtime ownership & lifecycle (Strategy B)
+## 2.4 Proposed runtime ownership & lifecycle (Strategy B)
 
 A single mod-owned controller, e.g. `ArenaController` (project-owned, no vanilla base type), owns the arena's
 whole lifecycle:
@@ -83,7 +129,7 @@ event) rather than scene-name or timing heuristics (CLAUDE.md §6). SULFUR Toget
 relevant level-transition methods (`SwitchLevelRoutine`, `CompleteLevel`) and boss triggers, so the arena
 entry can be driven from a genuine game event.
 
-## 2.4 What still needs verification (feeds the PoC)
+## 2.5 What still needs verification (feeds the PoC)
 - Whether our own AssetBundle built in the game's Unity version loads cleanly under BepInEx (Unity version
   match, shader stripping) — report 3, RiskList.
 - Exact Addressables key/GUID stability across game updates — RiskList R1.

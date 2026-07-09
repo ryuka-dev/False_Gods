@@ -129,3 +129,38 @@ Because `AstarPath.active` is **persistent and shared**, arena teardown must res
 - R4: `NavmeshPrefab.Apply()` usability from a mod + validity of a bundle-baked navmesh.
 - R5: real recast agent params (read at runtime, record here).
 - R8: teardown leaves `AstarPath.active` clean for the next level.
+
+## 4.8 Unity-authored navigation source
+
+`NavigationRoot` is authored visually as part of the arena prefab.
+
+It may contain:
+
+- geometry markers;
+- scan bounds;
+- walkable anchors;
+- off-mesh-link markers;
+- boss movement volumes;
+- recovery points;
+- forbidden regions.
+
+The final gameplay pathing still uses SULFUR's A* Recast Graph. Unity editor authoring does not imply use of
+Unity NavMesh.
+
+Editor tools may visualize the intended navigation surface, but the authoritative runtime result is the
+A* graph produced or applied inside SULFUR.
+
+### Original-boss movement models
+
+Original bosses are not required to inherit the complete vanilla `AiAgent` movement model.
+
+Each boss may select one of:
+
+1. normal `CustomRichAI` pathing;
+2. A* target queries plus scripted locomotion;
+3. fully scripted arena-relative movement;
+4. stationary boss with moving attack origins;
+5. multi-part or rail-based movement.
+
+The movement model must expose explicit authoritative state suitable for replication
+(see [OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitecture.md)).

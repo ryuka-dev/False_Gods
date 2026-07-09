@@ -23,6 +23,10 @@ unverified* until validated by the proof-of-concept.
 6. **[RiskList.md](RiskList.md)** — Ranked unknowns and their cheapest first-validation.
 7. **[MinimalProofOfConceptPlan.md](MinimalProofOfConceptPlan.md)** — The ~20×20 m test room and its
    pass/fail criteria.
+8. **[OriginalContentPipeline.md](OriginalContentPipeline.md)** — Unity project, original assets, prefabs,
+   shaders, materials, sprites, bundles, and editor-to-runtime workflow.
+9. **[OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitecture.md)** — The purpose-built
+   host-authoritative replication model for False Gods bosses.
 
 ## TL;DR of the key findings
 
@@ -38,6 +42,15 @@ unverified* until validated by the proof-of-concept.
 - **SULFUR Together already provides the multiplayer spine**: host owns level+seed, `NetLevelManifest`
   diffing, boss adapters (`IBossEncounterAdapter`/`NetBossEncounterManager`), host-driven enemy proxy, and a
   full `ArenaLockdownManager` (seal/barrier/teleport). The arena/boss should *reuse* these, not reinvent them.
+- **Unity prefab authoring is the intended production workflow.** Fixed arenas are built and previewed
+  visually in a matching-version Unity project, then loaded as mod-owned prefab/AssetBundle content.
+  Vanilla proxies are optional elements inside that prefab, not the primary layout format.
+- **Original bosses will use a network-native replication architecture.** Existing SULFUR Together boss
+  adapters remain useful references and infrastructure, but original bosses are not constrained to the
+  imperfect compatibility model required for vanilla boss synchronization.
 - **Highest-risk unknowns**: Addressables key stability & shader-variant coverage for reused assets; getting
   a custom mesh cleanly into the recast scan without the `NavMeshCleaner` flood-fill discarding it; and clean
   teardown so arena nav/objects don't leak into the next level. Validate these first (see RiskList + PoC).
+
+> Reference environment (verified from game files): **Unity 6000.3.6f1**, **URP** (Universal Render
+> Pipeline), with URP 2D renderer, ShaderGraph, VFX Graph, 2D Animation, and Timeline available.
