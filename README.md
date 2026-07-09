@@ -110,6 +110,7 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the structure and
 | `src/` | The eight module projects — reference lists only, no source yet | ✅ |
 | `tests/FalseGods.ArchitectureTests/` | The `FG-ARCH-*` boundary checks | ✅ |
 | `tests/Fixtures/` | Synthetic projects that prove the checks detect what they claim | ✅ |
+| `tools/FalseGods.Probe/` | Throwaway read-only PoC probe (P0/P1); outside `src/`, deleted after use | ✅ |
 | `scripts/verify.ps1` | The one-command local verification loop | ✅ |
 | `False Gods.slnx` | Solution | ✅ |
 | `global.json` | Pins the .NET SDK the checks were verified against | ✅ |

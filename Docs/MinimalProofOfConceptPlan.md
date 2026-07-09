@@ -37,6 +37,12 @@ documents describe one plan.
 |---|---|---|
 | P0 | BepInEx probe plugin loads; can read `AstarPath.active`, `GameManager.Instance.geometryLayer`, recast params | — |
 | P1 | Resolve + instantiate a vanilla cave prefab by Addressables key/GUID at runtime | R1 |
+
+> **P0/P1 probe built** — `tools/FalseGods.Probe` (a throwaway, read-only BepInEx plugin, outside `src/` and
+> outside the FG-ARCH rules; see its README). It compiles against the real game assemblies and covers the P0
+> reads and the P1 resolution/load. **Not yet run in-game** — that is the manual pre-release step. Building it
+> already corrected one documented fact (the recast rasterization members moved to `collectionSettings`;
+> report 4.2/4.4).
 | P2 | Load our own AssetBundle (built in the game's Unity version) with our ground mesh + layout | R2 |
 | P3 | Vanilla prefab **renders correctly** (no pink) under our lighting; test one vanilla floor material on our ground mesh | R6, R13, report 3.4 |
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |

@@ -1,0 +1,115 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ══ THROWAWAY DIAGNOSTIC TOOL — NOT PART OF THE PRODUCTION ARCHITECTURE ══
+
+    A read-only BepInEx probe that answers PoC steps P0 and P1 (Docs/MinimalProofOfConceptPlan.md §7.2)
+    by reading real values out of a running game, so RiskList R1/R3/R5 stop being guesses.
+
+    It deliberately lives OUTSIDE src/ and outside the FG-ARCH dependency rules:
+
+      - Nothing in src/ may reference it. A test asserts this.
+      - It answers to none of the module boundaries: it reads AstarPath, Addressables and game
+        singletons directly, because that is the entire point of a probe.
+      - It applies NO Harmony patches and mutates NO game state. Read-only.
+      - It is DISPOSABLE. When P0/P1 have been run and their results written back into
+        CollisionAndNavigationProposal.md §4.4 and RiskList R1/R3/R5, delete this project.
+
+    Deleting it must be a one-line change to the solution and nothing else. If that ever stops being
+    true, the probe has grown into production code and the boundary has been lost.
+
+    Build:   dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj
+    Deploy:  dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj -p:DeployProbe=true
+             (copies the DLL into $(BepInExPluginDir)\FalseGods.Probe; opt-in, so an ordinary
+              verify.ps1 run never writes outside the repository)
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Probe</AssemblyName>
+    <RootNamespace>FalseGods.Probe</RootNamespace>
+    <RequiresGameAssemblies>true</RequiresGameAssemblies>
+    <RequiresBepInEx>true</RequiresBepInEx>
+
+    <!-- Unity's API is not nullable-annotated and this code is throwaway; the repo-wide default only
+         produces noise here. -->
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Game -->
+    <Reference Include="PerfectRandom.Sulfur.Core">
+      <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PerfectRandom.Sulfur.LevelGeneration">
+      <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.LevelGeneration.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="netstandard">
+      <HintPath>$(SulfurManagedDir)\netstandard.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- P0: navigation. AstarPath derives from VersionedMonoBehaviour, which lives in PackageTools. -->
+    <Reference Include="AstarPathfindingProject">
+      <HintPath>$(SulfurManagedDir)\AstarPathfindingProject.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PackageTools">
+      <HintPath>$(SulfurManagedDir)\PackageTools.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- A*'s VersionedMonoBehaviour → MonoBehaviourGizmos base chain lives in Drawing. -->
+    <Reference Include="Drawing">
+      <HintPath>$(SulfurManagedDir)\Drawing.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- P1: vanilla asset resolution -->
+    <Reference Include="Unity.Addressables">
+      <HintPath>$(SulfurManagedDir)\Unity.Addressables.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.ResourceManager">
+      <HintPath>$(SulfurManagedDir)\Unity.ResourceManager.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Collider lives here (renderer/collider survey on the loaded vanilla prefab). -->
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- The game ships the new Input System; legacy UnityEngine.Input.GetKeyDown throws at runtime. -->
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(SulfurManagedDir)\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="DeployProbe" AfterTargets="Build" Condition="'$(DeployProbe)' == 'true' AND '$(BepInExPluginDir)' != ''">
+    <PropertyGroup>
+      <_ProbeDeployDir>$(BepInExPluginDir)\FalseGods.Probe</_ProbeDeployDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_ProbeDeployDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(_ProbeDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Text="Probe deployed → $(_ProbeDeployDir)" Importance="high" />
+  </Target>
+
+</Project>

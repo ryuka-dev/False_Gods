@@ -31,9 +31,13 @@ meshes. We follow the same instinct — never make the boss or players collide w
   obstacles: a handful of convex colliders. Nothing else.
 
 > The exact geometry layer index and the recast graph's rasterization mask are **serialized on the scene's
-> `AstarPath` component**, not in code. Read them at runtime for the PoC:
-> `AstarPath.active.data.recastGraph.mask` / `.rasterizeColliders` / `.rasterizeMeshes` and
-> `GameManager.Instance.geometryLayer`. (RiskList R3.)
+> `AstarPath` component**, not in code. Read them at runtime for the PoC (RiskList R3).
+>
+> **Corrected against the real `AstarPathfindingProject.dll`** (via `tools/FalseGods.Probe`): in this A*
+> version the rasterization inputs live on a nested `collectionSettings` object, not as top-level `RecastGraph`
+> fields. Read `AstarPath.active.data.recastGraph.collectionSettings.{layerMask, rasterizeColliders,
+> rasterizeMeshes}` and `GameManager.Instance.geometryLayer`. `RecastGraph.mask` / `.rasterizeColliders` /
+> `.rasterizeMeshes` still exist as `[Obsolete]` shims but should not be used. The measured values go in §4.4.
 
 ## 4.3 Navigation — the A\* recast graph (the real system)
 
@@ -99,12 +103,17 @@ if the arena needs disconnected walkable areas. A single flat arena floor needs 
 - `cellSize` (voxel size) is the one nav parameter set **from game code** per environment:
   `WorldEnvironment.navMeshVoxelSize = 0.1`. Match this for the arena's environment so agent fit is
   consistent.
-- The rest of the recast parameters — **character radius, walkable height, max slope, max step/climb**, and
-  the rasterization mask — are **serialized on the scene `AstarPath` RecastGraph**, not in code. Obtain the
-  real values at runtime for the PoC by reading
-  `AstarPath.active.data.recastGraph.{characterRadius, walkableHeight, walkableClimb, maxSlope, mask}` and
-  record them in this doc once measured. Design arena slopes/steps within those limits (keep the main floor
-  flat, per the arena design requirements).
+- The rest of the recast parameters — **character radius, walkable height, max slope, max step/climb** — are
+  **serialized on the scene `AstarPath` RecastGraph**, not in code, and the rasterization inputs are on its
+  nested `collectionSettings`. Obtain the real values at runtime for the PoC by reading
+  `AstarPath.active.data.recastGraph.{characterRadius, walkableHeight, walkableClimb, maxSlope}` and
+  `…recastGraph.collectionSettings.{layerMask, rasterizeColliders, rasterizeMeshes}`. Design arena slopes/steps
+  within those limits (keep the main floor flat, per the arena design requirements).
+
+> **Measured values — pending.** `tools/FalseGods.Probe` (PoC P0) reads exactly these members and writes them to
+> a report. Once it has run against a real level, replace this note with the measured `characterRadius`,
+> `walkableHeight`, `walkableClimb`, `maxSlope`, `cellSize`, `layerMask`, and `geometryLayer`, citing the probe
+> report. Until then these remain *proposed / unverified*.
 
 ## 4.5 Boss / enemy pathing
 

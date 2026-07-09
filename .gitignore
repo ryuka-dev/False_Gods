@@ -10,6 +10,10 @@ Decompiled/*
 # Any assets extracted from the player's local game install — never redistributed
 ExtractedAssets/
 
+# PoC probe run output (timestamped reports written next to the plugin at runtime)
+tools/**/probe-*.txt
+ProbeReports/
+
 # Build output
 bin/
 obj/
