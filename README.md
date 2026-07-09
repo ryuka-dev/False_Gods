@@ -47,8 +47,26 @@ False Gods bosses are authored as network-native encounters from the beginning:
 - snapshot and join-in-progress recovery;
 - no client-authoritative phase, damage, death, or attack selection.
 
-The project reuses SULFUR Together's transport, session, player registry, arena readiness, and lockdown
-infrastructure, while defining a purpose-built replication contract for original bosses.
+The project consumes SULFUR Together's transport, session, player registry, arena readiness, and lockdown
+capabilities **through project-owned ports** (never direct dependencies), while defining a purpose-built
+replication contract for original bosses.
+
+## Architecture boundaries
+
+Learning from SULFUR Together's system debt (boundaries added too late led to transport/session/boss/UI
+coupling), False Gods establishes strict boundaries **before** implementation:
+
+- **Inward dependency rule** — the boss/encounter domain (`FalseGods.Core`) knows nothing of Unity, BepInEx,
+  Harmony, SULFUR, A\*, Addressables, SULFUR Together, LiteNetLib, or Steam. Those live in outer integration
+  adapters.
+- **Transport and Steam P2P are invisible** to boss and arena code; adding/replacing a transport changes only
+  the SULFUR Together adapter.
+- **SULFUR Together is optional**, isolated behind `FalseGods.Integration.SulfurTogether`; single-player runs
+  with it absent.
+- Vanilla `BossFightHelper` / `BossPhase` / `IBossEncounterAdapter` are **reverse-engineering references, not
+  base classes** for original bosses.
+
+See [Docs/Architecture.md](Docs/Architecture.md) and [Docs/DependencyRules.md](Docs/DependencyRules.md).
 
 ## Repository layout
 

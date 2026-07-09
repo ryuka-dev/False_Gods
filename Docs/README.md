@@ -28,6 +28,15 @@ unverified* until validated by the proof-of-concept.
 9. **[OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitecture.md)** — The purpose-built
    host-authoritative replication model for False Gods bosses.
 
+### Architecture & process (boundaries before implementation)
+
+- **[Architecture.md](Architecture.md)** — module boundaries, inward dependency direction, ports, and the
+  Boss/Arena/Encounter split.
+- **[DependencyRules.md](DependencyRules.md)** — allowed/forbidden dependencies and the mechanical-enforcement
+  plan.
+- **[DefinitionOfDone.md](DefinitionOfDone.md)** — completion gates and the AI-development process rules.
+- **[ADRs/](ADRs/README.md)** — architecture decision records (ADR-001 … ADR-006).
+
 ## TL;DR of the key findings
 
 - **Levels are modular `Room` prefabs** (`Structure` + `Decoration`), grouped by `LevelBlock`
@@ -37,11 +46,17 @@ unverified* until validated by the proof-of-concept.
 - **Navigation is the A\* Pathfinding Project**, *not* Unity NavMesh. A persistent `AstarPath.active` recast
   graph is **re-scanned at runtime** each level; enemies move via `AiAgent` + `CustomRichAI`. A custom arena
   just needs its walkable geometry present when the recast graph scans (or a prebaked `NavmeshPrefab`).
-- **Bosses are `Npc` units driven by a `BossFightHelper` + `BossPhase`.** An original boss models onto that
-  template.
-- **SULFUR Together already provides the multiplayer spine**: host owns level+seed, `NetLevelManifest`
-  diffing, boss adapters (`IBossEncounterAdapter`/`NetBossEncounterManager`), host-driven enemy proxy, and a
-  full `ArenaLockdownManager` (seal/barrier/teleport). The arena/boss should *reuse* these, not reinvent them.
+- **Vanilla bosses are `Npc` units driven by a `BossFightHelper` + `BossPhase`** — these are
+  **reverse-engineering references, not base classes**. Original bosses are built from `FalseGods.Core`
+  types (Simulation / Presentation / Replication), not by subclassing vanilla helpers.
+- **SULFUR Together provides the multiplayer spine** — host owns level+seed, `NetLevelManifest` diffing,
+  host-driven enemy proxy, and a full `ArenaLockdownManager` (seal/barrier/teleport). False Gods **consumes
+  these through project-owned ports** in an optional `FalseGods.Integration.SulfurTogether` adapter — never by
+  direct dependency — and treats the vanilla boss adapters (`IBossEncounterAdapter`/`NetBossEncounterManager`)
+  as reference only.
+- **Boundaries before implementation.** `FalseGods.Core` is independent of Unity/SULFUR/BepInEx/Harmony/A\*/
+  Addressables/networking; transport and Steam are invisible to boss/arena code; SULFUR Together is optional.
+  See Architecture.md / DependencyRules.md.
 - **Unity prefab authoring is the intended production workflow.** Fixed arenas are built and previewed
   visually in a matching-version Unity project, then loaded as mod-owned prefab/AssetBundle content.
   Vanilla proxies are optional elements inside that prefab, not the primary layout format.

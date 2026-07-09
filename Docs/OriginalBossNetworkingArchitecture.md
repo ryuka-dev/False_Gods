@@ -24,12 +24,19 @@ more verifiable synchronization than any adapter over code that was never design
 
 | Layer | Runs on | Owns | Never does |
 |---|---|---|---|
-| **BossSimulation** | single-player **and** host only | phase, state machine, target/attack selection, authoritative RNG, movement intent, damage, health, weak points, summons, arena mechanisms, death/completion | render, guess on clients |
+| **BossSimulation** | single-player **and** host only | boss domain only: phase, state machine, target/attack selection, movement intent, damage, health, weak points, stagger, summons, death/completion, boss-specific domain events | render, guess on clients, own arena mechanisms |
 | **BossPresentation** | every machine | renderers/sprites, animation, particles, audio, telegraphs, camera FX, non-authoritative visual projectiles, interpolation | decide damage, phase, death, target, or attack outcome |
 | **BossReplication** | active only when SULFUR Together is present | host snapshots, discrete events, sequence numbers, sim tick/time, interpolation targets, duplicate suppression, late-join restore, desync detection, recovery snapshots | run gameplay logic |
 
 The layers are **assembly/type-isolated** so that `BossReplication` can be absent (single-player) without the
 simulation or presentation referencing any networking type (RiskList R20).
+
+**Boss ≠ arena.** `BossSimulation` owns only the boss. Arena mechanisms (gates, hazards, phase objects, exit)
+are owned by a separate `ArenaSimulation`, and an `EncounterCoordinator` bridges them via project-owned
+commands/events (e.g. boss `PhaseChanged(2)` → coordinator → arena `ActivateMechanismGroup("phase_2")`). This
+keeps a boss reusable across arenas and testable arena-less. Full split:
+[Architecture.md §5](Architecture.md). All three consume outer systems only through Core **ports**
+([Architecture.md §6](Architecture.md)); replication/state authority still follows the rules below.
 
 ## 9.3 Run modes
 
@@ -59,7 +66,7 @@ simulation or presentation referencing any networking type (RiskList R20).
 Two carriers (mirrors ST's channel semantics in `NetworkingArchitecture.md`):
 
 - **Unreliable snapshots** — continuous correction: `BossReplicatedState` (position/rotation/health/phase/
-  state/attack/weak-points/mechanism/RNG state + `LastProcessedEventSequence`). Loss is tolerated; snapshots
+  state/attack/weak-points/mechanism + `LastProcessedEventSequence`). Loss is tolerated; snapshots
   never *drive* discrete transitions.
 - **Reliable, sequenced discrete events** — `BossDiscreteEvent` (`AttackSelected`, `TelegraphStarted`,
   `AttackCommitted`, `ProjectileSpawned`, `PhaseChanged`, `WeakPointChanged`, `AddSpawned`,
@@ -72,8 +79,10 @@ Two carriers (mirrors ST's channel semantics in `NetworkingArchitecture.md`):
 
 - **Attack selection:** host picks once; clients never roll. `AttackInstanceId` ties the whole telegraph→
   commit→projectile chain together.
-- **Deterministic random:** authoritative RNG state/seed is host-owned and replicated; clients apply, never
-  generate (invariant... see §9.10).
+- **Deterministic random:** the host performs random decisions once and replicates their **result** (e.g.
+  the selected attack / target), not the RNG state. Clients apply results and never roll. The host's RNG
+  state stays **host-internal**; it is replicated only if a concrete need arises (replay, save/restore, host
+  recovery) — since clients do not re-simulate, they need the outcome, not the generator.
 - **Movement:** host computes movement intent per the boss's chosen movement model
   ([CollisionAndNavigationProposal.md §4.8](CollisionAndNavigationProposal.md)); clients interpolate from
   snapshots.
@@ -87,7 +96,7 @@ Two carriers (mirrors ST's channel semantics in `NetworkingArchitecture.md`):
 ## 9.8 Join-in-progress & recovery
 
 - A client joining mid-fight first receives a **full baseline snapshot** (current phase, state, active
-  attack, weak points, adds, arena mechanism state, RNG state) **before** normal event processing begins
+  attack, weak points, adds, arena mechanism state) **before** normal event processing begins
   (invariant 6, RiskList R18).
 - Periodic **recovery snapshots** let a client that missed/!desynced rebuild without a full rejoin.
 
@@ -114,18 +123,24 @@ report 4.6, [MultiplayerLoadingContract.md §5.11](MultiplayerLoadingContract.md
 
 ## 9.12 SULFUR Together: reuse vs reference vs new
 
-| Component | Disposition | Notes |
+**Boundary rule:** False Gods consumes SULFUR Together (ST) capabilities **only through project-owned ports
+implemented inside `FalseGods.Integration.SulfurTogether`** ([Architecture.md](Architecture.md),
+[DependencyRules.md](DependencyRules.md)). No boss, arena, protocol, or presentation code references ST,
+LiteNetLib, Steam, `CoopConnection`, `NetService`, `NetArenaCommand`, or any concrete ST message/manager type.
+"Consume via port" below means exactly that — never a direct dependency.
+
+| ST capability | Disposition | Port (implemented in the ST adapter) |
 |---|---|---|
-| LiteNetLib transport (+ Steam P2P loopback) | **Reuse directly** | The wire under everything (`NetworkingArchitecture.md`). |
-| Session / connection lifecycle | **Reuse directly** | `CoopConnection`, session bring-up/teardown. |
-| Player registry (`GameManager.Players` incl. headless remotes) | **Reuse directly** | Needed for ready-gate + enemy activation (`EnemyActivationAndPlayersRegistry.md`). |
-| Arena readiness / lockdown (`ArenaLockdownManager`, `ArenaBarrierManager`, `ArenaDoorwaySensor`, `NetArenaCommand`, `NetClientArenaEnter`) | **Reuse directly** | Seal/barrier/teleport for the arena (report 5). |
-| Level/seed authority + `NetLevelManifest` | **Reuse directly / model on** | Host owns entry; `ArenaManifest` mirrors the manifest header. |
-| Runtime spawn + world/entity roster (`NetRuntimeSpawn`, `NetWorldEntityRoster`) | **Reuse / model on** | Host-owned adds; stable ids. |
-| Message envelope + `Net*`/`Net*Codec`/`Register` pattern | **Reuse pattern** | Add False Gods codecs; add a small versioned family only if the generic envelope can't carry snapshots/events (§5.10). |
-| Boss adapter stack (`IBossEncounterAdapter`, `NetBossEncounterManager`, `BossReflect`, msgs 28–43) | **Reference only** | A vanilla-compat design; original bosses use the layered model instead of fitting its state model. |
-| Host-driven proxy discipline (`HostDrivenProxyPlan.md`) | **Reference / principle** | Confirms "client = non-autonomous puppet"; our presentation layer is the clean-room version. |
-| BossSimulation / BossPresentation / BossReplication split, sim-tick time model, `BossReplicatedState` / `BossDiscreteEvent`, attack-instance identity, duplicate suppression, join-in-progress baseline | **New to False Gods** | The purpose-built contract this document defines. |
+| LiteNetLib transport (+ Steam P2P loopback) | **Consume via port** — transport is invisible to False Gods | `IEncounterChannel` (reliable/unreliable send/receive) |
+| Session / connection lifecycle (`CoopConnection`) | **Consume via port** | `IMultiplayerSession` (host/client role, join/leave) |
+| Player registry (`GameManager.Players` incl. headless remotes) | **Consume via port** | `IPlayerRoster` / `IPlayerQuery` |
+| Arena readiness / lockdown (`ArenaLockdownManager`, `ArenaBarrierManager`, `ArenaDoorwaySensor`, `NetArenaCommand`, `NetClientArenaEnter`) | **Consume via port** | `IArenaLockdownPort` |
+| Level/seed authority + `NetLevelManifest` | **Model on; consume via port** | `IMultiplayerSession` (arena-entry authority); `ArenaManifest` mirrors the header shape |
+| Runtime spawn + world/entity roster (`NetRuntimeSpawn`, `NetWorldEntityRoster`) | **Model on; consume via port** | `ISpawnPort` / `IEncounterReplication` (stable ids) |
+| Message envelope + `Net*`/`Net*Codec`/`Register` pattern | **Reuse pattern inside the adapter only** | Adapter serializes Protocol DTOs; message ids/registration never leave the adapter (§5.10) |
+| Boss adapter stack (`IBossEncounterAdapter`, `NetBossEncounterManager`, `BossReflect`, msgs 28–43) | **Reference only** | Vanilla-compat design; original bosses use the layered model, not this state model — no dependency |
+| Host-driven proxy discipline (`HostDrivenProxyPlan.md`) | **Reference / principle** | Confirms "client = non-autonomous puppet"; our presentation layer is the clean-room version |
+| BossSimulation / BossPresentation / BossReplication split, sim-tick time model, `BossReplicatedState` / `BossDiscreteEvent`, attack-instance identity, duplicate suppression, join-in-progress baseline | **New to False Gods** | Defined in Core/Protocol; the purpose-built contract this document specifies |
 
 ## 9.13 Running without SULFUR Together
 

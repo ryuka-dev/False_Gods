@@ -54,7 +54,8 @@ The PoC is split into two phases:
 
 ## 7.4 Explicitly out of scope for the PoC
 - The full large square cave arena.
-- The original boss (`BossFightHelper`/`BossPhase` subclass, adapter) — only an ordinary enemy is tested here.
+- The original boss — only an ordinary enemy is tested here. (The boss is an original `FalseGods.Core`
+  `BossSimulation`, **not** a `BossFightHelper`/`BossPhase` subclass; those vanilla types are references only.)
 - Procedural / random arena assembly (fixed room only).
 - Phase-changing terrain, destructibles, mechanisms.
 
@@ -69,6 +70,14 @@ The PoC is split into two phases:
 # Phase B — Original Boss Networking Vertical Slice
 
 This is not the final first boss. It is a temporary test actor proving the False Gods boss architecture.
+
+**Follow the vertical-slice order** ([DefinitionOfDone.md §3](DefinitionOfDone.md)): establish the minimum
+module skeleton (`FalseGods.Core` / `.Protocol` / `.UnityRuntime` / `.Plugin` + the two integration adapters,
+per [Architecture.md](Architecture.md)) → arena PoC (Phase A) → one temporary `BossSimulation` in Core → one
+`BossPresentation` in UnityRuntime → single-player → transport-neutral snapshots/events in Protocol → connect
+via `FalseGods.Integration.SulfurTogether` → host/client validation. Extract shared abstractions **only** from
+demonstrated repetition — do not build a universal boss framework up front. The three layers below map to
+`BossSimulation` (Core), `BossPresentation` (UnityRuntime), and `BossReplication` (via the ST adapter).
 
 ## 7.6.1 Test boss
 

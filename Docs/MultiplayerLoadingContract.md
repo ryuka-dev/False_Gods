@@ -7,18 +7,24 @@ compatibility model. The deep boss model lives in
 [OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitecture.md); this report covers the
 loading/arena contract and how the boss plugs into it.
 
-## 5.1 What SULFUR Together already provides (reuse targets)
+## 5.1 What SULFUR Together provides, and the port it is consumed through
 
-| Concern | Existing system (SULFUR Together) | Reuse for the arena |
+**Boundary rule:** these capabilities are consumed **only** through project-owned ports implemented in
+`FalseGods.Integration.SulfurTogether` ([Architecture.md](Architecture.md), [DependencyRules.md](DependencyRules.md)).
+Boss/arena/protocol/presentation code never references SULFUR Together (ST), LiteNetLib, Steam,
+`CoopConnection`, `NetService`, `NetArenaCommand`, or any concrete ST message/manager. False Gods must not know
+which transport ST uses.
+
+| Concern | Existing system (SULFUR Together) | Consumed via port (in the ST adapter) |
 |---|---|---|
-| Transport | LiteNetLib (+ Steam P2P loopback), host-authoritative | Ride the same layer; add a small versioned message family only if the generic envelope can't carry it. |
-| "Which level + seed" | Host owns it. `HostSceneRequest(11)`/`ClientSceneAck(12)`, deterministic gen, `NetGenerationInputCapture` (`SceneTransitionAndLinkState.md`) | The host decides when everyone enters the arena and with what identity. |
-| Level content agreement | **`NetLevelManifest`** — host's generation-result summary (seed, rooms, units, `GenerationHash`) the client diffs against its local world | Model `ArenaId`/`ArenaVersion` on this; for a fixed arena it's a tiny manifest. |
-| Boss fight | Adapter pattern: `IBossEncounterAdapter`, `NetBossEncounterManager`, `BossReflect`; msgs **28–43**; host runs real fight via `Unit.ReceiveDamage`, client mirrors; presentation suppressed by default (`BossAuthority.md`) | **Reference only** — this is a compatibility layer for vanilla bosses. Original bosses use a purpose-built replication protocol (§5.4–5.9); they may reuse the manager/envelope where it fits, but are not required to fit the vanilla adapter's state model. |
-| Pre-fight convergence | Room sync / **room sealing** / dialog / teleport (`BossPreFightFlow.md`) | The arena's seal + teleport-in reuse this. |
-| Arena sealing | **`ArenaLockdownManager`** (host-authoritative membership + timer + force-seal barrier + teleport), `ArenaBarrierManager`, `ArenaDoorwaySensor`, `NetArenaCommand`, `NetClientArenaEnter` | Our arena boundary/seal reuses this directly. |
-| Enemy authority | Host-driven proxy: client enemies are non-autonomous puppets, damage suppressed; `NetRuntimeSpawn`, `NetWorldEntityRoster` (stable `HostSpawnIndex`/HostNetId), `NetGameplayEnemyStateSnapshot` (`HostDrivenProxyPlan.md`) | The boss and any adds are host-owned; clients render puppets. |
-| Enemy activation | `NpcUpdateManager.LateUpdate` is host-singleton bound; fix = register remote players in `GameManager.Players` (`EnemyActivationAndPlayersRegistry.md`) | Ensures the boss/adds wake for a client who enters first. |
+| Transport | LiteNetLib (+ Steam P2P loopback), host-authoritative | `IEncounterChannel` — reliable/unreliable send/receive of Protocol DTOs; transport is invisible to False Gods. |
+| "Which level + seed" | Host owns it. `HostSceneRequest(11)`/`ClientSceneAck(12)`, deterministic gen, `NetGenerationInputCapture` (`SceneTransitionAndLinkState.md`) | `IMultiplayerSession` — host decides when everyone enters the arena and with what identity. |
+| Level content agreement | **`NetLevelManifest`** — host's generation-result summary (seed, rooms, units, `GenerationHash`) the client diffs against its local world | Model `ArenaId`/`ArenaVersion` on the manifest shape; delivered via `IEncounterChannel`. |
+| Boss fight | Adapter pattern: `IBossEncounterAdapter`, `NetBossEncounterManager`, `BossReflect`; msgs **28–43** (`BossAuthority.md`) | **Reference only** — a vanilla-compat layer. Original bosses use the network-native model (§5.4–5.9); no dependency on the vanilla adapter's state model. |
+| Pre-fight convergence | Room sync / **room sealing** / dialog / teleport (`BossPreFightFlow.md`) | `IArenaLockdownPort` — seal + teleport-in. |
+| Arena sealing | **`ArenaLockdownManager`**, `ArenaBarrierManager`, `ArenaDoorwaySensor`, `NetArenaCommand`, `NetClientArenaEnter` | `IArenaLockdownPort` — arena boundary/seal/barrier/teleport. |
+| Enemy authority | Host-driven proxy: client enemies are non-autonomous puppets; `NetRuntimeSpawn`, `NetWorldEntityRoster` (stable ids), `NetGameplayEnemyStateSnapshot` (`HostDrivenProxyPlan.md`) | `ISpawnPort` / `IEncounterReplication` — boss & adds host-owned; clients render puppets. |
+| Enemy activation | `NpcUpdateManager.LateUpdate` is host-singleton bound; fix = register remote players in `GameManager.Players` (`EnemyActivationAndPlayersRegistry.md`) | `IPlayerRoster` — remote players registered so the boss/adds wake for a client who enters first. |
 
 ## 5.2 Arena identity
 
@@ -80,8 +86,9 @@ was not designed for networking.
 False Gods owns the source and design of its original bosses, so it should not inherit every limitation of
 that compatibility layer.
 
-The project should reuse SULFUR Together's transport/session infrastructure, but define a purpose-built
-original-boss replication protocol where needed.
+The project should consume SULFUR Together's transport/session capabilities **through the project-owned ports
+of §5.1** (never by direct dependency), and define a purpose-built original-boss replication protocol where
+needed.
 
 ## 5.5 Network-native False Gods boss model
 
@@ -101,14 +108,15 @@ Owns:
 - state-machine transition;
 - target selection;
 - attack selection;
-- authoritative random decisions;
+- authoritative decisions (random outcomes are decided **once on the host**; the result is replicated, not the RNG state);
 - movement intent;
 - damage;
 - health;
 - weak points;
 - summons;
-- arena mechanisms;
 - death and completion.
+
+`BossSimulation` owns **only the boss** — arena mechanisms belong to `ArenaSimulation` (below).
 
 ### BossPresentation
 
@@ -143,10 +151,28 @@ Owns:
 - desync detection;
 - recovery snapshots.
 
+### ArenaSimulation & EncounterCoordinator
+
+The arena is **not** part of the boss. `ArenaSimulation` (a.k.a. `ArenaStateMachine`) owns arena gameplay
+state — gates, hazards, destructible/phase objects, safe/unsafe regions, arena mechanisms, and the exit
+state. An `EncounterCoordinator` bridges boss and arena via project-owned commands/events, so neither reaches
+into the other's internals:
+
+```
+BossSimulation emits PhaseChanged(2)
+    → EncounterCoordinator evaluates encounter rules
+        → ArenaSimulation receives ActivateMechanismGroup("phase_2")
+```
+
+Both are `FalseGods.Core` concerns and, like the boss, are host-authoritative in multiplayer and consume
+outer systems only through ports. This keeps one boss reusable across arenas and one arena reusable across
+bosses ([Architecture.md §5](Architecture.md)).
+
 ## 5.6 During the fight — authority split
 
-**Host (BossSimulation) owns:** boss AI + pathing (report 4.5), target selection, boss position/rotation,
-attacks & damage, **phase changes**, arena mechanism state, add spawns, fight start/end, exit unlock.
+**Host owns:** `BossSimulation` (AI + pathing (report 4.5), target selection, boss position/rotation, attacks
+& damage, **phase changes**, add spawns) and `ArenaSimulation` (arena mechanism state), plus fight start/end
+and exit unlock — coordinated by the `EncounterCoordinator`.
 
 **Client (BossPresentation) owns / does:** load the identical arena, render visuals, play arena FX,
 **interpolate** the boss puppet from host snapshots, update mechanisms/environment from host state. Clients
@@ -179,10 +205,15 @@ BossReplicatedState {
   MaxHealth
   WeakPointStates[]
   ArenaMechanismState
-  AuthoritativeRandomStateOrSeed
   LastProcessedEventSequence
 }
 ```
+
+> The default snapshot carries **decision results**, not RNG state — the client does not re-simulate, so it
+> needs outcomes (selected attack/target), not the host's random generator. The host's authoritative RNG state
+> is host-internal and is replicated **only** if a concrete need arises (replay, save/restore, host recovery);
+> it is deliberately **not** a default `BossReplicatedState` field (see
+> [ADR-005](ADRs/ADR-005-Snapshot-And-Discrete-Event-Replication.md), RiskList R31-adjacent).
 
 Discrete transitions (reliable, sequenced):
 
@@ -245,9 +276,14 @@ If it can, reuse the envelope and add False Gods codecs/payloads.
 If it cannot, add a small versioned message family dedicated to original bosses. Avoid one-off message types
 per individual boss.
 
-Arena-loading messages stay minimal and follow SULFUR Together's `Net*` + `Net*Codec` + `Register` pattern
-(`NetworkingArchitecture.md`): at most `EnterArena` (host→client, reliable-ordered) and `ArenaReady`
-(client→host, reliable-ordered), with ids appended after the existing 46.
+**Message ids, codecs, and registration live entirely inside `FalseGods.Integration.SulfurTogether`.**
+`FalseGods.Core` and `FalseGods.Protocol` deal only in transport-neutral DTOs (`BossSnapshot`,
+`BossDiscreteEvent`, `ArenaManifest`); the adapter serializes them onto whatever envelope/ids ST uses. Nothing
+outside the adapter knows a message id or the `Net*` types.
+
+Arena-loading messages stay minimal and (inside the adapter) follow SULFUR Together's `Net*` + `Net*Codec` +
+`Register` pattern (`NetworkingArchitecture.md`): at most `EnterArena` (host→client, reliable-ordered) and
+`ArenaReady` (client→host, reliable-ordered), with ids appended after the existing 46.
 
 ## 5.11 Exit & teardown (synchronized)
 
