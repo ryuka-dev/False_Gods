@@ -63,7 +63,12 @@ public sealed class PluginDoesNotReferenceStAdapterChecks
             $"{Environment.NewLine}  " + string.Join(Environment.NewLine + "  ", offences)));
     }
 
+    // Reads the compiled FalseGods.Plugin.dll — an OUTER assembly that needs the game + BepInEx DLLs to
+    // build. A CI runner has neither, so this check runs locally and at L3, not in CI. The project-graph
+    // check above needs no build and DOES run in CI, so the rule's first line of defence is still enforced
+    // there. (Docs/ArchitectureEnforcement.md §6.2; scripts/verify.ps1 -CiSafe filters this out.)
     [Fact]
+    [Trait("Requires", "BuiltOuterAssemblies")]
     [ArchitectureRule(RuleId)]
     public void Plugin_assembly_metadata_does_not_reference_the_st_adapter()
     {
@@ -94,7 +99,9 @@ public sealed class PluginDoesNotReferenceStAdapterChecks
             $"  refs:          {string.Join(", ", referenced)}"));
     }
 
+    // Also reads the compiled Plugin.dll — same reason, excluded from CI (see above).
     [Fact]
+    [Trait("Requires", "BuiltOuterAssemblies")]
     [ArchitectureRule(RuleId)]
     public void The_assembly_inspected_belongs_to_the_configuration_being_verified()
     {

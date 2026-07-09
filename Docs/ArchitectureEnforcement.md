@@ -4,9 +4,10 @@
 added, excepted, or retired.*
 
 **Partially implemented.** The module skeleton's restricted project references give the compiler protection
-described in §5, and **two rules now have working automated checks** — `FG-ARCH-002` and `FG-ARCH-010` — run by
-`.\scripts\verify.ps1`. The other eight are `Planned`. **There is no CI**, so no rule is `Required in CI`.
-See §5 for each rule and §13 for the overall picture.
+described in §5; **two rules have working automated checks** — `FG-ARCH-002` and `FG-ARCH-010` — run by
+`.\scripts\verify.ps1`; and a **CI workflow** (`.github/workflows/verify.yml`) runs the game-independent subset
+on every push and PR. The other eight rules are `Planned`. **No rule is `Required in CI` yet**: CI runs but does
+not block merges until branch protection is configured (§4.1). See §5 for each rule and §13 for the picture.
 
 ## 1. Purpose and authority
 
@@ -91,18 +92,49 @@ Explicitly *not* in this command: launching Unity, launching SULFUR, and anythin
 The build step passes `--disable-build-servers -m:1` so the loop also works in constrained or sandboxed
 environments, where persistent MSBuild and Roslyn server processes are unavailable.
 
+`.\scripts\verify.ps1 -CiSafe` runs the game-independent subset — inner assemblies + the checks that need no
+compiled outer DLL. It is what CI runs; you run the full form. See §4.1 for exactly what the subset drops and
+why.
+
 ## 4. CI enforcement levels
 
 | Level | Runs | Contains | Blocking? |
 |---|---|---|---|
-| **L0 — local** | `.\scripts\verify.ps1`, before commit | build, Core tests, architecture tests, `git diff --check` | Developer's own loop |
-| **L1 — pull request** | every PR | everything in L0, on a clean checkout | **Yes** for rules marked `Required in CI` |
-| **L2 — packaging** | on tag / release build | L1 + the package check (no vanilla assets in the bundle; adapter packaged as its own plugin) | **Yes** |
+| **L0 — local** | `.\scripts\verify.ps1`, before commit | full build (incl. outer assemblies), architecture tests, `git diff --check` | Developer's own loop |
+| **L1 — CI** | `.github/workflows/verify.yml` on push + PR | `verify.ps1 -CiSafe` (inner build + the game-independent checks) + a PR-range whitespace check | See §4.1 |
+| **L2 — packaging** | on tag / release build | L1 + the package check (no vanilla assets in the bundle; adapter packaged as its own plugin) | Not built yet |
 | **L3 — manual / pre-release** | by hand, before a release | in-game probes, single-player smoke test, **host + client** two-instance validation, adapter-DLL-deleted launch | Release gate, **not** a per-commit gate |
 
 L3 is where the PoC lives ([MinimalProofOfConceptPlan.md](MinimalProofOfConceptPlan.md)). Two game instances,
 a Unity editor, and a real install cannot gate an ordinary commit — that would make the boundary rules feel
 like an obstacle, which is exactly how boundary rules get deleted.
+
+### 4.1 What CI covers, and what it deliberately cannot
+
+CI is `verify.ps1 -CiSafe`: it builds the **inner** assemblies (Core / Protocol / RuntimeContracts /
+Application, which need no game) and the test project, and runs every architecture check except those that
+read a compiled **outer** assembly. The runner has no SULFUR or BepInEx DLLs — those must never be committed —
+so it cannot build UnityRuntime / Integration.* / Plugin.
+
+| | Covered by CI | Why / why not |
+|---|---|---|
+| Inner assemblies build with no game | ✅ | The property CI exists to guard; the compiler enforces FG-ARCH-001/007 there. |
+| **FG-ARCH-002 project-graph layer** | ✅ | MSBuild *evaluation* needs no DLLs (report §6, §6.2); it catches an added-but-unused reference — the common mistake. |
+| **FG-ARCH-010** and all self-tests | ✅ | Pure logic / evaluation / in-memory Roslyn; no game. |
+| Probe isolation checks | ✅ | Project-graph evaluation only. |
+| **FG-ARCH-002 metadata layer** | ❌ | Reads `FalseGods.Plugin.dll`, an outer assembly CI cannot build. Stays L0 + L3. |
+| Outer-assembly compiler protection (FG-ARCH-003/006) | ❌ | CI does not build the outer assemblies, so their *compile-time* protection is a **local-only** guarantee (L0's full build). CI would only regain it via an evaluation-layer check per rule — not yet written. |
+
+So CI enforces the **first line of defence** for the rules it can (evaluation + inner build); the outer
+assemblies' compile-time protection and the FG-ARCH-002 metadata layer remain L0/L3. This is the split from
+report §6.2, made concrete. Extending CI to the outer *reference graphs* (evaluation-layer checks for
+FG-ARCH-003/005/006, mirroring FG-ARCH-002) is the natural next enforcement step.
+
+**"Blocking" needs branch protection, which is separate from this file.** The workflow *runs* on every push
+and PR, but a red result does not *prevent* a merge until the repository's branch-protection settings mark the
+`verify` check as required and require PRs before merging master. Until that is configured, CI reports but does
+not gate — see §11 and the project's setup notes. That is why FG-ARCH-002/010 below are still `Implemented`,
+not `Required in CI`.
 
 ## 5. Rule registry
 
@@ -168,8 +200,9 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 
   Neither layer is a text search. The first is MSBuild's own evaluation, so imports and conditions are
   resolved; the second is CLI metadata, so generics and indirection are resolved.
-- **Check status:** `Implemented` — the check exists and fails when run. **Not** `Required in CI`: there is no
-  CI yet. It should be the first rule promoted when CI arrives.
+- **Check status:** `Implemented`. **In CI:** the **project-graph layer runs** in CI (`verify.ps1 -CiSafe`); the
+  **metadata layer does not** — it reads the outer `Plugin.dll`, which CI cannot build (§4.1). Not yet
+  `Required in CI` (branch protection pending); this is the first rule to promote once it is.
 - **Compiler protection:** `Full`. `src/FalseGods.Plugin/FalseGods.Plugin.csproj` references
   `Integration.Sulfur` and not `Integration.SulfurTogether`; naming an adapter type from the Plugin fails with
   `CS0234`. **This is the rule whose residual gap matters most** — the compiler cannot stop someone from adding
@@ -306,7 +339,8 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
      authority and its machine-readable projection);
   5. every rule has an `<a id="fg-arch-0nn"></a>` anchor here, so the link each failure message prints actually
      resolves.
-- **Check status:** `Implemented` — the check exists and fails when run. Not `Required in CI`: there is no CI yet.
+- **Check status:** `Implemented`. **In CI:** yes — it needs no game and runs fully in `verify.ps1 -CiSafe`.
+  Not yet `Required in CI` (branch protection pending, §4.1).
 - **Compiler protection:** `None`. Nothing about a missing rule id is a compile error.
 - **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/RuleRegistryChecks.cs`, with the logic in
   `Rules/RuleRegistryValidator.cs` kept as pure functions so it can be tested against a deliberately wrong
@@ -490,41 +524,41 @@ Retiring a rule is the same sequence in reverse, and the id stays burned.
 
 The module skeleton exists: eight projects under `src/`, a `Directory.Build.props`/`.targets` pair,
 `global.json`, and `False Gods.slnx`. The production projects contain **no source files** — their entire content
-is the reference graph, and that graph is already doing work. The architecture test project and
-`scripts/verify.ps1` exist and run in about ten seconds.
+is the reference graph, and that graph is already doing work. The architecture test project, `scripts/verify.ps1`
+(with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
 
-| Rule | Check status | Compiler protection |
-|---|---|---|
-| FG-ARCH-001 | `Planned` | `Full` — Core declares no reference at all |
-| **FG-ARCH-002** | **`Implemented`** — project graph **and** `AssemblyRef` | `Full` — Plugin does not reference the adapter |
-| FG-ARCH-003 | `Planned` | `Full` — UnityRuntime does not reference Protocol |
-| FG-ARCH-004 | `Planned` | `Partial`, via FG-ARCH-003 |
-| FG-ARCH-005 | `Planned` | `Partial` — no project references ST/LiteNetLib/Steamworks |
-| FG-ARCH-006 | `Planned` | `Full` — only Integration.Sulfur references 0Harmony |
-| FG-ARCH-007 | `Planned` | `Full` — RuntimeContracts references Core alone |
-| FG-ARCH-008 | `Planned` | `None` — needs the Protocol types to exist |
-| FG-ARCH-009 | `Planned` | `Partial`, via FG-ARCH-002 |
-| **FG-ARCH-010** | **`Implemented`** — attribute scan + registry/document agreement | `None` |
+| Rule | Check status | Runs in CI? | Compiler protection |
+|---|---|---|---|
+| FG-ARCH-001 | `Planned` | via inner build | `Full` — Core declares no reference at all |
+| **FG-ARCH-002** | **`Implemented`** — project graph **and** `AssemblyRef` | project-graph layer only | `Full` — Plugin does not reference the adapter |
+| FG-ARCH-003 | `Planned` | ✗ (outer; compiler-only, L0) | `Full` — UnityRuntime does not reference Protocol |
+| FG-ARCH-004 | `Planned` | ✗ | `Partial`, via FG-ARCH-003 |
+| FG-ARCH-005 | `Planned` | ✗ (no check yet) | `Partial` — no project references ST/LiteNetLib/Steamworks |
+| FG-ARCH-006 | `Planned` | ✗ (outer; compiler-only, L0) | `Full` — only Integration.Sulfur references 0Harmony |
+| FG-ARCH-007 | `Planned` | via inner build | `Full` — RuntimeContracts references Core alone |
+| FG-ARCH-008 | `Planned` | ✗ | `None` — needs the Protocol types to exist |
+| FG-ARCH-009 | `Planned` | project-graph layer only | `Partial`, via FG-ARCH-002 |
+| **FG-ARCH-010** | **`Implemented`** — attribute scan + registry/document agreement | ✅ | `None` |
 
-**No rule is `Required in CI`, because there is no CI.** That is the next stage, not this one.
+**Nothing is `Required in CI` yet** — the workflow *runs* on push and PR, but a red result does not block a
+merge until branch protection marks the `verify` check required and requires PRs before merging master (§4.1).
+Once that is configured, FG-ARCH-002 (project-graph layer) and FG-ARCH-010 become the first `Required in CI`.
 
 Every `Full` above was checked by writing the violation and confirming the compiler rejected it (`CS0246` /
-`CS0234`), not by reading the csproj and assuming. Two further properties were verified the same way:
-
-- `FalseGods.Core`, `.Protocol`, `.RuntimeContracts`, and `.Application` build with `SulfurManagedDir` and
-  `BepInExCoreDir` forced empty — that is, **on a machine with no SULFUR and no BepInEx installed.** The
-  Unity-less, testable domain is not an aspiration; it compiles.
-- The four outer projects refuse to build with those paths unset, and say which path to set and where.
+`CS0234`), not by reading the csproj and assuming. The `-CiSafe` path was checked the same way: the inner
+assemblies and the test project build with `SulfurManagedDir`/`BepInExCoreDir` empty, and the CI-safe test
+subset passes with **every outer DLL physically removed** (so nothing silently depends on one).
 
 Still not created:
 
-- any CI workflow (so nothing is mandatory on a pull request)
-- any check for the other eight rules
+- **branch protection** (a repository setting, not a file) — without it CI reports but does not gate
+- an evaluation-layer check for FG-ARCH-003/005/006, which would let CI cover the outer *reference graphs*
+  (report §4.1) — the natural next step
 - Core unit tests (Core has no code to test)
 - any `.asmdef` (the Unity authoring project is separate — see
   [OriginalContentPipeline.md §8.2](OriginalContentPipeline.md))
 - any source file in any of the eight production projects
 
-**Next.** A CI workflow that runs `scripts/verify.ps1` on every pull request, promoting FG-ARCH-002 and
-FG-ARCH-010 to `Required in CI`. After that, FG-ARCH-001/003/007 are nearly free: the two inspectors already
-exist, and each rule becomes an allow-list of assembly names plus a fixture.
+**Next.** Configure branch protection (promotes FG-ARCH-002/010 to `Required in CI`), then add
+evaluation-layer checks for FG-ARCH-003/005/006 so CI covers the outer reference graphs too — each is an
+allow-list of assembly names plus a fixture, reusing the two inspectors that already exist.

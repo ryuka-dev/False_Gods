@@ -1,0 +1,60 @@
+# Architecture verification (CI = the L1 enforcement level in Docs/ArchitectureEnforcement.md section 4).
+#
+# This runs the game-independent subset of scripts/verify.ps1. It does NOT build the outer assemblies
+# (UnityRuntime / Integration.* / Plugin), which need the SULFUR and BepInEx DLLs that a runner does not
+# have and that must never be committed. What CI cannot cover -- the FG-ARCH-002 metadata layer and any
+# check over a compiled outer assembly -- stays local + L3 (Docs report section 6.2).
+#
+# One source of truth: CI calls the same scripts/verify.ps1 you run locally, only with -CiSafe. The logic
+# is not duplicated here; this file adds only what is CI-specific (checkout, SDK setup, a PR-range
+# whitespace check that the local working-tree check cannot express).
+
+name: verify
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# A newer push to the same branch/PR cancels the older in-flight run.
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # Windows: the projects target net472, verify.ps1 is written for Windows PowerShell 5.1, and the
+    # solution is a .slnx. A Linux runner cannot stand in.
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the PR-range whitespace check can reach the base commit.
+          fetch-depth: 0
+
+      - name: Set up .NET (pinned by global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Windows PowerShell 5.1 (shell: powershell), matching the local environment verify.ps1 targets --
+      # not pwsh 7, whose native-stderr handling differs from what the script was written and tested against.
+      - name: Verify (CI-safe subset)
+        shell: powershell
+        run: .\scripts\verify.ps1 -CiSafe
+
+      # verify.ps1's own whitespace step is `git diff HEAD --check`, which on a fresh CI checkout compares
+      # nothing (no uncommitted changes). The meaningful CI question is "does THIS PR introduce whitespace
+      # damage", i.e. base..head -- which needs the PR context the local script has no access to.
+      - name: Whitespace check (PR range)
+        if: github.event_name == 'pull_request'
+        shell: powershell
+        run: |
+          git -c core.safecrlf=false diff --check "origin/${{ github.base_ref }}...HEAD"
+          if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: whitespace/conflict markers in the PR diff"; exit $LASTEXITCODE }
+          Write-Host "  clean"

@@ -23,13 +23,24 @@
     (<Configurations>), which this script reads from MSBuild rather than hardcoding. Defaults to Debug,
     matching VerificationContext.DefaultConfiguration in the test project.
 
+.PARAMETER CiSafe
+    Runs the subset that needs no game install: builds only the inner assemblies (Core / Protocol /
+    RuntimeContracts / Application) plus the test project, and skips architecture checks that read a
+    compiled OUTER assembly (they need the game DLLs to build, which CI does not have — Docs report §6.2).
+
+    ONE script, one source of truth: -CiSafe narrows what runs, it does not fork the logic. GitHub CI calls
+    this with -CiSafe; you run it without. What CI cannot cover — the FG-ARCH-002 metadata layer and any
+    check over an outer DLL — stays your responsibility locally and at L3.
+
 .EXAMPLE
     .\scripts\verify.ps1
     .\scripts\verify.ps1 -Configuration Release
+    .\scripts\verify.ps1 -CiSafe            # what the GitHub workflow runs
 #>
 [CmdletBinding()]
 param(
-    [string] $Configuration = 'Debug'
+    [string] $Configuration = 'Debug',
+    [switch] $CiSafe
 )
 
 Set-StrictMode -Version Latest
@@ -124,24 +135,45 @@ try {
     Write-Host "  configuration $Configuration (declared: $($allowed -join ', '))"
 
     # ------------------------------------------------- 2. build
-    Start-Step "Build ($Configuration)"
+    Start-Step "Build ($Configuration)$(if ($CiSafe) { ' - CI-safe: inner assemblies + tests' })"
 
     # --disable-build-servers and -m:1 keep this working in constrained/sandboxed environments,
     # where persistent MSBuild/Roslyn server processes are unavailable or blocked.
-    Invoke-Native -What 'dotnet build' -Command {
-        & dotnet build $solution --configuration $Configuration --disable-build-servers -m:1 --nologo -v minimal
+    if ($CiSafe) {
+        # The outer assemblies (UnityRuntime / Integration.* / Plugin) reference the game and BepInEx DLLs,
+        # which a CI runner does not have — building the solution would fail on them. Build only what needs
+        # no game: FalseGods.Application (which pulls in Core / Protocol / RuntimeContracts) and the test
+        # project. That the inner four build with no game installed is the property CI exists to guard.
+        $innerRoot = Join-Path $repoRoot 'src/FalseGods.Application/FalseGods.Application.csproj'
+        Invoke-Native -What 'dotnet build (inner assemblies)' -Command {
+            & dotnet build $innerRoot --configuration $Configuration --disable-build-servers -m:1 --nologo -v minimal
+        }
+        Invoke-Native -What 'dotnet build (architecture tests)' -Command {
+            & dotnet build $testProject --configuration $Configuration --disable-build-servers -m:1 --nologo -v minimal
+        }
+    }
+    else {
+        Invoke-Native -What 'dotnet build' -Command {
+            & dotnet build $solution --configuration $Configuration --disable-build-servers -m:1 --nologo -v minimal
+        }
     }
 
     # ------------------------------------------------- 3. architecture tests
-    Start-Step "Architecture tests ($Configuration)"
+    Start-Step "Architecture tests ($Configuration)$(if ($CiSafe) { ' - CI-safe subset' })"
 
     # Tell the checks which configuration was just built, so the FG-ARCH-002 metadata check reads THAT
     # assembly and never a stale one from the other configuration. The test process inherits this.
     $env:FALSEGODS_VERIFY_CONFIGURATION = $Configuration
 
     # --no-build: step 2 just built it, and the metadata check needs those exact binaries.
+    # In CI-safe mode, exclude checks that read a compiled OUTER assembly (Requires=BuiltOuterAssemblies):
+    # the outer DLLs were not built above, so those checks belong to local/L3, not CI (Docs report §6.2).
+    $testArgs = @('test', $testProject, '--configuration', $Configuration, '--no-build', '--nologo', '-v', 'minimal')
+    if ($CiSafe) {
+        $testArgs += @('--filter', 'Requires!=BuiltOuterAssemblies')
+    }
     Invoke-Native -What 'architecture tests' -Command {
-        & dotnet test $testProject --configuration $Configuration --no-build --nologo -v minimal
+        & dotnet @testArgs
     }
 
     # ------------------------------------------------- 4. whitespace
