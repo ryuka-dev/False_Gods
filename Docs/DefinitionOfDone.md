@@ -1,6 +1,6 @@
 # Definition of Done
 
-*Completion gates and the AI-assisted development process for False Gods.* A feature is not "done" when it
+*Completion gates and the development process for False Gods.* A feature is not "done" when it
 merely works once; it is done when it meets the gates below and respects the boundaries in
 [Architecture.md](Architecture.md) / [DependencyRules.md](DependencyRules.md). How those boundaries are checked
 mechanically — and which checks exist yet — lives in
@@ -99,7 +99,7 @@ architecture check named below is currently `Planned`.
 - Every architecture check cited a rule id from
   [ArchitectureEnforcement.md §5](ArchitectureEnforcement.md) (`FG-ARCH-010`).
 
-## 2. AI-assisted development process
+## 2. Development process
 
 ### Before implementing a feature — identify:
 - the owning module;
