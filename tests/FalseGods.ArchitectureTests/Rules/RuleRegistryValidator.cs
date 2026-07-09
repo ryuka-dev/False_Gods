@@ -29,8 +29,8 @@ public static class RuleRegistryValidator
     }
 
     /// <summary>
-    /// Rules claiming to be <see cref="CheckStatus.Implemented"/> or <see cref="CheckStatus.RequiredInCi"/>
-    /// that no check actually cites. This is the half that catches a rule quietly declared done.
+    /// Rules with at least one <see cref="CheckStatus.Implemented"/> or <see cref="CheckStatus.RequiredInCi"/>
+    /// layer that no check actually cites. This is the half that catches a rule quietly declared done.
     /// </summary>
     public static IReadOnlyList<string> FindEnforcedRulesWithoutChecks(
         IEnumerable<ArchitectureRule> registry,
@@ -38,7 +38,7 @@ public static class RuleRegistryValidator
     {
         var cited = citedRuleIds.ToHashSet(StringComparer.Ordinal);
         return registry
-            .Where(r => r.CheckStatus is CheckStatus.Implemented or CheckStatus.RequiredInCi)
+            .Where(r => r.IsEnforcedByAnyLayer)
             .Where(r => !cited.Contains(r.Id))
             .Select(r => r.Id)
             .OrderBy(id => id, StringComparer.Ordinal)
@@ -107,5 +107,86 @@ public static class RuleRegistryValidator
             .Where(id => !markdown.Contains($"<a id=\"{id.ToLowerInvariant()}\"></a>", StringComparison.Ordinal))
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToList();
+    }
+
+    // ------------------------------------------------------------ layer status
+
+    /// <summary>One row of the document's layer-status table, or of the registry's projection onto it.</summary>
+    public sealed record LayerStatusRow(string RuleId, string Layer, string Status)
+    {
+        public override string ToString() => $"{RuleId} | {Layer} | {Status}";
+    }
+
+    public const string LayerTableBeginMarker = "<!-- BEGIN FG-ARCH-LAYER-STATUS -->";
+    public const string LayerTableEndMarker = "<!-- END FG-ARCH-LAYER-STATUS -->";
+
+    /// <summary>
+    /// The layer-status table the document publishes, parsed from between the two markers.
+    ///
+    /// A prose "Check status:" line cannot be parsed without a brittle regex over English, and a brittle
+    /// check is worse than none (§12). So the document carries one delimited table whose three columns are
+    /// exactly the registry's three fields, and this reads it back.
+    ///
+    /// Returns an empty list when the markers are absent or reversed. That is not "the table is fine" —
+    /// callers must treat an empty result as a failure, or renaming a marker would silently disable the
+    /// comparison.
+    /// </summary>
+    public static IReadOnlyList<LayerStatusRow> ParseLayerStatusTable(string markdown)
+    {
+        var start = markdown.IndexOf(LayerTableBeginMarker, StringComparison.Ordinal);
+        var end = markdown.IndexOf(LayerTableEndMarker, StringComparison.Ordinal);
+
+        if (start < 0 || end < 0 || end <= start)
+            return Array.Empty<LayerStatusRow>();
+
+        var block = markdown[(start + LayerTableBeginMarker.Length)..end];
+        var rows = new List<LayerStatusRow>();
+
+        foreach (var line in block.Split('\n'))
+        {
+            var trimmed = line.Trim();
+
+            if (!trimmed.StartsWith('|'))
+                continue;
+
+            var cells = trimmed.Trim('|')
+                               .Split('|')
+                               // Tolerate the markdown a human would reach for: `code`, **bold**.
+                               .Select(cell => cell.Trim().Trim('`', '*', ' '))
+                               .ToList();
+
+            // Skips the header row and the |---|---|---| separator, neither of which starts with a rule id.
+            if (cells.Count != 3 || !RuleIdPattern.IsMatch(cells[0]))
+                continue;
+
+            rows.Add(new LayerStatusRow(cells[0], cells[1], cells[2]));
+        }
+
+        return rows;
+    }
+
+    /// <summary>The registry, expressed in the same three columns, so the two can be compared as sets.</summary>
+    public static IReadOnlyList<LayerStatusRow> ProjectRegistryOntoLayerStatusRows(IEnumerable<ArchitectureRule> registry) =>
+        registry.SelectMany(rule => rule.Layers.Select(layer =>
+                    new LayerStatusRow(rule.Id, layer.Name, ArchitectureRuleRegistry.Display(layer.Status))))
+                .ToList();
+
+    /// <summary>
+    /// Rows present in one side and not the other, as printable strings. The registry and the document must
+    /// agree exactly: a layer promoted in code but not in the table is a rule whose documented enforcement
+    /// is now a lie, and vice versa.
+    /// </summary>
+    public static (IReadOnlyList<string> OnlyInDocument, IReadOnlyList<string> OnlyInRegistry) DiffLayerStatusRows(
+        IEnumerable<LayerStatusRow> documentRows,
+        IEnumerable<LayerStatusRow> registryRows)
+    {
+        var document = documentRows.Select(r => r.ToString()).ToList();
+        var registry = registryRows.Select(r => r.ToString()).ToList();
+
+        return (Sorted(document.Except(registry, StringComparer.Ordinal)),
+                Sorted(registry.Except(document, StringComparer.Ordinal)));
+
+        static IReadOnlyList<string> Sorted(IEnumerable<string> rows) =>
+            rows.OrderBy(row => row, StringComparer.Ordinal).ToList();
     }
 }
