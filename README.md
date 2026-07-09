@@ -3,7 +3,7 @@
 A SULFUR mod that adds original bosses and dedicated boss-arena maps. It is designed to work in **both**:
 
 - **Vanilla single-player SULFUR**, and
-- **[SULFUR Together](../SULFUR%20Together)** multiplayer, where the **host is authoritative** over the
+- **[SULFUR Together](https://github.com/ryuka-dev/SULFUR-Together)** multiplayer, where the **host is authoritative** over the
   boss, the arena, and the combat flow.
 
 > **Status: research + an empty module skeleton.** This repository contains the design documents, a local
