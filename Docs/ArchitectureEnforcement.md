@@ -68,7 +68,8 @@ Optionally `-Configuration Release`; the default is `Debug`. It runs, in order, 
 1. SDK + configuration    (the version pinned by global.json; -Configuration is one the projects declare)
 2. dotnet build           (restricted project references — the compiler catches most violations)
 3. Architecture tests     (the FG-ARCH-* checks, told which configuration was just built)
-4. git diff HEAD --check  (whitespace damage / conflict markers, staged AND unstaged)
+4. Whitespace checks      (git diff HEAD --check, staged AND unstaged; plus the committed range
+                           BaseRef...HEAD — default origin/master — the same range CI checks on a PR)
 ```
 
 A few details that are load-bearing rather than incidental:
@@ -85,7 +86,13 @@ A few details that are load-bearing rather than incidental:
 - **`git diff HEAD --check`, not `git diff --check`.** The latter sees only *unstaged* changes, so whitespace
   damage that was already `git add`-ed passes the very check meant to catch it before a commit. `HEAD` covers
   staged and unstaged modifications to tracked files. It does **not** cover untracked files — they have no
-  diff; `git add` brings them into scope. CI will instead diff a base commit against `HEAD`.
+  diff; `git add` brings them into scope.
+- **The committed range is checked too** (`BaseRef...HEAD`, default `origin/master`, override with
+  `-BaseRef`). `git diff HEAD --check` is empty right after a commit, so damage in an already-committed file
+  would pass every local gate and die only in CI's PR-range step — PR #6 did exactly that (a Unity
+  `ProjectSettings` file with Unity's trailing-space YAML, committed before the matching `.gitattributes`
+  exemption was broad enough). If no merge base with `BaseRef` exists (a clone that never fetched), the range
+  check is skipped with an explicit notice rather than silently passing.
 - Native commands are judged only by exit code, with `$ErrorActionPreference` relaxed around them. In Windows
   PowerShell 5.1 a native command's redirected stderr becomes a terminating error, and `git` writes harmless
   CRLF advisories there — so the script would "fail" on a clean tree, but only when its output was piped. A
@@ -108,8 +115,8 @@ why.
 
 | Level | Runs | Contains | Blocking? |
 |---|---|---|---|
-| **L0 — local** | `.\scripts\verify.ps1`, before commit | full build (incl. outer assemblies), architecture tests, `git diff --check` | Developer's own loop |
-| **L1 — CI** | `.github/workflows/verify.yml` on push + PR | `verify.ps1 -CiSafe` (inner build + the game-independent checks) + a PR-range whitespace check | See §4.1 |
+| **L0 — local** | `.\scripts\verify.ps1`, before commit | full build (incl. outer assemblies), architecture tests, whitespace checks (working tree + committed range vs `origin/master`) | Developer's own loop |
+| **L1 — CI** | `.github/workflows/verify.yml` on push + PR | `verify.ps1 -CiSafe` (inner build + the game-independent checks) + a PR-range whitespace check against the PR's actual base ref | See §4.1 |
 | **L2 — packaging** | on tag / release build | L1 + the package check (no vanilla assets in the bundle; adapter packaged as its own plugin) | Not built yet |
 | **L3 — manual / pre-release** | by hand, before a release | in-game probes, single-player smoke test, **host + client** two-instance validation, adapter-DLL-deleted launch | Release gate, **not** a per-commit gate |
 

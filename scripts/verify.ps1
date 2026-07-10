@@ -9,7 +9,10 @@
       2. dotnet build        — restricted project references; the compiler catches most boundary violations
       3. test projects       — every test project under tests/ (the FG-ARCH-* checks plus the unit tests),
                                told which configuration was just built
-      4. git diff HEAD --check — whitespace damage and conflict markers, staged AND unstaged
+      4. whitespace checks   — git diff HEAD --check (staged AND unstaged), plus the committed range
+                               BaseRef...HEAD (default origin/master) when a merge base exists: the same
+                               range CI checks on a pull request. Without it, damage in an already-committed
+                               file only surfaces in CI (it did once: PR #6, a Unity ProjectSettings file).
 
     Success and failure are decided by PROCESS EXIT CODES, never by searching output for the word
     "error". That matters more than it looks: this repository's own build prints "0 个错误" on success,
@@ -33,6 +36,12 @@
     this with -CiSafe; you run it without. What CI cannot cover — the FG-ARCH-002 metadata layer and any
     check over an outer DLL — stays your responsibility locally and at L3.
 
+.PARAMETER BaseRef
+    The ref the committed-range whitespace check diffs against (BaseRef...HEAD). Default: origin/master —
+    the only PR base this repository uses (CONTRIBUTING.md). When the ref is missing or shares no merge
+    base with HEAD (e.g. a clone that never fetched), the range check is skipped with an explicit notice;
+    the working-tree check always runs.
+
 .EXAMPLE
     .\scripts\verify.ps1
     .\scripts\verify.ps1 -Configuration Release
@@ -41,7 +50,8 @@
 [CmdletBinding()]
 param(
     [string] $Configuration = 'Debug',
-    [switch] $CiSafe
+    [switch] $CiSafe,
+    [string] $BaseRef = 'origin/master'
 )
 
 Set-StrictMode -Version Latest
@@ -117,6 +127,21 @@ function Invoke-Native {
     }
 
     if ($PassThru) { return $output }
+}
+
+<#
+    Runs a native command whose FAILURE is an answer, not an error: returns its stdout on exit code 0,
+    $null otherwise. Same function-scoped ErrorActionPreference dance as Invoke-Native, for the same
+    stderr-under-5.1 reason; stderr is additionally discarded because a probe's advisory text is noise.
+#>
+function Invoke-NativeQuery {
+    param([Parameter(Mandatory)] [scriptblock] $Command)
+
+    $ErrorActionPreference = 'Continue'
+
+    $output = & $Command 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $output
 }
 
 Push-Location $repoRoot
@@ -201,7 +226,7 @@ try {
     }
 
     # ------------------------------------------------- 4. whitespace
-    Start-Step 'git diff HEAD --check'
+    Start-Step 'Whitespace (working tree + committed range)'
 
     # HEAD, not the bare working-tree diff: `git diff --check` only sees UNSTAGED changes, so whitespace
     # damage that was already `git add`-ed would sail through the very check meant to catch it before commit.
@@ -213,7 +238,24 @@ try {
     Invoke-Native -What 'git diff HEAD --check (whitespace damage or conflict markers, staged or unstaged)' -Command {
         & git -c core.safecrlf=false diff HEAD --check
     }
-    Write-Host '  clean'
+    Write-Host '  working tree clean'
+
+    # The committed range too — the same BaseRef...HEAD expression CI checks on a pull request
+    # (.github/workflows/verify.yml). `git diff HEAD --check` is empty right after a commit, so damage in an
+    # already-committed file passes every local gate and dies in CI (PR #6 did exactly that). Checking the
+    # range here — and therefore in the pre-push hook, which runs this script — closes that gap before the
+    # push leaves the machine. Guarded by a merge-base probe: a missing remote ref degrades to an explicit
+    # notice, never to a green checkmark that checked nothing.
+    $mergeBase = Invoke-NativeQuery { & git merge-base $BaseRef HEAD }
+    if ($mergeBase) {
+        Invoke-Native -What "git diff $BaseRef...HEAD --check (whitespace in the committed range CI checks)" -Command {
+            & git -c core.safecrlf=false diff --check "$BaseRef...HEAD"
+        }
+        Write-Host "  committed range vs $BaseRef clean"
+    }
+    else {
+        Write-Host "  NOTE: skipped the committed-range check - no merge base with '$BaseRef' (fetch the remote, or pass -BaseRef)" -ForegroundColor Yellow
+    }
 
     # ------------------------------------------------- done
     $elapsed = (Get-Date) - $startedAt

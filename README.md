@@ -154,9 +154,10 @@ machine with no game and no BepInEx installed, which is what makes the domain un
 2. `.\scripts\setup-dev.ps1` — installs the version-controlled git hooks for this clone (see below).
    Run it **once per clone**.
 3. `.\scripts\verify.ps1` — validates the SDK and configuration, builds the solution, runs the architecture
-   checks against *that* build, and runs `git diff HEAD --check` (staged and unstaged). Takes about twenty
-   seconds. Add `-Configuration Release` to verify that configuration. If a required path is missing, the build
-   tells you which one.
+   checks against *that* build, and runs the whitespace checks: `git diff HEAD --check` (staged and unstaged)
+   plus the committed range `origin/master...HEAD` — the same range CI checks on a PR (`-BaseRef` overrides
+   the base). Takes about twenty seconds. Add `-Configuration Release` to verify that configuration. If a
+   required path is missing, the build tells you which one.
 4. (Optional) Regenerate the decompile reference — see `Decompiled/README.md`.
 
 ### Local pre-push hook
