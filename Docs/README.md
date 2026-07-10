@@ -2,8 +2,10 @@
 
 Feasibility investigation for building an original boss **arena map** for SULFUR that works in vanilla
 single-player and in host-authoritative SULFUR Together multiplayer. **No gameplay implementation yet** — the
-repository holds these reports plus an empty module skeleton under `src/`, whose project reference lists encode
-the boundaries below ([ArchitectureEnforcement.md §13](ArchitectureEnforcement.md)).
+repository holds these reports, the module skeleton under `src/` whose project reference lists encode the
+boundaries below ([ArchitectureEnforcement.md §13](ArchitectureEnforcement.md)) — with `FalseGods.Protocol`
+carrying the first real slice (`ArenaManifest` + canonical `ContentHash`) — and the `FalseGods.Unity`
+authoring project that generates and bundles the PoC test room (report 8, PoC step P2).
 
 All claims are grounded in the decompiled game assemblies (`../Decompiled/`, gitignored) and in SULFUR
 Together's own docs/source. Concrete type/method names are cited; runtime behaviour is marked *proposed /
@@ -84,5 +86,6 @@ unverified* until validated by the proof-of-concept.
 
 > Reference environment: **Unity 6000.3.6f1** (confirmed at runtime by the PoC probe), **URP** (Universal
 > Render Pipeline), with URP 2D renderer, ShaderGraph, VFX Graph, 2D Animation, and Timeline available;
-> **A\* Pathfinding Project 5.3.8**. PoC steps P0/P1 have been run in-game — RiskList R1 verified, R3 verified
-> (with a design-changing finding), R5 mechanism confirmed; see report 4.2/4.4.
+> **A\* Pathfinding Project 5.3.8**. PoC steps P0/P1/P2 have been run in-game — RiskList R1 verified, R2
+> verified (our own 6000.3.6f1 bundle loads with meshes/materials/layers intact), R3 verified (with a
+> design-changing finding), R5 mechanism confirmed; see report 4.2/4.4 and report 7 §7.2.

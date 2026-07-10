@@ -9,7 +9,7 @@ using UnityEngine.InputSystem;
 namespace FalseGods.Probe
 {
     /// <summary>
-    /// Read-only diagnostic plugin for PoC steps P0 and P1. Applies no Harmony patches and mutates no
+    /// Read-only diagnostic plugin for PoC steps P0, P1 and P2. Applies no Harmony patches and mutates no
     /// authoritative game state.
     ///
     /// Timing is driven by the game's own canonical "navigation scan finished" event, not by polling for
@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.2.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -112,7 +112,7 @@ namespace FalseGods.Probe
 
             var report = new ProbeReport(Logger);
 
-            report.Line("False Gods — PoC probe P0/P1");
+            report.Line("False Gods — PoC probe P0/P1/P2");
             report.Line($"trigger: {trigger}");
             report.Line($"utc:     {DateTime.UtcNow:O}");
             report.Line(new string('═', 78));
@@ -131,11 +131,14 @@ namespace FalseGods.Probe
             // hence the guard inside AddressablesProbe rather than around it.
             yield return AddressablesProbe.Run(report);
 
+            // P2 awaits AssetBundle loads — same coroutine + inner-guard structure as P1.
+            yield return BundleProbe.Run(report);
+
             report.Line();
             report.Line(new string('═', 78));
             report.Line("End of probe. Transcribe results into:");
             report.Line("  Docs/CollisionAndNavigationProposal.md §4.4  (recast agent parameters)");
-            report.Line("  Docs/RiskList.md  R1 / R3 / R5");
+            report.Line("  Docs/RiskList.md  R1 / R2 / R3 / R5");
 
             string path = null;
             try
