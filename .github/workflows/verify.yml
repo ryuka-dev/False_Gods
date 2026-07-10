@@ -6,8 +6,9 @@
 # check over a compiled outer assembly -- stays local + L3 (Docs report section 6.2).
 #
 # One source of truth: CI calls the same scripts/verify.ps1 you run locally, only with -CiSafe. The logic
-# is not duplicated here; this file adds only what is CI-specific (checkout, SDK setup, a PR-range
-# whitespace check that the local working-tree check cannot express).
+# is not duplicated here; this file adds only what is CI-specific (checkout, SDK setup, and a PR-range
+# whitespace check pinned to the PR's ACTUAL base ref — verify.ps1 checks the same range shape locally,
+# but against its -BaseRef default of origin/master).
 
 name: verify
 
@@ -48,9 +49,10 @@ jobs:
         shell: powershell
         run: .\scripts\verify.ps1 -CiSafe
 
-      # verify.ps1's own whitespace step is `git diff HEAD --check`, which on a fresh CI checkout compares
-      # nothing (no uncommitted changes). The meaningful CI question is "does THIS PR introduce whitespace
-      # damage", i.e. base..head -- which needs the PR context the local script has no access to.
+      # verify.ps1 checks the committed range too, but against its -BaseRef default (origin/master). This
+      # step asks the question with the PR's ACTUAL base ref from the event context, so it stays authoritative
+      # even if a PR ever targets a different base branch. (On a fresh checkout the script's working-tree
+      # diff is empty; the range is the check that means something in CI.)
       - name: Whitespace check (PR range)
         if: github.event_name == 'pull_request'
         shell: powershell
