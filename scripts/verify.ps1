@@ -7,7 +7,8 @@
       1. SDK + configuration — the pinned SDK from global.json is present, and -Configuration is one the
                                projects actually declare (read from MSBuild, not assumed)
       2. dotnet build        — restricted project references; the compiler catches most boundary violations
-      3. architecture tests  — the FG-ARCH-* checks, told which configuration was just built
+      3. test projects       — every test project under tests/ (the FG-ARCH-* checks plus the unit tests),
+                               told which configuration was just built
       4. git diff HEAD --check — whitespace damage and conflict markers, staged AND unstaged
 
     Success and failure are decided by PROCESS EXIT CODES, never by searching output for the word
@@ -48,7 +49,20 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $repoRoot 'False Gods.slnx'
-$testProject = Join-Path $repoRoot 'tests/FalseGods.ArchitectureTests/FalseGods.ArchitectureTests.csproj'
+# Every test project under tests/ EXCEPT the Fixtures (which are input data for the architecture checks,
+# not test assemblies). Discovered from disk rather than hardcoded, the same way the checks discover
+# production projects from src/ (RepoLayout.ProductionProjectNames): a test project added later is covered
+# automatically instead of silently going unrun.
+$testProjects = @(
+    Get-ChildItem -Path (Join-Path $repoRoot 'tests') -Directory |
+        Where-Object { $_.Name -ne 'Fixtures' } |
+        ForEach-Object { Join-Path $_.FullName ($_.Name + '.csproj') } |
+        Where-Object { Test-Path $_ } |
+        Sort-Object
+)
+if ($testProjects.Count -eq 0) {
+    throw 'No test projects found under tests/. Expected at least FalseGods.ArchitectureTests.'
+}
 # Any production project will do: Directory.Build.props declares <Configurations> for all of them, and
 # a test asserts they agree.
 $configurationProbeProject = Join-Path $repoRoot 'src/FalseGods.Core/FalseGods.Core.csproj'
@@ -148,8 +162,14 @@ try {
         Invoke-Native -What 'dotnet build (inner assemblies)' -Command {
             & dotnet build $innerRoot --configuration $Configuration --disable-build-servers -m:1 --nologo -v minimal
         }
-        Invoke-Native -What 'dotnet build (architecture tests)' -Command {
-            & dotnet build $testProject --configuration $Configuration --disable-build-servers -m:1 --nologo -v minimal
+        # Both test projects build with no game installed: the architecture tests reference nothing under src/,
+        # and the unit tests reference only inner assemblies (Protocol -> Core). That is exactly the property CI
+        # exists to guard, so both belong in the CI-safe subset.
+        foreach ($testProject in $testProjects) {
+            $testProjectName = [System.IO.Path]::GetFileNameWithoutExtension($testProject)
+            Invoke-Native -What "dotnet build ($testProjectName)" -Command {
+                & dotnet build $testProject --configuration $Configuration --disable-build-servers -m:1 --nologo -v minimal
+            }
         }
     }
     else {
@@ -165,15 +185,19 @@ try {
     # assembly and never a stale one from the other configuration. The test process inherits this.
     $env:FALSEGODS_VERIFY_CONFIGURATION = $Configuration
 
-    # --no-build: step 2 just built it, and the metadata check needs those exact binaries.
+    # --no-build: step 2 just built these, and the FG-ARCH-002 metadata check needs those exact binaries.
     # In CI-safe mode, exclude checks that read a compiled OUTER assembly (Requires=BuiltOuterAssemblies):
-    # the outer DLLs were not built above, so those checks belong to local/L3, not CI (Docs report §6.2).
-    $testArgs = @('test', $testProject, '--configuration', $Configuration, '--no-build', '--nologo', '-v', 'minimal')
-    if ($CiSafe) {
-        $testArgs += @('--filter', 'Requires!=BuiltOuterAssemblies')
-    }
-    Invoke-Native -What 'architecture tests' -Command {
-        & dotnet @testArgs
+    # the outer DLLs were not built above, so those checks belong to local/L3, not CI (Docs report §6.2). A
+    # test with no Requires trait (every unit test) still runs under that filter, which is what we want.
+    foreach ($testProject in $testProjects) {
+        $testProjectName = [System.IO.Path]::GetFileNameWithoutExtension($testProject)
+        $testArgs = @('test', $testProject, '--configuration', $Configuration, '--no-build', '--nologo', '-v', 'minimal')
+        if ($CiSafe) {
+            $testArgs += @('--filter', 'Requires!=BuiltOuterAssemblies')
+        }
+        Invoke-Native -What "tests ($testProjectName)" -Command {
+            & dotnet @testArgs
+        }
     }
 
     # ------------------------------------------------- 4. whitespace

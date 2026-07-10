@@ -38,10 +38,10 @@ cd "$repo_root" || {
 while read -r local_ref local_sha remote_ref remote_sha; do :; done
 
 run_verify() {
-    # -File with a relative path resolves against the working directory set above. ExecutionPolicy Bypass
-    # covers a machine whose default policy would otherwise refuse to run a local script; nothing is
-    # downloaded. Windows PowerShell 5.1 (powershell.exe), matching what verify.ps1 targets.
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1 -Configuration "$1"
+    # -File with a relative path resolves against the working directory set above. Use the machine's configured
+    # PowerShell execution policy instead of bypassing it; all supported development machines can run repo-local
+    # scripts directly. Windows PowerShell 5.1 (powershell.exe), matching what verify.ps1 targets.
+    powershell.exe -NoProfile -File scripts/verify.ps1 -Configuration "$1"
 }
 
 for configuration in Debug Release; do

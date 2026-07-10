@@ -11,5 +11,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/FalseGods.ArchitectureTests/FalseGods.ArchitectureTests.csproj" />
+    <Project Path="tests/FalseGods.ProtocolTests/FalseGods.ProtocolTests.csproj" />
   </Folder>
 </Solution>

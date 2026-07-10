@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit tests for FalseGods.Protocol. Unlike FalseGods.ArchitectureTests (a build-time auditor that
+    targets net10 and references nothing under src/), these are ordinary unit tests: they reference the
+    production assembly and exercise its behaviour. So this project keeps the repo-wide net472 target and
+    ProjectReferences FalseGods.Protocol directly.
+
+    Scope today: the canonical ContentHash (RiskList R34) — reproducible across load orders, and a
+    fail-closed export failure on NaN/infinity/duplicate/missing marker/zero-length quaternion. No game,
+    no Unity, no network: this is exactly the layer that must be verifiable on a bare machine.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.ProtocolTests</AssemblyName>
+    <RootNamespace>FalseGods.ProtocolTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <!-- A test host must carry the test platform into its own output to start; the repo-wide default is the
+         opposite (false) because the production plugins must not litter the plugins folder. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FalseGods.Protocol\FalseGods.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>
