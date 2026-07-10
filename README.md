@@ -6,12 +6,14 @@ A SULFUR mod that adds original bosses and dedicated boss-arena maps. It is desi
 - **[SULFUR Together](https://github.com/ryuka-dev/SULFUR-Together)** multiplayer, where the **host is authoritative** over the
   boss, the arena, and the combat flow.
 
-> **Status: research + an empty module skeleton.** This repository contains the design documents, a local
-> reverse-engineering reference, and the eight project files that encode the architecture's dependency graph.
-> **The projects contain no source files**: there is no plugin, boss, arena, or asset yet. The skeleton exists
-> first on purpose — the compiler enforces the module boundaries the moment the reference lists exist, so the
-> first boss grows inside them rather than being retrofitted into them later. The first implementation target
-> is a single boss in a **fixed** arena; procedural arena assembly is a later goal.
+> **Status: research + the first thin implementation slices.** This repository contains the design documents,
+> a local reverse-engineering reference, the eight project files that encode the architecture's dependency
+> graph, the first `FalseGods.Protocol` slice (`ArenaManifest` + canonical `ContentHash`), and the
+> `FalseGods.Unity` authoring project that generates and bundles the proof-of-concept test room (PoC step P2).
+> **There is no plugin, boss, or playable arena yet.** The skeleton exists first on purpose — the compiler
+> enforces the module boundaries the moment the reference lists exist, so the first boss grows inside them
+> rather than being retrofitted into them later. The first implementation target is a single boss in a
+> **fixed** arena; procedural arena assembly is a later goal.
 
 ## Goals & principles
 

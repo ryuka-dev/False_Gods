@@ -1,15 +1,16 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2)
 
 A read-only BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
-[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0** and **P1**
+[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1** and **P2**
 ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
 
 **This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
-results transcribed into report 4.2/4.4 and RiskList R1/R3/R5 — so it can be deleted now. The one reason to
-keep it a little longer: at **P5** it can re-check R5 (does *our* arena's `NavMeshAnchor` survive the cleaner)
-inside the custom arena, which is the same read it already does. Delete it after P5 at the latest. Deleting it
-is a one-line change — it is not in `False Gods.slnx` and nothing under `src/` references it, both enforced by
-`tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
+results transcribed into report 4.2/4.4 and RiskList R1/R3/R5. P2 (our own AssetBundle loads) runs from the
+same report; once its result is transcribed into RiskList R2 the P2 section is done too. The one reason to
+keep the probe a little longer: at **P5** it can re-check R5 (does *our* arena's `NavMeshAnchor` survive the
+cleaner) inside the custom arena, which is the same read it already does. Delete it after P5 at the latest.
+Deleting it is a one-line change — it is not in `False Gods.slnx` and nothing under `src/` references it, both
+enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 
 ## What it answers
 
@@ -21,6 +22,7 @@ is a one-line change — it is not in `False Gods.slnx` and nothing under `src/`
 | P0 | Is `AstarPath.active` really rebuilt per level? (lifecycle claim behind ADR-002 / R8) | `AstarPath.active.GetInstanceID()` changing across levels |
 | P1 / **R1** | Can mod code resolve, load **and instantiate** a vanilla room prefab by the GUIDs the game itself holds? | `LevelBlock.roomPrefabsAddressable` → `LoadResourceLocationsAsync` → `LoadAssetAsync<GameObject>` → `Instantiate` |
 | P1 / R6 | (bonus) What shaders and collider layers does a vanilla room prefab carry? | renderers / colliders on the instantiated prefab |
+| P2 / **R2** | Does an AssetBundle built in the game's exact Unity version (`FalseGods.Unity`, 6000.3.6f1) load under BepInEx with meshes/materials/collider layers intact? | `AssetBundle.LoadFromFileAsync` on `BepInEx/FalseGods.Probe/falsegods-poc-room.bundle` → instantiate under an inactive holder → inspect → `Unload(true)` |
 
 It mutates **no authoritative game state**: no Harmony patches, no manager registration, no world spawn. P1's
 acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so no
@@ -49,10 +51,16 @@ are `[Obsolete]` shims. This was found at compile time, before the game was ever
 ## Build and run
 
 ```powershell
+# P2 only — build the PoC bundle first (or use the editor menu "False Gods/Build PoC AssetBundle"):
+& "D:\Unity\6000.3.6f1\Editor\Unity.exe" -batchmode -nographics -projectPath FalseGods.Unity `
+    -executeMethod FalseGods.EditorTools.PocBundleBuilder.BuildFromBatchMode -logFile unity-build.log
+
 # Build (needs LocalPaths.props — SulfurManagedDir, BepInExCoreDir):
 dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj
 
-# Build AND deploy into the BepInEx plugins folder from LocalPaths.props (opt-in):
+# Build AND deploy into the BepInEx plugins folder from LocalPaths.props (opt-in).
+# Also copies FalseGods.Unity/Build/falsegods-poc-room.bundle → BepInEx/FalseGods.Probe/ when it exists;
+# without the bundle, the P2 section reports "skipped" and P0/P1 still run.
 dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj -p:DeployProbe=true
 ```
 
@@ -68,6 +76,7 @@ Then launch the game, **enter a normal level**, and either let the automatic pos
 1. Enter a normal level, let the probe fire, grab the report.
 2. Transcribe the measured values into:
    - [CollisionAndNavigationProposal.md §4.4](../../Docs/CollisionAndNavigationProposal.md) — agent parameters
-   - [RiskList.md](../../Docs/RiskList.md) — R1 (resolution works?), R3 (layers), R5 (cleaner points)
+   - [RiskList.md](../../Docs/RiskList.md) — R1 (resolution works?), R2 (our bundle loads?), R3 (layers),
+     R5 (cleaner points)
    - flip the affected *proposed / unverified* notes to measured facts, citing the report.
 3. Delete `tools/FalseGods.Probe/`.

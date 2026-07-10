@@ -89,6 +89,11 @@
       <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- P2: AssetBundle lives here. -->
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
@@ -108,10 +113,17 @@
   <Target Name="DeployProbe" AfterTargets="Build" Condition="'$(DeployProbe)' == 'true' AND '$(BepInExPluginDir)' != ''">
     <PropertyGroup>
       <_ProbeDeployDir>$(BepInExPluginDir)\FalseGods.Probe</_ProbeDeployDir>
+      <!-- P2: the PoC bundle, if it has been built (FalseGods.Unity/Build is gitignored build output).
+           BundleProbe looks for it in BepInEx/FalseGods.Probe/, next to the probe reports. -->
+      <_PocBundlePath>$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\falsegods-poc-room.bundle</_PocBundlePath>
+      <_ProbeDataDir>$(BepInExPluginDir)\..\FalseGods.Probe</_ProbeDataDir>
     </PropertyGroup>
     <MakeDir Directories="$(_ProbeDeployDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(_ProbeDeployDir)" OverwriteReadOnlyFiles="true" />
     <Message Text="Probe deployed → $(_ProbeDeployDir)" Importance="high" />
+    <Copy Condition="Exists('$(_PocBundlePath)')" SourceFiles="$(_PocBundlePath)" DestinationFolder="$(_ProbeDataDir)" OverwriteReadOnlyFiles="true" />
+    <Message Condition="Exists('$(_PocBundlePath)')" Text="PoC bundle deployed → $(_ProbeDataDir)" Importance="high" />
+    <Message Condition="!Exists('$(_PocBundlePath)')" Text="PoC bundle not found ($(_PocBundlePath)) — P2 will report 'skipped'. Build it in FalseGods.Unity first." Importance="high" />
   </Target>
 
 </Project>
