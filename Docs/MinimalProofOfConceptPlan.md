@@ -51,16 +51,17 @@ documents describe one plan.
 > been captured it can be deleted per its README, or kept to re-check R5 inside our own arena at P5.
 | P2 | Load our own AssetBundle (built in the game's Unity version) with our ground mesh + layout | R2 |
 
-> **P2 — TOOLING IN PLACE, BUNDLE BUILT; the in-game run is still open.** The dedicated Unity project
-> (`FalseGods.Unity/`, pinned to the game's 6000.3.6f1, URP 17.3.0 editor-built-in) regenerates the §7.1 room
-> deterministically (`False Gods/Generate PoC Room Prefab`; floor/pillar mesh on `Geometry(3)`, boundary-wall
-> colliders on `GeometryNoNavMesh(22)`, per the measured §4.2 masks) and builds `falsegods-poc-room.bundle`
-> for StandaloneWindows64 (`False Gods/Build PoC AssetBundle`, or headless via
-> `PocBundleBuilder.BuildFromBatchMode`). The probe gained a P2 section that loads the bundle from
-> `BepInEx/FalseGods.Probe/`, instantiates the prefab under an inactive holder, and checks
-> meshes/materials/collider layers before unloading (see `tools/FalseGods.Probe/README.md`).
-> **R2 stays unverified until that report has run in-game** — building the bundle in the right editor is the
-> setup, not the result.
+> **P2 — RUN AND PASSED.** The dedicated Unity project (`FalseGods.Unity/`, pinned to the game's 6000.3.6f1,
+> URP 17.3.0 editor-built-in) regenerates the §7.1 room deterministically (`False Gods/Generate PoC Room
+> Prefab`; floor/pillar mesh on `Geometry(3)`, boundary-wall colliders on `GeometryNoNavMesh(22)`, per the
+> measured §4.2 masks) and builds `falsegods-poc-room.bundle` for StandaloneWindows64 headlessly
+> (`PocBundleBuilder.BuildFromBatchMode`, exit code 0). The probe's P2 section (v0.2.0, run in-game
+> 2026-07-11, Act_01_Caves) loaded that bundle with `AssetBundle.LoadFromFileAsync`, instantiated `PocRoom`
+> under an inactive holder, and found both authored meshes intact, **0 null materials**,
+> `Universal Render Pipeline/Lit` reporting `isSupported = yes`, and all six collider layers correct →
+> RiskList **R2 verified**. Rendering correctness (no pink) is deliberately left to P3, judged with the
+> instance visible. Operational trap, fixed: a stale probe DLL from the P0/P1 run (same GUID **and version**)
+> made BepInEx skip the rebuilt plugin — the probe version is now bumped per change (0.2.0).
 | P3 | Vanilla prefab **renders correctly** (no pink) under our lighting; test one vanilla floor material on our ground mesh | R6, R13, report 3.4 |
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |

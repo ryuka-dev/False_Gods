@@ -128,7 +128,8 @@ The arena is authored as one `ArenaRoot` prefab (hierarchy in
    (RiskList R8).
 
 ## 8.7 Verification (PoC)
-- P2 (report 7): a trivial bundle built in Unity 6000.3.6f1 loads under BepInEx.
+- P2 (report 7): a trivial bundle built in Unity 6000.3.6f1 loads under BepInEx — **done** (probe P2 run
+  in-game 2026-07-11; RiskList R2 verified).
 - P3 / R13: one opaque, one transparent-sprite, and one emissive original material render correctly in-game.
 - R14: runtime hierarchy/transforms match the exported arena manifest after proxy replacement.
 - R8: bundle + handles fully released on teardown.
