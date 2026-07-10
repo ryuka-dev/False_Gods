@@ -24,12 +24,18 @@ directly from the game files are marked *(verified from game files)*.
   **ShaderGraph** (`Unity.RenderPipelines.ShaderGraph.ShaderGraphLibrary`), **VFX Graph** (`UnityEngine.VFXModule`),
   **2D Animation / skeletal 2D** (`Unity.2D.Animation.Runtime`), **SpriteShape**, **Timeline**, and the
   **A\* Pathfinding Project** (`AstarPathfindingProject.dll`).
+- **URP package version: 17.3.0** *(verified from the editor install)* — URP is built into the 6000.3 editor
+  (`Editor/Data/Resources/PackageManager/BuiltInPackages/com.unity.render-pipelines.universal/package.json`),
+  so `FalseGods.Unity` authors against exactly this version.
 - **Still to confirm in the PoC:** URP asset/renderer settings the game runs with (forward vs deferred, HDR,
-  MSAA, renderer features), and which URP package version matches Unity 6000.3.6f1 (RiskList R2/R13).
+  MSAA, renderer features) — RiskList R13.
 
 ## 8.2 Recommended Unity project layout
 
-A dedicated project, separate from the BepInEx plugin solution:
+A dedicated project, separate from the BepInEx plugin solution. **Status:** `FalseGods.Unity/` exists at the
+repo root (pinned to 6000.3.6f1) with the editor tooling under `Assets/FalseGods/Editor` and the generated
+PoC room under `Assets/FalseGods/Arenas/PocRoom`; the tree below is the intended full layout, grown as
+content arrives.
 
 ```text
 FalseGods.Unity/

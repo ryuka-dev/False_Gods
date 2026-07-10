@@ -50,6 +50,17 @@ documents describe one plan.
 > The probe is a throwaway (outside `src/`, outside the FG-ARCH rules; see its README). Now that P0/P1 have
 > been captured it can be deleted per its README, or kept to re-check R5 inside our own arena at P5.
 | P2 | Load our own AssetBundle (built in the game's Unity version) with our ground mesh + layout | R2 |
+
+> **P2 — TOOLING IN PLACE, BUNDLE BUILT; the in-game run is still open.** The dedicated Unity project
+> (`FalseGods.Unity/`, pinned to the game's 6000.3.6f1, URP 17.3.0 editor-built-in) regenerates the §7.1 room
+> deterministically (`False Gods/Generate PoC Room Prefab`; floor/pillar mesh on `Geometry(3)`, boundary-wall
+> colliders on `GeometryNoNavMesh(22)`, per the measured §4.2 masks) and builds `falsegods-poc-room.bundle`
+> for StandaloneWindows64 (`False Gods/Build PoC AssetBundle`, or headless via
+> `PocBundleBuilder.BuildFromBatchMode`). The probe gained a P2 section that loads the bundle from
+> `BepInEx/FalseGods.Probe/`, instantiates the prefab under an inactive holder, and checks
+> meshes/materials/collider layers before unloading (see `tools/FalseGods.Probe/README.md`).
+> **R2 stays unverified until that report has run in-game** — building the bundle in the right editor is the
+> setup, not the result.
 | P3 | Vanilla prefab **renders correctly** (no pink) under our lighting; test one vanilla floor material on our ground mesh | R6, R13, report 3.4 |
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |

@@ -4,3 +4,11 @@
 
 # PowerShell scripts are invoked by Windows PowerShell; CRLF is the native convention there.
 *.ps1              text eol=crlf
+
+# Unity serializes empty YAML entries as "- " (trailing space). Exempt Unity-owned YAML from the
+# blank-at-eol whitespace check so an editor re-save cannot fail verify's `git diff HEAD --check`.
+FalseGods.Unity/ProjectSettings/*.asset whitespace=-blank-at-eol
+FalseGods.Unity/Assets/**/*.asset       whitespace=-blank-at-eol
+FalseGods.Unity/Assets/**/*.prefab      whitespace=-blank-at-eol
+FalseGods.Unity/Assets/**/*.mat         whitespace=-blank-at-eol
+FalseGods.Unity/Assets/**/*.meta        whitespace=-blank-at-eol

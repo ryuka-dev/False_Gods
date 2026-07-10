@@ -1,0 +1,13 @@
+# Unity-generated local state (never committed)
+/Library/
+/Temp/
+/Logs/
+/UserSettings/
+/obj/
+/Build/
+
+# IDE projects Unity regenerates on demand
+/*.csproj
+/*.sln
+/*.slnx
+/.vsconfig
