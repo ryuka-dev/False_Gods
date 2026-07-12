@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.17.0";
+        public const string PluginVersion = "0.18.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -39,6 +39,7 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _navHotkey;
         private ConfigEntry<Key> _navPrefabHotkey;
         private ConfigEntry<Key> _navBakeHotkey;
+        private ConfigEntry<Key> _navApplyHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
 
@@ -108,6 +109,13 @@ namespace FalseGods.Probe
                 "shippable Option-1 artifact (baked once, applied by every peer). Read-only: it never touches " +
                 "the live graph. Run once per distinct environment cellSize (0.1, 0.3).");
 
+            _navApplyHotkey = Config.Bind("Probe", "NavApplyHotkey", Key.F5,
+                "P5d apply shipped artifact: reads arena-nav-PocRoom-cell<size>.bytes (baked by F6) for this " +
+                "level's cellSize, spawns the arena, and applies the SAVED bytes via TileMeshes.Deserialize + " +
+                "SnapToGraph + ReplaceTiles — the exact runtime path — then measures walkable floor nodes before " +
+                "vs after to prove the shipped artifact makes OUR floor walkable. Adds tiles then ClearTiles-es " +
+                "them. Run in a level whose cellSize matches a baked artifact.");
+
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
             _scanHandler = OnNavigationScanComplete;
@@ -118,7 +126,8 @@ namespace FalseGods.Probe
                               $"P0/P1/P2 hotkey: {_hotkey.Value}. P3 visible hotkey: {_visualHotkey.Value}. " +
                               $"P4 collision hotkey: {_collisionHotkey.Value}. P5 nav hotkey: {_navHotkey.Value}. " +
                               $"P5b nav-prefab hotkey: {_navPrefabHotkey.Value}. " +
-                              $"P5c bake hotkey: {_navBakeHotkey.Value}.");
+                              $"P5c bake hotkey: {_navBakeHotkey.Value}. " +
+                              $"P5d apply hotkey: {_navApplyHotkey.Value}.");
         }
 
         private void OnDestroy()
@@ -173,6 +182,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_navBakeHotkey.Value))
             {
                 StartCoroutine(RunNavBake());
+                return;
+            }
+
+            if (HotkeyPressed(_navApplyHotkey.Value))
+            {
+                StartCoroutine(RunNavApply());
                 return;
             }
 
@@ -332,6 +347,37 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P5c report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P5d: apply a SAVED arena navmesh artifact (the ship->apply half of Option 1). Self-contained and
+        /// restores the graph, so a fresh <see cref="NavmeshApplyProbe"/> is used each time. Shares the _running
+        /// guard.
+        /// </summary>
+        private IEnumerator RunNavApply()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P5d (apply shipped arena navmesh)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new NavmeshApplyProbe().Run(report);
+
+            _scanCompletePending = false;
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P5d apply done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P5d report: {exception}");
             }
 
             _running = false;

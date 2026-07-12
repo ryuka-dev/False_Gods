@@ -119,9 +119,12 @@ documents describe one plan.
 > geometry, not ours. An isolated bake in clear space (+300 m, P5c) baked our floor to **0 triangles**, and a
 > side-by-side test showed the top-face geometric normal points DOWN (`(0,-1,0)`): `BuildBoxMesh` wound the box
 > inside-out, and recast reads walkability from the winding, not the vertex normals (so it still rendered). A
-> winding-reversed copy baked fine (`(0,1,0)`, 2 tris). Fixed the winding; bundle rebuild + re-verify pending.
-> The shipping pipeline then bakes in-game once → ships the serialized bytes as a bundle `TextAsset` → applies
-> from the plugin via `Deserialize` + `ReplaceTiles` (no A* in `FalseGods.Unity`). See RiskList R4.
+> winding-reversed copy baked fine (`(0,1,0)`, 2 tris). **Fixed the winding and rebuilt the bundle:** the arena
+> now bakes 16 triangles and P5c wrote `arena-nav-PocRoom-cell0.30.bytes`. **P5d (F5) closed the loop:** loading
+> that saved artifact and applying it (`Deserialize` + `SnapToGraph` + `ReplaceTiles`) took the floated arena's
+> floor from 0 → walkable, and it survived without a `NavMeshCleaner` anchor (the tile-replace path side-steps
+> the cleaner — R5). **P5 (R4/R5) is resolved:** Option 1 works end-to-end from a mod; remaining is build-work
+> (bytes into the bundle, arena controller, one bake per environment `cellSize`). See RiskList R4/R5.
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
 | P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
 | P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest; the canonical `ContentHash` is stable across two loads with different Addressables completion order | P1–P7, R14, R34 |
