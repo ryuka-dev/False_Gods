@@ -74,9 +74,11 @@ documents describe one plan.
 > - **A vanilla floor material (`CaveFloor`) sits correctly on our own flat mesh** — the projection/UV-tolerant
 >   ideal case of report §3.4 → R13 floor strategy: reuse vanilla floor materials directly.
 > - **Our own `URP/Lit` bundle materials went pink** (the pillar) — the predicted variant-stripping (report
->   §3.2/§3.8). Fix: adopt the game's resident shader at runtime via `Shader.Find` (probe
->   `VisualRepointOurShaders`, deployed) or a `ShaderVariantCollection`. Recorded in RiskList R6/R13 and report
->   §3.6; the runtime `Shader.Find` fix awaits one more F11 confirmation run.
+>   §3.2/§3.8). Measured: `Shader.Find("Universal Render Pipeline/Lit")` **misses** — the game has no resident
+>   stock URP/Lit to adopt (all vanilla content uses `Shader Graphs/*`). Working fixes: reuse a vanilla
+>   material (proven), or a `ShaderVariantCollection` for original shaders. The probe now dresses our meshes
+>   with a borrowed vanilla material (`VisualFixOurMaterials`, 0.5.0) to demonstrate it — pending one F11
+>   confirmation run. Recorded in RiskList R6/R13 and report §3.6.
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |

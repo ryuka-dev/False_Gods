@@ -84,13 +84,18 @@ Then launch the game, **enter a normal level**, and either let the automatic pos
 `BepInEx/FalseGods.Probe/` (gitignored) and echoes to the BepInEx console. Prefer the F10 report.
 
 **P3 (F11) — the visible render check.** Stand in a loaded level and press **F11**: a stage appears ~18 m in
-front of you — our room (lit by its own `LightingRoot`) with a vanilla prefab beside it, and a vanilla floor
-material laid on our flat floor. Then judge, with your eyes:
+front of you — our room (lit by its own `LightingRoot`) with a vanilla prefab beside it. Then judge, with your
+eyes:
 
 1. Is the vanilla prefab **pink/black** or correctly textured and lit? (R6/R13)
-2. Does the vanilla floor material **sit right** on our flat mesh, or swim/mis-scale? (report §3.4 — projection
-   vs. authored-UV dependence, which decides the floor strategy)
+2. With `VisualFixOurMaterials` on (default), our floor + pillar wear a **borrowed vanilla material**: do they
+   render un-pink, and does the material **sit right** on our flat mesh or swim/mis-scale? (report §3.4)
 3. Does **our** lighting read as the light source (visible even where the level's own lights don't reach)?
+
+**Measured (2026-07-12):** the vanilla prefab and a borrowed vanilla material render correctly under our lights;
+our **own** stock-`URP/Lit` materials render **pink** and the game has no resident `URP/Lit` to adopt
+(`Shader.Find` misses) — original materials need a vanilla material or a `ShaderVariantCollection` (report §3.8).
+Turn `VisualFixOurMaterials` **off** to see the raw pink.
 
 Press **F11** again to tear the stage down and restore the environment. Needs the deployed bundle (build it in
 `FalseGods.Unity`, then `-p:DeployProbe=true` copies it); without it the P3 stage reports "skipped".
