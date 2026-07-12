@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.18.0";
+        public const string PluginVersion = "0.23.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -40,8 +40,10 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _navPrefabHotkey;
         private ConfigEntry<Key> _navBakeHotkey;
         private ConfigEntry<Key> _navApplyHotkey;
+        private ConfigEntry<Key> _navEnemyHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
+        private ConfigEntry<string> _enemyUnitId;
 
         private readonly VisualProbe _visual = new VisualProbe();
 
@@ -116,6 +118,19 @@ namespace FalseGods.Probe
                 "vs after to prove the shipped artifact makes OUR floor walkable. Adds tiles then ClearTiles-es " +
                 "them. Run in a level whose cellSize matches a baked artifact.");
 
+            _navEnemyHotkey = Config.Bind("Probe", "NavEnemyHotkey", Key.F4,
+                "P6 A* pathing check: spawns our arena as an isolated island, bakes + applies its navmesh " +
+                "(P5c+P5d in memory), then proves pathing on OUR geometry two ways: (1) an ABPath between the " +
+                "EnemySpawn and PlayerSpawn corners whose straight line crosses the central pillar must ROUTE " +
+                "AROUND it (read the report), and (2) a real vanilla enemy (EnemyUnitId) is spawned, activated " +
+                "and driven to the far corner past the pillar. WARNING: mutates AstarPath.active (adds tiles + " +
+                "one NPC) then removes exactly that; a level change rebuilds nav. Run in a throwaway level.");
+
+            _enemyUnitId = Config.Bind("Probe", "EnemyUnitId", "HellshrewSticka",
+                "P6 live-enemy: the UnitIds field name of the vanilla enemy to spawn (resolved by reflection, " +
+                "loaded via Addressables). Pick a normal grounded melee enemy. Change here to try another if " +
+                "one misbehaves. The nav-graph proof (layer 1) does not depend on this.");
+
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
             _scanHandler = OnNavigationScanComplete;
@@ -127,7 +142,8 @@ namespace FalseGods.Probe
                               $"P4 collision hotkey: {_collisionHotkey.Value}. P5 nav hotkey: {_navHotkey.Value}. " +
                               $"P5b nav-prefab hotkey: {_navPrefabHotkey.Value}. " +
                               $"P5c bake hotkey: {_navBakeHotkey.Value}. " +
-                              $"P5d apply hotkey: {_navApplyHotkey.Value}.");
+                              $"P5d apply hotkey: {_navApplyHotkey.Value}. " +
+                              $"P6 enemy hotkey: {_navEnemyHotkey.Value} (enemy: {_enemyUnitId.Value}).");
         }
 
         private void OnDestroy()
@@ -188,6 +204,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_navApplyHotkey.Value))
             {
                 StartCoroutine(RunNavApply());
+                return;
+            }
+
+            if (HotkeyPressed(_navEnemyHotkey.Value))
+            {
+                StartCoroutine(RunNavEnemy());
                 return;
             }
 
@@ -378,6 +400,38 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P5d report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P6: prove A* pathing on our applied arena — an ABPath routes around the pillar and a live vanilla
+        /// enemy follows such a path. Self-contained (spawns its own island + one NPC, mutates then restores
+        /// AstarPath.active), so a fresh <see cref="NavmeshEnemyProbe"/> is used each time. Shares the _running
+        /// guard so nothing overlaps a graph update.
+        /// </summary>
+        private IEnumerator RunNavEnemy()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P6 (A* pathing: route around pillar + live enemy)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new NavmeshEnemyProbe(_enemyUnitId.Value).Run(report);
+
+            _scanCompletePending = false;
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P6 nav-enemy check done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P6 report: {exception}");
             }
 
             _running = false;

@@ -1,4 +1,4 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6)
 
 A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
 [RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**,
@@ -32,6 +32,7 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P3 / **R6, R13** | Does a vanilla prefab render correctly (no pink) under **our** `LightingRoot`, and does one vanilla floor material behave on our own flat ground mesh? | shows our room (bundle, now with lights) + a vanilla prefab, borrows a vanilla floor material onto our floor — **you judge on screen** (report §3.4) |
 | P4 / **R3** | Is our arena solid to the player on foot — floor holds, pillar blocks, walls contain, no snagging? | places our room so its `PlayerSpawn` marker sits under your feet, leaving you inside the sealed arena — **you judge on foot** (no teleport, no F3) |
 | P5 / **R4, R5** | Can a mod make its own arena floor walkable at runtime, and does it survive `NavMeshCleaner`'s flood-fill? | spawns our room as an isolated island, `UpdateGraphs` over it with **no** anchor (cleaner erases it) then **with** a `validNavMeshPoint` on it (it survives) — read from `GetNearest(...).node.Walkable` |
+| P6 / **R9** | Does A\* pathing work on our applied arena — does a path route **around** the pillar, and does a real vanilla enemy follow it? | bakes+applies our navmesh (P5c+P5d) on an isolated island, then (1) an `ABPath` between the EnemySpawn/PlayerSpawn corners whose straight line crosses the pillar must route around it, and (2) a real vanilla `Npc` (by `UnitId`) is spawned, activated and driven past the pillar to the far corner |
 
 P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
 P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
@@ -148,6 +149,25 @@ walkable-and-close). It then restores the cleaner's points, destroys the island,
 > the whole level's nav three times, so **NPCs will re-path** while it runs. It only appends a point and
 > restores it, and a level change rebuilds the graph, but run it in a level you do not care about. The scan is
 > driven over frames (no freeze); each is followed by a fixed 1 s settle for the cleaner's work item.
+
+**P6 (F4) — the A\* pathing check.** Stand in a **throwaway** loaded level and press **F4**. Nothing to judge
+by eye until the enemy appears — read the report. It spawns our arena as an isolated island a few metres up,
+bakes and applies its navmesh in memory (P5c + P5d, so our floor is walkable and the pillar is a nav hole),
+then runs two layers:
+
+1. **Layer 1 — nav-graph proof (deterministic).** Requests an `ABPath` from the EnemySpawn corner (7,7) to the
+   PlayerSpawn corner (-7,-7); their straight line passes through the central pillar. The report's
+   **`R9 verdict (nav-graph)`** reads `ROUTES AROUND` when the path's closest approach to the pillar centre
+   stays outside the footprint (≥ ~0.85 m), or `THROUGH THE PILLAR` (~0 m) if the hole is missing.
+2. **Layer 2 — live enemy (visible, best-effort).** Spawns the vanilla enemy named by `Probe/EnemyUnitId`
+   (default `HellshrewSticka`), registers + activates it, and drives it to the far corner past the pillar with
+   the game's own scripted-movement handle (`SetForcedDestination`, behaviour tree off). Watch it thread past
+   the pillar; the **`R9 verdict (live enemy)`** line summarises distance travelled and closest pillar approach.
+   If the enemy misbehaves, change `EnemyUnitId` to another `UnitIds` field name — Layer 1 stands regardless.
+
+> **This probe writes to shared authoritative state** — `AstarPath.active` (adds tiles) and
+> `GameManager.npcs` (one NPC) — then removes exactly what it added (`ClearTiles` over the same rect,
+> unregister + destroy the NPC). A level change rebuilds nav anyway, but run it in a level you do not care about.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.

@@ -126,6 +126,25 @@ documents describe one plan.
 > the cleaner — R5). **P5 (R4/R5) is resolved:** Option 1 works end-to-end from a mod; remaining is build-work
 > (bytes into the bundle, arena controller, one bake per environment `cellSize`). See RiskList R4/R5.
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
+
+> **P6 — RUN AND PASSED (probe P6, F4, 0.23.0, in-game 2026-07-13).** With our baked navmesh applied to a
+> floated, isolated copy of the arena (P5c bake in clear space + P5d `ReplaceTiles`, on a graph-tile-aligned
+> footprint), two checks passed across **10 environments** (Act_01 Castle/Sewers/Shanty/Caves, Act_02
+> Bridge/Forest/Fortress, Act_03 Desert/EndChurch) with **no** non-passing verdict:
+> - **Nav-graph proof:** an `ABPath` between the EnemySpawn (7,7) and PlayerSpawn (-7,-7) corners — whose
+>   straight line crosses the central 2×2 pillar — **routes AROUND it** (path complete, ~12 waypoints, closest
+>   approach ~2.8 m vs the 1.0 m pillar footprint, length ~21.5 m vs ~19.9 m straight).
+> - **Live enemy:** a real vanilla `Npc` (`HellshrewSticka`), spawned and activated the game's own way
+>   (`UnitId.GetAsset()` → `FetchAndLoadUnitLoader()` → `SetStats` → `Spawn()` → register in `GameManager.npcs`
+>   → `ActivateBehaviour`, driven by `Npc.SetForcedDestination` with the behaviour tree off), **walks ~16 m
+>   around the pillar** to the far corner, staying ~1 m clear → `TRACKS + ROUTES AROUND`.
+>
+> So plain `CustomRichAI` pathing works on our flat arena floor with the pillar as a nav hole (RiskList R9,
+> ordinary-enemy half). The road there surfaced three reusable facts, all recorded in R9: spawn the NPC
+> **active** so `AiAgent.Awake` runs before `Spawn()`; drive the physics→nav handoff via
+> `Npc.SetNavAndDisablePhysics`; and **tile-align** the nav bounds, or `NavmeshPrefab.Apply`'s
+> `SnapToGraph`/`Scan` origin mismatch shifts the floor (it left half the floor unwalkable on the 38.4 m-tile
+> boss levels until fixed). A **big / special-movement** boss (raycast-ground-follow) is deferred to Phase B.
 | P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
 | P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest; the canonical `ContentHash` is stable across two loads with different Addressables completion order | P1–P7, R14, R34 |
 | P9 | **Host+client**: both load the identical room and exchange `(ContentHashSchemaVersion, ContentHash)` in `ArenaReady`; the two machines produce **byte-identical** hashes; the gate blocks seal/teleport until both match; an NPC wakes for a client who enters first while the host is far away; a forced hash mismatch, schema mismatch, or timeout **aborts** instead of starting | R7, R10, R33, R34, report 5 |
