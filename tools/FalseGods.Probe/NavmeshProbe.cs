@@ -119,12 +119,20 @@ namespace FalseGods.Probe
             report.Line("  NOTE: this mutates AstarPath.active (the live level's nav). It only APPENDS a point,");
             report.Line("  and a level change rebuilds the graph — so the change is additive and recoverable.");
 
+            // Recast reads mesh triangles on the CPU (rasterizeMeshes=true, rasterizeColliders=false — P0), so
+            // a bundle mesh that is not read/write enabled is invisible to it even though it renders fine.
+            DiagnoseMeshes(report, _room);
+
+            report.Line();
+            report.Line("  -- Baseline (before any UpdateGraphs): our island floor should not be in the graph yet");
+            ReportPhase(report, "baseline", recast, sample, bounds);
+
             // ── Phase 1: rescan our island with the cleaner points unchanged. R5 predicts our floor is erased.
             report.Line();
             report.Line("  -- Phase 1: UpdateGraphs(island) with NO anchor on our floor (R5 predicts UNWALKABLE)");
             astar.UpdateGraphs(bounds);
             yield return new WaitForSeconds(SettleSeconds);
-            var walkable1 = ReportPhase(report, "phase 1 / no anchor", recast, sample);
+            var walkable1 = ReportPhase(report, "phase 1 / no anchor", recast, sample, bounds);
 
             // ── Phase 2: append a valid point on our floor and rescan again. Expect the island to survive.
             report.Line();
@@ -132,7 +140,7 @@ namespace FalseGods.Probe
             cleaner.validNavMeshPoints = Append(savedPoints, sample);
             astar.UpdateGraphs(bounds);
             yield return new WaitForSeconds(SettleSeconds);
-            var walkable2 = ReportPhase(report, "phase 2 / anchored", recast, sample);
+            var walkable2 = ReportPhase(report, "phase 2 / anchored", recast, sample, bounds);
 
             report.Line();
             report.Value("R5 verdict", (!walkable1 && walkable2)
@@ -154,27 +162,55 @@ namespace FalseGods.Probe
             report.Line("  Any residual nodes are wiped on the next level change (astarPathPrefab is rebuilt).");
         }
 
-        /// <summary>Reports the node nearest our floor sample and the graph's walkable/total counts, and
-        /// returns whether that node is walkable. Uses <see cref="NNConstraint.None"/> so it returns the
-        /// geometrically nearest node regardless of walkability — otherwise Phase 1 would snap to a far
-        /// walkable node and hide the erase.</summary>
-        private static bool ReportPhase(ProbeReport report, string tag, RecastGraph recast, Vector3 sample)
+        /// <summary>Reports, for the node nearest our floor sample: its walkability, area, and DISTANCE (so we
+        /// can tell our own floor node — ~0.1 m away — from a distant level node it snapped to), plus how many
+        /// nodes fall inside the island bounds and the graph's walkable/total. Returns true only when the
+        /// nearest node is both walkable AND close, i.e. our floor really is walkable. Uses
+        /// <see cref="NNConstraint.None"/> so Phase 1 does not snap past an unwalkable floor node to a far
+        /// walkable one.</summary>
+        private static bool ReportPhase(ProbeReport report, string tag, RecastGraph recast, Vector3 sample, Bounds bounds)
         {
             var node = recast.GetNearest(sample, NNConstraint.None).node;
+            var distance = node == null ? -1f : Vector3.Distance(sample, (Vector3)node.position);
 
             var total = 0;
             var walkable = 0;
+            var inBounds = 0;
+            var inBoundsWalkable = 0;
             recast.GetNodes(n =>
             {
                 total++;
                 if (n.Walkable)
                     walkable++;
+                if (bounds.Contains((Vector3)n.position))
+                {
+                    inBounds++;
+                    if (n.Walkable)
+                        inBoundsWalkable++;
+                }
             });
 
-            report.Value($"[{tag}] nearest node to our floor",
-                node == null ? "<none>" : $"walkable={node.Walkable}, area={node.Area}");
-            report.Value($"[{tag}] graph nodes walkable/total", $"{walkable}/{total}");
-            return node != null && node.Walkable;
+            report.Value($"[{tag}] nearest node to our floor", node == null
+                ? "<none>"
+                : $"walkable={node.Walkable}, area={node.Area}, distance={distance:F2} m");
+            report.Value($"[{tag}] nodes inside island bounds (walkable/total)", $"{inBoundsWalkable}/{inBounds}");
+            report.Value($"[{tag}] whole graph (walkable/total)", $"{walkable}/{total}");
+            return node != null && node.Walkable && distance <= 1f;
+        }
+
+        /// <summary>Reports each of our room meshes' readability. Recast rasterizes mesh triangles read on the
+        /// CPU, so a mesh with <c>isReadable == false</c> is skipped by the nav scan (it still renders — that is
+        /// GPU-only). This is the first thing to check when a floor will not rasterize.</summary>
+        private static void DiagnoseMeshes(ProbeReport report, GameObject room)
+        {
+            foreach (var filter in room.GetComponentsInChildren<MeshFilter>(true))
+            {
+                var mesh = filter.sharedMesh;
+                if (mesh == null)
+                    continue;
+                report.Value($"mesh '{filter.name}' (layer {filter.gameObject.layer})",
+                    $"isReadable={mesh.isReadable}, vertices={mesh.vertexCount}");
+            }
         }
 
         private static Vector3 SampleFloorPoint(GameObject room, Vector3 fallback)
