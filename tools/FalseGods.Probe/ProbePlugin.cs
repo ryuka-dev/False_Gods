@@ -30,13 +30,14 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.13.0";
+        public const string PluginVersion = "0.15.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
         private ConfigEntry<Key> _visualHotkey;
         private ConfigEntry<Key> _collisionHotkey;
         private ConfigEntry<Key> _navHotkey;
+        private ConfigEntry<Key> _navPrefabHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
 
@@ -91,6 +92,14 @@ namespace FalseGods.Probe
                 "three times. It only appends a cleaner point and restores it, and a level change rebuilds nav " +
                 "— but run it in a throwaway level; NPCs will re-path while it re-bakes.");
 
+            _navPrefabHotkey = Config.Bind("Probe", "NavPrefabHotkey", Key.F7,
+                "P5b Option-1 mechanism check: spawns our room as an isolated island, runs the game's own " +
+                "NavmeshPrefab.Scan() to bake a localized navmesh over just the arena, then replicates " +
+                "NavmeshPrefab.Apply() (SnapToGraph + ReplaceTiles) to insert those tiles into the live graph — " +
+                "the Option-1 path, run at runtime with no editor bake. Reports whether the bake produced " +
+                "geometry (R4 rasterization) and whether a walkable node lands on our floor (Apply from a mod). " +
+                "Adds tiles then ClearTiles-es them; a level change rebuilds nav. Run it in a throwaway level.");
+
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
             _scanHandler = OnNavigationScanComplete;
@@ -99,7 +108,8 @@ namespace FalseGods.Probe
             Logger.LogMessage($"{PluginName} {PluginVersion} loaded. " +
                               $"Auto-run after each nav scan: {_runAfterEachScan.Value}. " +
                               $"P0/P1/P2 hotkey: {_hotkey.Value}. P3 visible hotkey: {_visualHotkey.Value}. " +
-                              $"P4 collision hotkey: {_collisionHotkey.Value}. P5 nav hotkey: {_navHotkey.Value}.");
+                              $"P4 collision hotkey: {_collisionHotkey.Value}. P5 nav hotkey: {_navHotkey.Value}. " +
+                              $"P5b nav-prefab hotkey: {_navPrefabHotkey.Value}.");
         }
 
         private void OnDestroy()
@@ -142,6 +152,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_navHotkey.Value))
             {
                 StartCoroutine(RunNav());
+                return;
+            }
+
+            if (HotkeyPressed(_navPrefabHotkey.Value))
+            {
+                StartCoroutine(RunNavPrefab());
                 return;
             }
 
@@ -237,6 +253,39 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P5 report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P5b: run the NavmeshPrefab Scan+Apply mechanism check (Option 1, from a mod, no editor bake). Like
+        /// P5 it is self-contained — spawns its own island, mutates and then restores AstarPath.active — so a
+        /// fresh <see cref="NavmeshPrefabProbe"/> is used each time. Shares the _running guard.
+        /// </summary>
+        private IEnumerator RunNavPrefab()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P5b (NavmeshPrefab Scan+Apply)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new NavmeshPrefabProbe().Run(report);
+
+            // The localized Scan does not fire AstarPath.OnPostScan, but clear the flag defensively so nothing
+            // kicks off an automatic P0/P1/P2 run once the guard drops.
+            _scanCompletePending = false;
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P5b nav-prefab check done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P5b report: {exception}");
             }
 
             _running = false;
