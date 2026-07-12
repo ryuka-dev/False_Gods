@@ -116,6 +116,10 @@ namespace FalseGods.Probe
             report.Value("floor sample point (clear of the pillar)", sample);
             report.Value("update bounds", bounds);
             report.Value("existing validNavMeshPoints", savedPoints?.Length ?? 0);
+            report.Value("recast collectionMode", recast.collectionSettings.collectionMode);
+            report.Value("recast tagMask", recast.collectionSettings.tagMask == null || recast.collectionSettings.tagMask.Count == 0
+                ? "<empty>"
+                : string.Join(", ", recast.collectionSettings.tagMask));
             report.Line("  NOTE: this re-bakes the WHOLE level's nav (AstarPath.ScanAsync — the game's own");
             report.Line("  BuildNavMeshNode/BakeNavMesh path). UpdateGraphs(bounds) only edits node walkability and");
             report.Line("  never rasterizes new geometry (that was the first attempt's mistake — MetalGate uses it");
@@ -125,8 +129,14 @@ namespace FalseGods.Probe
             // a bundle mesh that is not read/write enabled is invisible to it even though it renders fine.
             DiagnoseMeshes(report, _room);
 
+            // The first two runs failed because recast never collected our floor. CollectMeshes gathers scene
+            // meshes only by the graph's collectionMode (Layers vs Tags) — an untagged mesh is skipped in Tags
+            // mode — but CollectRecastNavmeshModifiers() runs in BOTH modes, so a RecastNavmeshModifier set to
+            // AlwaysInclude gets our floor into the scan regardless (verified against the decompiled A* source).
+            AddNavmeshModifiers(report, _room);
+
             report.Line();
-            report.Line("  -- Baseline (before any UpdateGraphs): our island floor should not be in the graph yet");
+            report.Line("  -- Baseline (before any re-bake): our island floor should not be in the graph yet");
             ReportPhase(report, "baseline", recast, sample, bounds);
 
             // ── Phase 1: full re-bake with the cleaner points unchanged. R5 predicts our floor is erased.
@@ -195,6 +205,25 @@ namespace FalseGods.Probe
             report.Value($"[{tag}] nodes inside island bounds (walkable/total)", $"{inBoundsWalkable}/{inBounds}");
             report.Value($"[{tag}] whole graph (walkable/total)", $"{walkable}/{total}");
             return node != null && node.Walkable && distance <= 1f;
+        }
+
+        /// <summary>Attaches a <see cref="RecastNavmeshModifier"/> (WalkableSurface, force-included) to each of
+        /// our meshes. <c>RecastGraph.CollectMeshes</c> gathers scene meshes only by the graph's collectionMode
+        /// (Layers/Tags) — an untagged mesh is skipped in Tags mode — but <c>CollectRecastNavmeshModifiers()</c>
+        /// runs in both modes, so this makes our floor visible to the scan either way.</summary>
+        private static void AddNavmeshModifiers(ProbeReport report, GameObject room)
+        {
+            var added = 0;
+            foreach (var filter in room.GetComponentsInChildren<MeshFilter>(true))
+            {
+                var modifier = filter.gameObject.AddComponent<RecastNavmeshModifier>();
+                modifier.mode = RecastNavmeshModifier.Mode.WalkableSurface;
+                modifier.geometrySource = RecastNavmeshModifier.GeometrySource.MeshFilter;
+                modifier.includeInScan = RecastNavmeshModifier.ScanInclusion.AlwaysInclude;
+                modifier.dynamic = true;
+                added++;
+            }
+            report.Value("RecastNavmeshModifier added (WalkableSurface, AlwaysInclude)", added);
         }
 
         /// <summary>Reports each of our room meshes' readability. Recast rasterizes mesh triangles read on the

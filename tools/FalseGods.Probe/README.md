@@ -131,7 +131,10 @@ its own nav area, not merged with the level floor below) and runs two phases. Ea
 level's nav** with `AstarPath.ScanAsync` — the game's own bake path (`NavMeshManager.BakeNavMesh` /
 `BuildNavMeshNode`). `UpdateGraphs(bounds)` was tried first and does **not** work: it only edits existing node
 walkability (that is all `MetalGate` uses it for), so our floor was never rasterized — the first run showed the
-node total unchanged and our floor 3.9 m from the nearest node.
+node total unchanged and our floor 3.9 m from the nearest node. A full `ScanAsync` did not collect it either,
+because `RecastGraph.CollectMeshes` gathers scene meshes only by the graph's `collectionMode` (Layers or
+Tags), and an untagged bundle mesh is skipped in Tags mode. The floor therefore also gets a
+`RecastNavmeshModifier` (`AlwaysInclude`), which `CollectRecastNavmeshModifiers()` picks up in either mode.
 
 1. **Phase 1 — no anchor:** re-bake with the cleaner's points unchanged. R5 predicts our floor is **erased**
    (`nearest node … walkable=False`, `nodes inside island bounds` ~0).
