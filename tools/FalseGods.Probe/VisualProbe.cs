@@ -53,7 +53,7 @@ namespace FalseGods.Probe
         public bool IsUp => _ourRoom != null || _vanilla != null || _bundle != null;
 
         /// <summary>Raises the visible P3 stage. Coroutine: it awaits the bundle and Addressables loads.</summary>
-        public IEnumerator Raise(ProbeReport report, bool applyEnvironment, bool repointOurShaders)
+        public IEnumerator Raise(ProbeReport report, bool applyEnvironment, bool fixOurMaterials)
         {
             report.Section("P3 — VISIBLE render check (judge with your eyes)");
 
@@ -102,19 +102,23 @@ namespace FalseGods.Probe
                 report.Value("our room lights", _ourRoom.GetComponentsInChildren<Light>(true).Length);
             });
 
-            // Our own materials use "Universal Render Pipeline/Lit". Packed into a bundle whose project never
-            // renders them, its variants get stripped — they show PINK in-game even though the shader object
-            // reports isSupported=true (measured P3, 2026-07-12). Re-pointing each material's shader to the
-            // game's already-resident shader of the same name (Shader.Find) should fix it; if it does, that
-            // confirms the diagnosis and is the production remedy for original materials (report §3.8).
-            if (repointOurShaders)
-                report.Try("re-point our materials to the game's resident shaders", () => RepointOurShaders(report));
+            // Our own materials use stock "Universal Render Pipeline/Lit". Packed into a bundle whose project
+            // never renders them, the needed variants are stripped — they show PINK in-game even though the
+            // shader reports isSupported=true. Measured P3 (2026-07-12): the game has NO resident
+            // "Universal Render Pipeline/Lit" (Shader.Find misses — all vanilla content uses Shader Graphs/*),
+            // so there is no game-side twin to adopt by name. The diagnostic records that; the working fixes
+            // are a ShaderVariantCollection for original shaders, or reusing a vanilla material (report §3.6/§3.8).
+            report.Try("diagnose our materials (is there a resident twin to adopt?)", () => DiagnoseOurShaders(report));
 
             // ── the vanilla prefab, rendered next to our lighting, scripts stripped ────────────────────
             yield return RaiseVanilla(report, origin + right * VanillaSideOffset);
 
-            // ── the "vanilla material on our own ground mesh" test (report §3.4) ───────────────────────
-            report.Try("swap a vanilla floor material onto our ground mesh", () => SwapFloorMaterial(report));
+            // ── the working fix + the report §3.4 test: put a vanilla material on OUR own meshes ───────
+            if (fixOurMaterials)
+                report.Try("dress our own meshes with a vanilla material (the working fix)",
+                    () => DressOurMeshesWithVanilla(report));
+            else
+                report.Line("  (VisualFixOurMaterials off: our own URP/Lit materials left raw — expect pink.)");
 
             // ── ambient/fog: scene state the prefab cannot carry; apply and remember to restore ────────
             if (applyEnvironment)
@@ -123,7 +127,8 @@ namespace FalseGods.Probe
             report.Line();
             report.Line("  >>> NOW LOOK, with the stage in front of you:");
             report.Line("      1. Is the vanilla prefab PINK/black, or correctly textured and lit?  (R6/R13)");
-            report.Line("      2. Does the vanilla floor material sit right on our flat floor, or swim/mis-scale? (§3.4)");
+            report.Line("      2. With VisualFixOurMaterials on: do our floor AND pillar now wear the vanilla");
+            report.Line("         material (no pink)? Does it sit right on our flat mesh or swim/mis-scale? (§3.4)");
             report.Line("      3. Is the arena lit by OUR LightingRoot (it should read as lit even where the");
             report.Line("         level's own lights don't reach)?");
             report.Line("  Press the visual hotkey again to tear the stage down and restore the environment.");
@@ -204,22 +209,17 @@ namespace FalseGods.Probe
         }
 
         /// <summary>
-        /// Takes one material off the vanilla prefab and puts it on our own flat floor mesh — the report §3.4
-        /// test. If the material is triplanar/world-projected it should look right on our mesh; if it needs
-        /// authored UVs / vertex colours / lightmap UV2 it will look wrong. That verdict is yours, on screen.
+        /// The working fix and the report §3.4 test in one: borrow a material off the vanilla prefab and put
+        /// it on ALL of our own meshes (floor AND pillar). The floor is the §3.4 case — a vanilla floor
+        /// material on our flat mesh; doing the pillar too shows the pink is specific to our bundle's stock
+        /// URP/Lit and that vanilla-material reuse fixes it. Whether the vanilla material sits right on our
+        /// mesh or swims is still your verdict, on screen.
         /// </summary>
-        private void SwapFloorMaterial(ProbeReport report)
+        private void DressOurMeshesWithVanilla(ProbeReport report)
         {
             if (_vanilla == null || _ourRoom == null)
             {
                 report.Line("  Skipped: need both the vanilla prefab and our room up.");
-                return;
-            }
-
-            var floorRenderer = FindRenderer(_ourRoom, "Floor");
-            if (floorRenderer == null)
-            {
-                report.Line("  Skipped: our room has no 'Floor' renderer.");
                 return;
             }
 
@@ -240,19 +240,24 @@ namespace FalseGods.Probe
                 return;
             }
 
-            floorRenderer.sharedMaterial = chosen;
-            report.Value("floor material now", chosen.name);
-            report.Value("floor material shader", chosen.shader == null ? "<null>" : chosen.shader.name);
+            var ourRenderers = _ourRoom.GetComponentsInChildren<Renderer>(true);
+            foreach (var renderer in ourRenderers)
+                renderer.sharedMaterial = chosen;
+
+            report.Value("vanilla material borrowed", chosen.name);
+            report.Value("borrowed shader", chosen.shader == null ? "<null>" : chosen.shader.name);
+            report.Value("applied to our renderers", ourRenderers.Length);
+            report.Line("  Our floor and pillar now wear the vanilla material — they should no longer be pink.");
         }
 
         /// <summary>
-        /// Swaps each of our room's materials onto the game's resident shader of the same name. The bundle
-        /// carried its own copy of "Universal Render Pipeline/Lit" with the render variants stripped (nothing
-        /// in the authoring project used them), so it renders pink; the game's copy has the variants loaded.
-        /// If the pillar stops being pink after this, that IS the confirmation — and the fix for shipping
-        /// original materials that use a stock URP shader.
+        /// Logs, for each of our room's materials, whether the game has a resident shader of the same name to
+        /// adopt (Shader.Find). Measured result (P3, 2026-07-12): it does not — the game ships only
+        /// Shader Graphs/* shaders, no stock "Universal Render Pipeline/Lit" — so adopting a game shader by
+        /// name is not an available fix here, and the pink stays until we ship a ShaderVariantCollection or
+        /// reuse a vanilla material. Read-only: nothing is reassigned.
         /// </summary>
-        private void RepointOurShaders(ProbeReport report)
+        private void DiagnoseOurShaders(ProbeReport report)
         {
             if (_ourRoom == null)
                 return;
@@ -263,29 +268,16 @@ namespace FalseGods.Probe
                 .Distinct()
                 .ToList();
 
-            var repointed = 0;
             foreach (var mat in mats)
             {
                 var name = mat.shader.name;
-                var wasSupported = mat.shader.isSupported;
-                var gameShader = Shader.Find(name);
-                var swapped = gameShader != null && gameShader != mat.shader;
-                if (swapped)
-                {
-                    mat.shader = gameShader;
-                    repointed++;
-                }
-
+                var resident = Shader.Find(name);
                 report.Value($"our mat '{mat.name}'",
-                    $"{name} (bundle shader supported={wasSupported}) -> " +
-                    (swapped ? "re-pointed to game shader"
-                             : gameShader == null ? "*** Shader.Find MISS — game has no such shader ***"
-                                                  : "already the game shader"));
+                    $"{name} (bundle shader supported={mat.shader.isSupported}) -> " +
+                    (resident == null ? "no resident twin (Shader.Find MISS) — cannot adopt by name"
+                                      : resident == mat.shader ? "already the game shader"
+                                                              : "a resident twin exists"));
             }
-
-            report.Value("our materials re-pointed", repointed);
-            report.Line("  If our pillar is no longer pink, the bundle's shader variants were stripped —");
-            report.Line("  original materials need Shader.Find at runtime or a ShaderVariantCollection (report §3.8).");
         }
 
         private void ApplyEnvironment(ProbeReport report)
@@ -369,12 +361,6 @@ namespace FalseGods.Probe
                 }
             });
             return found;
-        }
-
-        private static Renderer FindRenderer(GameObject root, string childName)
-        {
-            return root.GetComponentsInChildren<Renderer>(true)
-                .FirstOrDefault(r => string.Equals(r.gameObject.name, childName, StringComparison.Ordinal));
         }
 
         /// <summary>Snapshot of the global lighting environment so a raise can put it back exactly.</summary>

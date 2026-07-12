@@ -83,10 +83,13 @@ large filler surfaces after confirming the shader is projection-based.
 > **New finding — our *own* materials went pink.** Our `Universal Render Pipeline/Lit` materials packed into
 > the bundle rendered **pink** (the pillar), confirming §3.2 row 1 / §3.8: a stock URP shader packed by an
 > authoring project that never renders it has its variants stripped, so `isSupported = true` at load yet pink
-> in-render. **Two fixes for original materials:** adopt the game's resident shader at runtime with
-> `Shader.Find("Universal Render Pipeline/Lit")` (cheapest — the probe now does this under
-> `VisualRepointOurShaders`), or ship a `ShaderVariantCollection` that preserves the needed variants. The
-> runtime `Shader.Find` fix is deployed (probe 0.4.0); its in-game confirmation is pending one more F11 run.
+> in-render. **Measured (probe 0.4.0):** `Shader.Find("Universal Render Pipeline/Lit")` **misses** — the game
+> keeps no resident stock URP/Lit (all vanilla content uses `Shader Graphs/*`), so adopting a game shader by
+> name is **not** an available fix here. **Working fixes:** reuse a vanilla material (proven — a `CaveFloor`
+> material renders on our own mesh; probe 0.5.0's `VisualFixOurMaterials` now dresses our floor + pillar with a
+> borrowed vanilla material to demonstrate it), or, for genuinely original shaders, ship a
+> `ShaderVariantCollection` that preserves the needed variants. Visual confirmation of the vanilla-material fix
+> is pending one more F11 run.
 
 ## 3.7 Original False Gods content is a first-class path
 
