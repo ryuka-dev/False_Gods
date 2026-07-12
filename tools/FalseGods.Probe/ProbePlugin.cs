@@ -30,12 +30,13 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.4.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
         private ConfigEntry<Key> _visualHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
+        private ConfigEntry<bool> _visualRepointOurShaders;
 
         private readonly VisualProbe _visual = new VisualProbe();
 
@@ -66,6 +67,11 @@ namespace FalseGods.Probe
                 "During the P3 stage, also apply basic ambient/fog to the global RenderSettings (scene state " +
                 "a prefab cannot carry). Always restored on teardown. Turn off to leave the level's own " +
                 "environment untouched and judge the lights alone.");
+
+            _visualRepointOurShaders = Config.Bind("Probe", "VisualRepointOurShaders", true,
+                "During the P3 stage, re-point our own room materials to the game's resident shaders via " +
+                "Shader.Find. Our bundle's URP/Lit copy renders PINK (its variants are stripped); this fixes " +
+                "it and confirms the cause. Turn OFF to see the raw pink for yourself.");
 
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
@@ -152,7 +158,7 @@ namespace FalseGods.Probe
             else
             {
                 report.Line("Raising the P3 stage in front of the camera. Look, then press the key again to drop it.");
-                yield return _visual.Raise(report, _visualApplyEnvironment.Value);
+                yield return _visual.Raise(report, _visualApplyEnvironment.Value, _visualRepointOurShaders.Value);
             }
 
             try

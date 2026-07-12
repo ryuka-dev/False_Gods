@@ -53,7 +53,7 @@ namespace FalseGods.Probe
         public bool IsUp => _ourRoom != null || _vanilla != null || _bundle != null;
 
         /// <summary>Raises the visible P3 stage. Coroutine: it awaits the bundle and Addressables loads.</summary>
-        public IEnumerator Raise(ProbeReport report, bool applyEnvironment)
+        public IEnumerator Raise(ProbeReport report, bool applyEnvironment, bool repointOurShaders)
         {
             report.Section("P3 — VISIBLE render check (judge with your eyes)");
 
@@ -101,6 +101,14 @@ namespace FalseGods.Probe
                 report.Value("our room at", origin);
                 report.Value("our room lights", _ourRoom.GetComponentsInChildren<Light>(true).Length);
             });
+
+            // Our own materials use "Universal Render Pipeline/Lit". Packed into a bundle whose project never
+            // renders them, its variants get stripped — they show PINK in-game even though the shader object
+            // reports isSupported=true (measured P3, 2026-07-12). Re-pointing each material's shader to the
+            // game's already-resident shader of the same name (Shader.Find) should fix it; if it does, that
+            // confirms the diagnosis and is the production remedy for original materials (report §3.8).
+            if (repointOurShaders)
+                report.Try("re-point our materials to the game's resident shaders", () => RepointOurShaders(report));
 
             // ── the vanilla prefab, rendered next to our lighting, scripts stripped ────────────────────
             yield return RaiseVanilla(report, origin + right * VanillaSideOffset);
@@ -235,6 +243,49 @@ namespace FalseGods.Probe
             floorRenderer.sharedMaterial = chosen;
             report.Value("floor material now", chosen.name);
             report.Value("floor material shader", chosen.shader == null ? "<null>" : chosen.shader.name);
+        }
+
+        /// <summary>
+        /// Swaps each of our room's materials onto the game's resident shader of the same name. The bundle
+        /// carried its own copy of "Universal Render Pipeline/Lit" with the render variants stripped (nothing
+        /// in the authoring project used them), so it renders pink; the game's copy has the variants loaded.
+        /// If the pillar stops being pink after this, that IS the confirmation — and the fix for shipping
+        /// original materials that use a stock URP shader.
+        /// </summary>
+        private void RepointOurShaders(ProbeReport report)
+        {
+            if (_ourRoom == null)
+                return;
+
+            var mats = _ourRoom.GetComponentsInChildren<Renderer>(true)
+                .SelectMany(r => r.sharedMaterials ?? Array.Empty<Material>())
+                .Where(m => m != null && m.shader != null)
+                .Distinct()
+                .ToList();
+
+            var repointed = 0;
+            foreach (var mat in mats)
+            {
+                var name = mat.shader.name;
+                var wasSupported = mat.shader.isSupported;
+                var gameShader = Shader.Find(name);
+                var swapped = gameShader != null && gameShader != mat.shader;
+                if (swapped)
+                {
+                    mat.shader = gameShader;
+                    repointed++;
+                }
+
+                report.Value($"our mat '{mat.name}'",
+                    $"{name} (bundle shader supported={wasSupported}) -> " +
+                    (swapped ? "re-pointed to game shader"
+                             : gameShader == null ? "*** Shader.Find MISS — game has no such shader ***"
+                                                  : "already the game shader"));
+            }
+
+            report.Value("our materials re-pointed", repointed);
+            report.Line("  If our pillar is no longer pink, the bundle's shader variants were stripped —");
+            report.Line("  original materials need Shader.Find at runtime or a ShaderVariantCollection (report §3.8).");
         }
 
         private void ApplyEnvironment(ProbeReport report)
