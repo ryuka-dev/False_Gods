@@ -30,11 +30,12 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.5.0";
+        public const string PluginVersion = "0.6.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
         private ConfigEntry<Key> _visualHotkey;
+        private ConfigEntry<Key> _collisionHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
 
@@ -73,6 +74,12 @@ namespace FalseGods.Probe
                 "material — the working fix for our bundle's pink URP/Lit materials (the game has no resident " +
                 "URP/Lit to adopt; originals need a ShaderVariantCollection). Turn OFF to see the raw pink.");
 
+            _collisionHotkey = Config.Bind("Probe", "CollisionHotkey", Key.F12,
+                "P4 collision check: press once to place our sealed arena around you (its PlayerSpawn marker " +
+                "under your feet) so you can walk it on foot — stand on the floor, hit the pillar, test the " +
+                "walls — press again to remove it. The room's four walls seal it by design, which is why the " +
+                "P3 stage could only be entered with F3; P4 puts you inside without teleporting the player.");
+
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
             _scanHandler = OnNavigationScanComplete;
@@ -80,7 +87,8 @@ namespace FalseGods.Probe
 
             Logger.LogMessage($"{PluginName} {PluginVersion} loaded. " +
                               $"Auto-run after each nav scan: {_runAfterEachScan.Value}. " +
-                              $"P0/P1/P2 hotkey: {_hotkey.Value}. P3 visible hotkey: {_visualHotkey.Value}.");
+                              $"P0/P1/P2 hotkey: {_hotkey.Value}. P3 visible hotkey: {_visualHotkey.Value}. " +
+                              $"P4 collision hotkey: {_collisionHotkey.Value}.");
         }
 
         private void OnDestroy()
@@ -110,7 +118,13 @@ namespace FalseGods.Probe
 
             if (HotkeyPressed(_visualHotkey.Value))
             {
-                StartCoroutine(RunVisualToggle());
+                StartCoroutine(RunVisualToggle(VisualProbe.StageMode.Render));
+                return;
+            }
+
+            if (HotkeyPressed(_collisionHotkey.Value))
+            {
+                StartCoroutine(RunVisualToggle(VisualProbe.StageMode.Collision));
                 return;
             }
 
@@ -138,16 +152,18 @@ namespace FalseGods.Probe
         }
 
         /// <summary>
-        /// P3: toggle the visible render-check stage. Raising it awaits bundle + Addressables loads, so it is
-        /// a coroutine; teardown is immediate. Shares the _running guard with the P0/P1/P2 probe so the two
-        /// never run at once. Each action writes its own report.
+        /// Toggle the visible stage — P3 render (F11) or P4 collision (F12). Raising awaits bundle +
+        /// Addressables loads, so it is a coroutine; teardown is immediate. One stage is up at a time, so
+        /// either key while a stage is up tears it down. Shares the _running guard with the P0/P1/P2 probe so
+        /// the two never run at once. Each action writes its own report.
         /// </summary>
-        private IEnumerator RunVisualToggle()
+        private IEnumerator RunVisualToggle(VisualProbe.StageMode mode)
         {
             _running = true;
 
+            var label = mode == VisualProbe.StageMode.Render ? "P3 (visible render check)" : "P4 (collision check)";
             var report = new ProbeReport(Logger);
-            report.Line("False Gods — PoC probe P3 (visible render check)");
+            report.Line($"False Gods — PoC probe {label}");
             report.Line($"utc:     {DateTime.UtcNow:O}");
             report.Line(new string('═', 78));
 
@@ -157,18 +173,20 @@ namespace FalseGods.Probe
             }
             else
             {
-                report.Line("Raising the P3 stage in front of the camera. Look, then press the key again to drop it.");
-                yield return _visual.Raise(report, _visualApplyEnvironment.Value, _visualFixOurMaterials.Value);
+                report.Line(mode == VisualProbe.StageMode.Render
+                    ? "Raising the P3 stage in front of the camera. Look, then press the key again to drop it."
+                    : "Placing the P4 arena around you. Walk it, then press the key again to remove it.");
+                yield return _visual.Raise(report, mode, _visualApplyEnvironment.Value, _visualFixOurMaterials.Value);
             }
 
             try
             {
                 var path = report.WriteToDisk();
-                Logger.LogMessage($"P3 visual {(_visual.IsUp ? "raised" : "dropped")}. Report: {path}");
+                Logger.LogMessage($"{label} {(_visual.IsUp ? "raised" : "dropped")}. Report: {path}");
             }
             catch (Exception exception)
             {
-                Logger.LogError($"Could not write P3 report: {exception}");
+                Logger.LogError($"Could not write {label} report: {exception}");
             }
 
             _running = false;

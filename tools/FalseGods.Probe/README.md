@@ -1,12 +1,13 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4)
 
 A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
-[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2** and
-**P3** ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
+[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**
+and **P4** ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
 
-**P0/P1/P2 are read-only** (F10). **P3 is a visible render check** (F11): it deliberately shows real objects
-on screen so you can judge pink/no-pink with your eyes — see the read-only note below for exactly how far that
-departs from read-only, and how it is contained.
+**P0/P1/P2 are read-only** (F10). **P3 is a visible render check** (F11): it shows real objects on screen so
+you can judge pink/no-pink with your eyes. **P4 is a collision check** (F12): it places our sealed arena
+around you so you can walk it on foot. Both show real objects — see the read-only note below for exactly how
+far they depart from read-only, and how they are contained.
 
 **This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
 results transcribed into report 4.2/4.4 and RiskList R1/R3/R5. P2 (our own AssetBundle loads) runs from the
@@ -28,21 +29,25 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P1 / R6 | (bonus) What shaders and collider layers does a vanilla room prefab carry? | renderers / colliders on the instantiated prefab |
 | P2 / **R2** | Does an AssetBundle built in the game's exact Unity version (`FalseGods.Unity`, 6000.3.6f1) load under BepInEx with meshes/materials/collider layers intact? | `AssetBundle.LoadFromFileAsync` on `BepInEx/FalseGods.Probe/falsegods-poc-room.bundle` → instantiate under an inactive holder → inspect → `Unload(true)` |
 | P3 / **R6, R13** | Does a vanilla prefab render correctly (no pink) under **our** `LightingRoot`, and does one vanilla floor material behave on our own flat ground mesh? | shows our room (bundle, now with lights) + a vanilla prefab, borrows a vanilla floor material onto our floor — **you judge on screen** (report §3.4) |
+| P4 / **R3** | Is our arena solid to the player on foot — floor holds, pillar blocks, walls contain, no snagging? | places our room so its `PlayerSpawn` marker sits under your feet, leaving you inside the sealed arena — **you judge on foot** (no teleport, no F3) |
 
 P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
 P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
 no component `Awake`/`OnEnable`/`Start` runs (Unity does not run those on an object inactive in the hierarchy),
 and the instance is destroyed immediately after inspection. The Addressables handle is released.
 
-**P3 is the one visible step**, and stays as contained as a render check can be:
+**P3 and P4 are the visible steps**, and each stays as contained as its check can be:
 
 - Our own room is shown active — it has **no MonoBehaviours**, so only its lights/renderers/colliders come alive.
-- The vanilla prefab is instantiated **inactive**, has **every MonoBehaviour stripped** while nothing can
-  `Awake`, and only then is shown — what renders is meshes + materials + shaders, never a gameplay script. It
+- The vanilla prefab (P3 only) is instantiated **inactive**, has **every MonoBehaviour stripped** while nothing
+  can `Awake`, and only then is shown — what renders is meshes + materials + shaders, never a gameplay script. It
   registers with no manager, spawns nothing.
 - Ambient/fog (scene state a prefab cannot carry) is optionally applied to global `RenderSettings` and **always
   restored on teardown**. Everything the stage created is destroyed and the Addressables handle + bundle released
   when you drop it (and on plugin unload, if still up).
+- P4 **never moves the player** — it moves the room so `PlayerSpawn` lands under your feet. The player's CMF
+  movement controller is untouched (its position-set path is not in our decompiled reference, so we do not
+  depend on it); when you drop the room you simply fall onto the level floor.
 
 ## When it runs (timing matters)
 
@@ -100,6 +105,19 @@ Turn `VisualFixOurMaterials` **off** to see the raw pink.
 Press **F11** again to tear the stage down and restore the environment. Needs the deployed bundle (build it in
 `FalseGods.Unity`, then `-p:DeployProbe=true` copies it); without it the P3 stage reports "skipped".
 
+**P4 (F12) — the collision check.** Stand in a loaded level and press **F12**: our sealed arena appears
+*around* you, with its `PlayerSpawn` marker under your feet — so you are inside it, on the floor, clear of the
+central pillar and the walls. The room's four boundary walls seal it by design, which is why the P3 stage 18 m
+away could only be entered with F3/noclip; P4 puts you inside without teleporting the player. Geometry may be
+**pink** (P4 judges collision, not colour — P3 covered colour). Then judge, on foot:
+
+1. Do you stand **on** our floor — not sinking through, not floating? (R3)
+2. Does the central **pillar block** you (no clipping, no snagging)?
+3. Do the four **walls contain** you (you cannot walk out)?
+4. Circle the pillar and the perimeter — any **snagging** on edges or corners?
+
+Press **F12** again to remove the room; you drop back onto the level floor. Same bundle requirement as P3.
+
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.
 
@@ -108,9 +126,9 @@ Press **F11** again to tear the stage down and restore the environment. Needs th
 1. Enter a normal level, let the probe fire, grab the report.
 2. Transcribe the measured values into:
    - [CollisionAndNavigationProposal.md §4.4](../../Docs/CollisionAndNavigationProposal.md) — agent parameters
-   - [RiskList.md](../../Docs/RiskList.md) — R1 (resolution works?), R2 (our bundle loads?), R3 (layers),
-     R5 (cleaner points), **R6/R13** (P3: vanilla prefab renders un-pink under our lights? floor material
-     projects or needs UVs?)
+   - [RiskList.md](../../Docs/RiskList.md) — R1 (resolution works?), R2 (our bundle loads?), R3 (P0: layers;
+     **P4: floor/pillar/walls solid to the player on foot, no snagging?**), R5 (cleaner points), **R6/R13**
+     (P3: vanilla prefab renders un-pink under our lights? floor material projects or needs UVs?)
    - [MaterialCompatibilityReport.md §3.6](../../Docs/MaterialCompatibilityReport.md) — the P3 floor-strategy
      verdict.
    - flip the affected *proposed / unverified* notes to measured facts, citing the report.

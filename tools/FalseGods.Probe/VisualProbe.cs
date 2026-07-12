@@ -37,6 +37,15 @@ namespace FalseGods.Probe
         private const string BundleFileName = "falsegods-poc-room.bundle";
         private const string OurRoomPrefabName = "PocRoom";
 
+        // The room's spawn marker (PocRoomGenerator: a child named "PlayerSpawn" at local (-7,0,-7), on the
+        // floor top, ~10 m from the central pillar and ~3 m inside the nearest walls). P4 drops the room so
+        // this marker lands under your feet — a placement guaranteed clear of the pillar and walls.
+        private const string PlayerSpawnMarkerName = "PlayerSpawn";
+
+        /// <summary>Render (P3): our room + a vanilla prefab 18 m ahead, judged by eye. Collision (P4): our
+        /// room placed around you, judged on foot.</summary>
+        internal enum StageMode { Render, Collision }
+
         // Where the stage appears relative to the camera, so you see it the moment you raise it.
         private const float RoomForwardDistance = 18f;
         private const float VanillaSideOffset = 14f;
@@ -52,10 +61,17 @@ namespace FalseGods.Probe
 
         public bool IsUp => _ourRoom != null || _vanilla != null || _bundle != null;
 
-        /// <summary>Raises the visible P3 stage. Coroutine: it awaits the bundle and Addressables loads.</summary>
-        public IEnumerator Raise(ProbeReport report, bool applyEnvironment, bool fixOurMaterials)
+        /// <summary>
+        /// Raises the visible stage. <see cref="StageMode.Render"/> (P3) puts our room + a vanilla prefab
+        /// 18 m ahead to judge pink/no-pink; <see cref="StageMode.Collision"/> (P4) places our room around
+        /// you — its PlayerSpawn marker under your feet — so you judge collision on foot. Coroutine: it
+        /// awaits the bundle and Addressables loads.
+        /// </summary>
+        public IEnumerator Raise(ProbeReport report, StageMode mode, bool applyEnvironment, bool fixOurMaterials)
         {
-            report.Section("P3 — VISIBLE render check (judge with your eyes)");
+            report.Section(mode == StageMode.Render
+                ? "P3 — VISIBLE render check (judge with your eyes)"
+                : "P4 — collision check (walk it with your feet, no F3)");
 
             var camera = Camera.main;
             if (camera == null)
@@ -64,9 +80,7 @@ namespace FalseGods.Probe
                 yield break;
             }
 
-            var origin = StageOrigin(camera, out var right);
-
-            // ── our own room: the P2 bundle, now with a LightingRoot ──────────────────────────────────
+            // ── our own room bundle (shared by both modes) ─────────────────────────────────────────────
             var bundlePath = Path.Combine(Paths.BepInExRootPath, "FalseGods.Probe", BundleFileName);
             if (!File.Exists(bundlePath))
             {
@@ -94,6 +108,15 @@ namespace FalseGods.Probe
                 yield break;
             }
 
+            // P4: place the room around the player and hand off — collision is judged on foot, nothing to
+            // render-dress or light for the eye, so the render-only steps below are skipped.
+            if (mode == StageMode.Collision)
+            {
+                RaiseCollision(report, camera, ourPrefab);
+                yield break;
+            }
+
+            var origin = StageOrigin(camera, out var right);
             report.Try("instantiate our room (active — its LightingRoot lights the stage)", () =>
             {
                 _ourRoom = UnityEngine.Object.Instantiate(ourPrefab, origin, Quaternion.identity);
@@ -132,6 +155,52 @@ namespace FalseGods.Probe
             report.Line("      3. Is the arena lit by OUR LightingRoot (it should read as lit even where the");
             report.Line("         level's own lights don't reach)?");
             report.Line("  Press the visual hotkey again to tear the stage down and restore the environment.");
+        }
+
+        /// <summary>
+        /// P4 — RiskList R3, MinimalProofOfConceptPlan §7.2: is our arena solid to the player on foot? The
+        /// four boundary walls seal the room by design (which is exactly why P3's 18 m stage could only be
+        /// entered with F3/noclip). So rather than teleport the player in — the movement controller is a CMF
+        /// <c>AdvancedWalkerController</c> whose position-set path is not in our decompiled reference, so we
+        /// do not depend on it — this moves the ROOM: it drops so the PlayerSpawn marker lands under your
+        /// feet, leaving you standing inside the sealed arena, clear of the pillar and walls. Teardown
+        /// destroys the room and you fall back onto the level floor.
+        /// </summary>
+        private void RaiseCollision(ProbeReport report, Camera camera, GameObject ourPrefab)
+        {
+            var foot = camera.transform.position - Vector3.up * EyeToFootDrop;
+
+            report.Try("instantiate our room around you (PlayerSpawn under your feet)", () =>
+            {
+                _ourRoom = UnityEngine.Object.Instantiate(ourPrefab, foot, Quaternion.identity);
+                _ourRoom.name = "FalseGodsP4_OurRoom";
+
+                var spawn = _ourRoom.GetComponentsInChildren<Transform>(true)
+                    .FirstOrDefault(t => t.name == PlayerSpawnMarkerName);
+                if (spawn != null)
+                {
+                    // Shift the whole room so PlayerSpawn sits exactly at your feet: floor top under you,
+                    // ~10 m clear of the central pillar, ~3 m inside the nearest walls — no capsule overlap.
+                    _ourRoom.transform.position += foot - spawn.position;
+                }
+                else
+                {
+                    report.Line("  (No PlayerSpawn marker found — room left centred on you; you may overlap the pillar.)");
+                }
+
+                report.Value("our room at", _ourRoom.transform.position);
+                report.Value("your feet at", foot);
+                report.Value("colliders in room", _ourRoom.GetComponentsInChildren<Collider>(true).Length);
+            });
+
+            report.Line();
+            report.Line("  Geometry may be PINK — P4 judges COLLISION, not colour (P3 covered colour).");
+            report.Line("  >>> NOW WALK IT, no F3 / noclip:");
+            report.Line("      1. Do you stand ON our floor — not sinking through, not floating?  (R3)");
+            report.Line("      2. Walk into the central pillar: does it BLOCK you (no clipping, no snagging)?");
+            report.Line("      3. Walk into the four walls: do they CONTAIN you? (this seal is why P3 needed F3)");
+            report.Line("      4. Circle the pillar and the perimeter: any snagging on edges or corners?");
+            report.Line("  Press the collision hotkey again to remove the room — you drop onto the level floor.");
         }
 
         private IEnumerator RaiseVanilla(ProbeReport report, Vector3 position)
@@ -299,7 +368,7 @@ namespace FalseGods.Probe
         /// <summary>Drops the stage and restores everything the raise touched.</summary>
         public void Drop(ProbeReport report)
         {
-            report.Section("P3 — teardown");
+            report.Section("stage teardown (P3 render / P4 collision)");
 
             if (_envApplied)
             {
