@@ -63,6 +63,16 @@ documents describe one plan.
 > instance visible. Operational trap, fixed: a stale probe DLL from the P0/P1 run (same GUID **and version**)
 > made BepInEx skip the rebuilt plugin — the probe version is now bumped per change (0.2.0).
 | P3 | Vanilla prefab **renders correctly** (no pink) under our lighting; test one vanilla floor material on our ground mesh | R6, R13, report 3.4 |
+
+> **P3 — HARNESS READY, NOT YET RUN.** The room's `LightingRoot` now carries two realtime lights
+> (`PocRoomGenerator.BuildLighting`; directional key + point fill, `Realtime`, no baked lightmaps per report
+> 3.3), and the probe grew a visible section (`VisualProbe`, F11): it shows our lit room + a vanilla prefab
+> beside it and lays one vanilla floor material on our flat floor, for an on-screen pink/no-pink and
+> projection judgement (report §3.4). The vanilla prefab is shown with **every MonoBehaviour stripped while
+> inactive** (renders meshes/materials only — no gameplay Awake); ambient/fog is applied to global
+> `RenderSettings` and restored on teardown. This is a **plan/harness only**: pink is a human verdict and the
+> game has not been run for P3 yet, so R6/R13 stay *unverified* until the F11 stage is judged in-game and the
+> result is written into RiskList R6/R13 and report §3.6.
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |

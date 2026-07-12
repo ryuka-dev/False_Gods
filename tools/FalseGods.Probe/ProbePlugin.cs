@@ -30,10 +30,14 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.3.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
+        private ConfigEntry<Key> _visualHotkey;
+        private ConfigEntry<bool> _visualApplyEnvironment;
+
+        private readonly VisualProbe _visual = new VisualProbe();
 
         private OnScanDelegate _scanHandler;
 
@@ -50,22 +54,37 @@ namespace FalseGods.Probe
                 "This is the earliest point at which the level's rooms, graph and cleaner points are all ready.");
 
             _hotkey = Config.Bind("Probe", "Hotkey", Key.F10,
-                "Run the probe on demand — the authoritative report, taken when you choose. " +
-                "The game uses the new Input System; legacy UnityEngine.Input would throw.");
+                "Run the read-only P0/P1/P2 probe on demand — the authoritative report, taken when you " +
+                "choose. The game uses the new Input System; legacy UnityEngine.Input would throw.");
+
+            _visualHotkey = Config.Bind("Probe", "VisualHotkey", Key.F11,
+                "P3 visible render check: press once to raise a visible stage (our room + a vanilla prefab " +
+                "under our LightingRoot, with a vanilla floor material on our ground mesh), press again to " +
+                "tear it down. Unlike P0/P1/P2 this shows real objects — judge pink/no-pink with your eyes.");
+
+            _visualApplyEnvironment = Config.Bind("Probe", "VisualApplyEnvironment", true,
+                "During the P3 stage, also apply basic ambient/fog to the global RenderSettings (scene state " +
+                "a prefab cannot carry). Always restored on teardown. Turn off to leave the level's own " +
+                "environment untouched and judge the lights alone.");
 
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
             _scanHandler = OnNavigationScanComplete;
             AstarPath.OnPostScan = (OnScanDelegate)Delegate.Combine(AstarPath.OnPostScan, _scanHandler);
 
-            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Read-only. " +
-                              $"Auto-run after each nav scan: {_runAfterEachScan.Value}. Hotkey: {_hotkey.Value}.");
+            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. " +
+                              $"Auto-run after each nav scan: {_runAfterEachScan.Value}. " +
+                              $"P0/P1/P2 hotkey: {_hotkey.Value}. P3 visible hotkey: {_visualHotkey.Value}.");
         }
 
         private void OnDestroy()
         {
             if (_scanHandler != null)
                 AstarPath.OnPostScan = (OnScanDelegate)Delegate.Remove(AstarPath.OnPostScan, _scanHandler);
+
+            // Never leave the P3 stage (or its RenderSettings change) behind if the plugin unloads while up.
+            if (_visual.IsUp)
+                _visual.Drop(new ProbeReport(Logger));
         }
 
         /// <summary>Called by A* on the main thread when a scan finishes (BuildNavMeshNode's ScanAsync path).</summary>
@@ -76,10 +95,16 @@ namespace FalseGods.Probe
             if (_running)
                 return;
 
-            if (HotkeyPressed())
+            if (HotkeyPressed(_hotkey.Value))
             {
                 _scanCompletePending = false;
                 StartCoroutine(RunProbe("hotkey (authoritative — taken on demand)"));
+                return;
+            }
+
+            if (HotkeyPressed(_visualHotkey.Value))
+            {
+                StartCoroutine(RunVisualToggle());
                 return;
             }
 
@@ -92,18 +117,55 @@ namespace FalseGods.Probe
             }
         }
 
-        private bool HotkeyPressed()
+        private static bool HotkeyPressed(Key key)
         {
             try
             {
                 var keyboard = Keyboard.current;
-                return keyboard != null && keyboard[_hotkey.Value].wasPressedThisFrame;
+                return keyboard != null && keyboard[key].wasPressedThisFrame;
             }
             catch (Exception)
             {
                 // No keyboard device, or an unmapped key. Auto-run still works.
                 return false;
             }
+        }
+
+        /// <summary>
+        /// P3: toggle the visible render-check stage. Raising it awaits bundle + Addressables loads, so it is
+        /// a coroutine; teardown is immediate. Shares the _running guard with the P0/P1/P2 probe so the two
+        /// never run at once. Each action writes its own report.
+        /// </summary>
+        private IEnumerator RunVisualToggle()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P3 (visible render check)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            if (_visual.IsUp)
+            {
+                _visual.Drop(report);
+            }
+            else
+            {
+                report.Line("Raising the P3 stage in front of the camera. Look, then press the key again to drop it.");
+                yield return _visual.Raise(report, _visualApplyEnvironment.Value);
+            }
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P3 visual {(_visual.IsUp ? "raised" : "dropped")}. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P3 report: {exception}");
+            }
+
+            _running = false;
         }
 
         private IEnumerator RunProbe(string trigger)

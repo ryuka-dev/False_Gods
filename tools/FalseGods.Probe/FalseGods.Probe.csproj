@@ -3,19 +3,25 @@
   <!--
     ══ THROWAWAY DIAGNOSTIC TOOL — NOT PART OF THE PRODUCTION ARCHITECTURE ══
 
-    A read-only BepInEx probe that answers PoC steps P0 and P1 (Docs/MinimalProofOfConceptPlan.md §7.2)
-    by reading real values out of a running game, so RiskList R1/R3/R5 stop being guesses.
+    A BepInEx probe that answers PoC steps P0, P1, P2 and P3 (Docs/MinimalProofOfConceptPlan.md §7.2)
+    by reading — and, for P3, showing — real values out of a running game, so RiskList R1/R2/R3/R5/R6/R13
+    stop being guesses.
 
     It deliberately lives OUTSIDE src/ and outside the FG-ARCH dependency rules:
 
       - Nothing in src/ may reference it. A test asserts this.
       - It answers to none of the module boundaries: it reads AstarPath, Addressables and game
         singletons directly, because that is the entire point of a probe.
-      - It applies NO Harmony patches and mutates NO authoritative game state. It does instantiate one
-        vanilla prefab (P1 requires it), but under an inactive holder so no component lifecycle runs, and
-        it destroys the instance immediately — no manager registration, no spawn, no world change.
-      - It is DISPOSABLE. When P0/P1 have been run and their results written back into
-        CollisionAndNavigationProposal.md §4.4 and RiskList R1/R3/R5, delete this project.
+      - P0/P1/P2 apply NO Harmony patches and mutate NO authoritative game state. P1/P2 instantiate a
+        prefab under an inactive holder so no component lifecycle runs, then destroy it — no manager
+        registration, no spawn, no world change.
+      - P3 (F11) is the one VISIBLE step: pink/no-pink is a render verdict a human makes on screen, so it
+        shows our room + a vanilla prefab. It stays contained — our room has no scripts; the vanilla
+        prefab has every MonoBehaviour stripped before it is shown (renders meshes/materials only, no
+        gameplay); global ambient/fog is restored and every spawned object destroyed on teardown.
+      - It is DISPOSABLE. When P0..P3 have been run and their results written back into
+        CollisionAndNavigationProposal.md §4.4, MaterialCompatibilityReport §3.6 and
+        RiskList R1/R2/R3/R5/R6/R13, delete this project.
 
     Deleting it must be a one-line change to the solution and nothing else. If that ever stops being
     true, the probe has grown into production code and the boundary has been lost.

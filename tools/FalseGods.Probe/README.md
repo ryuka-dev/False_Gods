@@ -1,8 +1,12 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3)
 
-A read-only BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
-[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1** and **P2**
-([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
+A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
+[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2** and
+**P3** ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
+
+**P0/P1/P2 are read-only** (F10). **P3 is a visible render check** (F11): it deliberately shows real objects
+on screen so you can judge pink/no-pink with your eyes — see the read-only note below for exactly how far that
+departs from read-only, and how it is contained.
 
 **This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
 results transcribed into report 4.2/4.4 and RiskList R1/R3/R5. P2 (our own AssetBundle loads) runs from the
@@ -23,11 +27,22 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P1 / **R1** | Can mod code resolve, load **and instantiate** a vanilla room prefab by the GUIDs the game itself holds? | `LevelBlock.roomPrefabsAddressable` → `LoadResourceLocationsAsync` → `LoadAssetAsync<GameObject>` → `Instantiate` |
 | P1 / R6 | (bonus) What shaders and collider layers does a vanilla room prefab carry? | renderers / colliders on the instantiated prefab |
 | P2 / **R2** | Does an AssetBundle built in the game's exact Unity version (`FalseGods.Unity`, 6000.3.6f1) load under BepInEx with meshes/materials/collider layers intact? | `AssetBundle.LoadFromFileAsync` on `BepInEx/FalseGods.Probe/falsegods-poc-room.bundle` → instantiate under an inactive holder → inspect → `Unload(true)` |
+| P3 / **R6, R13** | Does a vanilla prefab render correctly (no pink) under **our** `LightingRoot`, and does one vanilla floor material behave on our own flat ground mesh? | shows our room (bundle, now with lights) + a vanilla prefab, borrows a vanilla floor material onto our floor — **you judge on screen** (report §3.4) |
 
-It mutates **no authoritative game state**: no Harmony patches, no manager registration, no world spawn. P1's
-acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so no
-component `Awake`/`OnEnable`/`Start` runs (Unity does not run those on an object inactive in the hierarchy), and
-the instance is destroyed immediately after inspection. The Addressables handle is released.
+P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
+P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
+no component `Awake`/`OnEnable`/`Start` runs (Unity does not run those on an object inactive in the hierarchy),
+and the instance is destroyed immediately after inspection. The Addressables handle is released.
+
+**P3 is the one visible step**, and stays as contained as a render check can be:
+
+- Our own room is shown active — it has **no MonoBehaviours**, so only its lights/renderers/colliders come alive.
+- The vanilla prefab is instantiated **inactive**, has **every MonoBehaviour stripped** while nothing can
+  `Awake`, and only then is shown — what renders is meshes + materials + shaders, never a gameplay script. It
+  registers with no manager, spawns nothing.
+- Ambient/fog (scene state a prefab cannot carry) is optionally applied to global `RenderSettings` and **always
+  restored on teardown**. Everything the stage created is destroyed and the Addressables handle + bundle released
+  when you drop it (and on plugin unload, if still up).
 
 ## When it runs (timing matters)
 
@@ -68,6 +83,18 @@ Then launch the game, **enter a normal level**, and either let the automatic pos
 **F10** once you are standing in the arena. Each run writes a timestamped `probe-YYYYMMDD-HHMMSS.txt` under
 `BepInEx/FalseGods.Probe/` (gitignored) and echoes to the BepInEx console. Prefer the F10 report.
 
+**P3 (F11) — the visible render check.** Stand in a loaded level and press **F11**: a stage appears ~18 m in
+front of you — our room (lit by its own `LightingRoot`) with a vanilla prefab beside it, and a vanilla floor
+material laid on our flat floor. Then judge, with your eyes:
+
+1. Is the vanilla prefab **pink/black** or correctly textured and lit? (R6/R13)
+2. Does the vanilla floor material **sit right** on our flat mesh, or swim/mis-scale? (report §3.4 — projection
+   vs. authored-UV dependence, which decides the floor strategy)
+3. Does **our** lighting read as the light source (visible even where the level's own lights don't reach)?
+
+Press **F11** again to tear the stage down and restore the environment. Needs the deployed bundle (build it in
+`FalseGods.Unity`, then `-p:DeployProbe=true` copies it); without it the P3 stage reports "skipped".
+
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.
 
@@ -77,6 +104,9 @@ Then launch the game, **enter a normal level**, and either let the automatic pos
 2. Transcribe the measured values into:
    - [CollisionAndNavigationProposal.md §4.4](../../Docs/CollisionAndNavigationProposal.md) — agent parameters
    - [RiskList.md](../../Docs/RiskList.md) — R1 (resolution works?), R2 (our bundle loads?), R3 (layers),
-     R5 (cleaner points)
+     R5 (cleaner points), **R6/R13** (P3: vanilla prefab renders un-pink under our lights? floor material
+     projects or needs UVs?)
+   - [MaterialCompatibilityReport.md §3.6](../../Docs/MaterialCompatibilityReport.md) — the P3 floor-strategy
+     verdict.
    - flip the affected *proposed / unverified* notes to measured facts, citing the report.
 3. Delete `tools/FalseGods.Probe/`.
