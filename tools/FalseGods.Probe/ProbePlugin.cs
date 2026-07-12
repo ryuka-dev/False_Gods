@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.12.0";
+        public const string PluginVersion = "0.13.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -83,12 +83,13 @@ namespace FalseGods.Probe
                 "Not F12 — that is the Steam/Windows screenshot key. Rebind here if F9 also conflicts.");
 
             _navHotkey = Config.Bind("Probe", "NavHotkey", Key.F8,
-                "P5 A* nav check: spawns our room as an isolated island a few metres up and runs a two-phase " +
-                "test — rebake with no anchor (the NavMeshCleaner should ERASE our floor), then with a " +
-                "validNavMeshPoint on it (our floor should SURVIVE, walkable). WARNING: this re-bakes the " +
-                "WHOLE level's nav (AstarPath.ScanAsync, the game's own BakeNavMesh path) three times. It only " +
-                "appends a cleaner point and restores it, and a level change rebuilds nav — but run it in a " +
-                "throwaway level; NPCs will re-path while it re-bakes.");
+                "P5 A* nav check: spawns our room as an isolated island a few metres up and re-bakes nav the " +
+                "way the game does — SnapBoundsToScene() FIRST, then Scan() (the earlier runs skipped the " +
+                "bounds refit, so our floor sat outside the graph and never rasterized). Two phases: rebake " +
+                "with no anchor (R4: floor should now rasterize; R5: NavMeshCleaner should ERASE it), then with " +
+                "a validNavMeshPoint on it (should SURVIVE, walkable). WARNING: re-bakes the WHOLE level's nav " +
+                "three times. It only appends a cleaner point and restores it, and a level change rebuilds nav " +
+                "— but run it in a throwaway level; NPCs will re-path while it re-bakes.");
 
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.

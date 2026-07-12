@@ -105,6 +105,13 @@ documents describe one plan.
 > only pathed because it rode the level's own nav; placed far from any level nav, it could not path to our arena.
 > **R5's cleaner mechanism is reconfirmed** (points keep areas), but **our floor's own walkability (R4) needs a
 > prebaked `NavmeshPrefab` in the bundle** — `NavmeshPrefab.Apply()` from a mod is the untested next step.
+>
+> **Faithful-sequence re-test (probe 0.13.0, 2026-07-12):** replicating `BuildNavMeshNode` exactly
+> (`recastGraph.SnapBoundsToScene()` then `Scan()`) still gave 0 nodes on our floor and ruled out two causes —
+> **bounds** (the floor was already inside `forcedBounds`; the snap changed nothing) and **collection** (the
+> floor is `isReadable=true`, so it passes A\*'s `ConvertMeshToGatheredMesh` and is gathered). The 0-nodes result
+> is a rasterization/walkability failure, not a collection failure; the path to Option 1 is unchanged and is the
+> determinism-correct choice for host+client parity anyway (see RiskList R4).
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
 | P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
 | P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest; the canonical `ContentHash` is stable across two loads with different Addressables completion order | P1–P7, R14, R34 |

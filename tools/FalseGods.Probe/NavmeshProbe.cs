@@ -28,6 +28,17 @@ namespace FalseGods.Probe
     /// only APPENDS to the cleaner's point list (the level's own areas stay valid), restores that list and
     /// re-updates before it returns, and in any case a level change rebuilds the graph from scratch
     /// (GameManager destroys and re-instantiates astarPathPrefab per level). Run it in a throwaway level.
+    ///
+    /// REVISION (P5 re-test, Path A): the earlier runs called <c>AstarPath.Scan()</c> WITHOUT first calling
+    /// <c>recastGraph.SnapBoundsToScene()</c>, which the game ALWAYS does before a bake (BuildNavMeshNode.cs:44,
+    /// NavMeshManager.SetupAstarPathSize, EndlessModeManager.cs:845). That step refits the graph's
+    /// rasterization volume (<c>forcedBoundsCenter/Size</c>) to the collected meshes over infinite bounds —
+    /// honoring our <see cref="RecastNavmeshModifier"/>(AlwaysInclude) — so skipping it left our floating
+    /// island OUTSIDE the level-fitted bounds, where neither <c>CollectMeshes</c> nor the modifier AABB query
+    /// (both clipped to <c>forcedBounds</c>) could see it. That is the likely reason the floor showed
+    /// "0 nodes, ~6 m from the nearest node". <see cref="Rescan"/> now replicates the game's sequence and logs
+    /// the bounds so the in/out signal is visible, separating R4 (does our floor rasterize at all under a
+    /// runtime rescan) from R5 (does the cleaner keep only anchored areas).
     /// </summary>
     internal sealed class NavmeshProbe
     {
@@ -120,10 +131,12 @@ namespace FalseGods.Probe
             report.Value("recast tagMask", recast.collectionSettings.tagMask == null || recast.collectionSettings.tagMask.Count == 0
                 ? "<empty>"
                 : string.Join(", ", recast.collectionSettings.tagMask));
-            report.Line("  NOTE: this re-bakes the WHOLE level's nav with AstarPath.Scan() — the exact call in");
-            report.Line("  NavMeshManager.BakeNavMesh(). It blocks (a brief freeze x3). UpdateGraphs(bounds) only");
-            report.Line("  edits node walkability and never rasterizes new geometry (MetalGate uses it that way).");
-            report.Line("  It only APPENDS a cleaner point, and a level change rebuilds nav — recoverable.");
+            report.Line("  NOTE: each re-bake now replicates the game's BuildNavMeshNode EXACTLY — recastGraph");
+            report.Line("  .SnapBoundsToScene() FIRST (refits the rasterization volume to include our floor),");
+            report.Line("  THEN AstarPath.Scan() (= NavMeshManager.BakeNavMesh). Earlier P5 runs SKIPPED");
+            report.Line("  SnapBoundsToScene, so our island sat outside the bounds and never rasterized — the");
+            report.Line("  bounds lines below show whether our floor is now inside. It blocks (a brief freeze x3),");
+            report.Line("  only APPENDS a cleaner point and restores it, and a level change rebuilds nav.");
 
             // Recast reads mesh triangles on the CPU (rasterizeMeshes=true, rasterizeColliders=false — P0), so
             // a bundle mesh that is not read/write enabled is invisible to it even though it renders fine.
@@ -141,21 +154,30 @@ namespace FalseGods.Probe
 
             // ── Phase 1: full re-bake with the cleaner points unchanged. R5 predicts our floor is erased.
             report.Line();
-            report.Line("  -- Phase 1: full Scan() with NO anchor on our floor (R5 predicts UNWALKABLE)");
-            yield return Rescan(astar);
-            var walkable1 = ReportPhase(report, "phase 1 / no anchor", recast, sample, bounds);
+            report.Line("  -- Phase 1: SnapBoundsToScene() + Scan() with NO anchor on our floor");
+            report.Line("     (R4: our floor should now RASTERIZE — a node within 1 m; R5: but be UNWALKABLE, erased)");
+            yield return Rescan(astar, recast, report, sample);
+            var phase1 = ReportPhase(report, "phase 1 / no anchor", recast, sample, bounds);
 
             // ── Phase 2: append a valid point on our floor and re-bake again. Expect the island to survive.
             report.Line();
-            report.Line("  -- Phase 2: append a validNavMeshPoint on our floor, Scan() again (expect WALKABLE)");
+            report.Line("  -- Phase 2: append a validNavMeshPoint on our floor, re-bake again (expect WALKABLE)");
             cleaner.validNavMeshPoints = Append(savedPoints, sample);
-            yield return Rescan(astar);
-            var walkable2 = ReportPhase(report, "phase 2 / anchored", recast, sample, bounds);
+            yield return Rescan(astar, recast, report, sample);
+            var phase2 = ReportPhase(report, "phase 2 / anchored", recast, sample, bounds);
 
             report.Line();
-            report.Value("R5 verdict", (!walkable1 && walkable2)
-                ? "CONFIRMED — floor erased without an anchor, walkable with one (exactly as predicted)"
-                : $"UNEXPECTED — phase1 walkable={walkable1}, phase2 walkable={walkable2} (read the phase lines above)");
+            report.Value("R4 verdict (does a runtime rescan rasterize our floor?)",
+                (phase1.FloorRasterized || phase2.FloorRasterized)
+                    ? "RASTERIZED — a nav node landed within 1 m of our floor. Runtime rescan (Option 2) IS viable; "
+                      + "the earlier 'ruled out' was the missing SnapBoundsToScene, not our geometry."
+                    : "NOT RASTERIZED — no node within 1 m of our floor even after SnapBoundsToScene. Option 2 "
+                      + "genuinely dead for our floor; the path is a prebaked NavmeshPrefab (Option 1).");
+            report.Value("R5 verdict (does the cleaner keep only anchored areas?)",
+                (!phase1.FloorWalkable && phase2.FloorWalkable)
+                    ? "CONFIRMED — floor erased without an anchor, walkable with one (exactly as predicted)"
+                    : $"INCONCLUSIVE — phase1 walkable={phase1.FloorWalkable}, phase2 walkable={phase2.FloorWalkable} "
+                      + "(needs the floor to rasterize first — read the R4 verdict and the distance lines above)");
 
             // ── Restore: put the cleaner points back, drop the island, and re-update so nothing walkable is
             // left behind. Destroy the room BEFORE the final update so the region re-rasterizes to nothing.
@@ -163,7 +185,7 @@ namespace FalseGods.Probe
             cleaner.validNavMeshPoints = savedPoints;
             if (_room != null) { UnityEngine.Object.Destroy(_room); _room = null; }
             yield return null; // let the destroy take effect before we re-bake without the island
-            yield return Rescan(astar);
+            yield return Rescan(astar, recast, report, sample);
             UnloadBundle();
 
             report.Section("P5 — teardown");
@@ -171,13 +193,33 @@ namespace FalseGods.Probe
             report.Line("  Any residual nodes are wiped on the next level change (astarPathPrefab is rebuilt).");
         }
 
+        /// <summary>The signal for one re-bake: whether a nav node landed ON our floor (R4 — rasterization)
+        /// and whether that node is walkable (R5 — cleaner). Distance separates our own floor node (~0.1 m) from
+        /// a distant level node the query snapped to.</summary>
+        private readonly struct PhaseResult
+        {
+            public readonly bool NearestWalkable;
+            public readonly float NearestDistance;
+
+            public PhaseResult(bool nearestWalkable, float nearestDistance)
+            {
+                NearestWalkable = nearestWalkable;
+                NearestDistance = nearestDistance;
+            }
+
+            /// <summary>A node landed on our floor — the floor entered the navmesh (R4).</summary>
+            public bool FloorRasterized => NearestDistance >= 0f && NearestDistance <= 1f;
+
+            /// <summary>Our floor is rasterized AND walkable — it survived the cleaner (R5).</summary>
+            public bool FloorWalkable => FloorRasterized && NearestWalkable;
+        }
+
         /// <summary>Reports, for the node nearest our floor sample: its walkability, area, and DISTANCE (so we
         /// can tell our own floor node — ~0.1 m away — from a distant level node it snapped to), plus how many
-        /// nodes fall inside the island bounds and the graph's walkable/total. Returns true only when the
-        /// nearest node is both walkable AND close, i.e. our floor really is walkable. Uses
+        /// nodes fall inside the island bounds and the graph's walkable/total. Uses
         /// <see cref="NNConstraint.None"/> so Phase 1 does not snap past an unwalkable floor node to a far
         /// walkable one.</summary>
-        private static bool ReportPhase(ProbeReport report, string tag, RecastGraph recast, Vector3 sample, Bounds bounds)
+        private static PhaseResult ReportPhase(ProbeReport report, string tag, RecastGraph recast, Vector3 sample, Bounds bounds)
         {
             var node = recast.GetNearest(sample, NNConstraint.None).node;
             var distance = node == null ? -1f : Vector3.Distance(sample, (Vector3)node.position);
@@ -204,7 +246,7 @@ namespace FalseGods.Probe
                 : $"walkable={node.Walkable}, area={node.Area}, distance={distance:F2} m");
             report.Value($"[{tag}] nodes inside island bounds (walkable/total)", $"{inBoundsWalkable}/{inBounds}");
             report.Value($"[{tag}] whole graph (walkable/total)", $"{walkable}/{total}");
-            return node != null && node.Walkable && distance <= 1f;
+            return new PhaseResult(node != null && node.Walkable, distance);
         }
 
         /// <summary>Attaches a <see cref="RecastNavmeshModifier"/> (WalkableSurface, force-included) to each of
@@ -262,14 +304,33 @@ namespace FalseGods.Probe
             return bounds;
         }
 
-        /// <summary>Re-bakes every graph with the game's own synchronous bake — <c>AstarPath.Scan()</c>, exactly
-        /// as <c>NavMeshManager.BakeNavMesh()</c> calls it. This blocks (a brief freeze) but runs the whole
-        /// pipeline to completion, unlike the manually-driven <c>ScanAsync</c> the earlier runs used. Then it
-        /// waits for the <see cref="NavMeshCleaner"/>'s post-scan work item to apply.</summary>
-        private static IEnumerator Rescan(AstarPath astar)
+        /// <summary>Re-bakes every graph the way the game's <c>BuildNavMeshNode</c> does: <b>refit the graph
+        /// bounds first</b> (<c>recastGraph.SnapBoundsToScene()</c> — BuildNavMeshNode.cs:44), <b>then</b>
+        /// <c>AstarPath.Scan()</c> (= <c>NavMeshManager.BakeNavMesh()</c>). SnapBoundsToScene collects scene
+        /// meshes over infinite bounds — honoring our <see cref="RecastNavmeshModifier"/>(AlwaysInclude) — and
+        /// grows <c>forcedBounds</c> to include our floor, which is exactly the step the earlier P5 runs omitted.
+        /// The bounds are logged before/after so we can see our floor move inside them. Blocks (a brief freeze),
+        /// then waits for the <see cref="NavMeshCleaner"/>'s post-scan work item.</summary>
+        private static IEnumerator Rescan(AstarPath astar, RecastGraph recast, ProbeReport report, Vector3 sample)
         {
+            ReportBounds(report, "before SnapBoundsToScene", recast, sample);
+            recast.SnapBoundsToScene();
+            ReportBounds(report, "after SnapBoundsToScene", recast, sample);
             astar.Scan();
             yield return new WaitForSeconds(SettleSeconds);
+        }
+
+        /// <summary>Logs the graph's rasterization volume (<c>forcedBoundsCenter/Size</c>) and whether our floor
+        /// sample falls inside it. SULFUR's recast graph has zero rotation (§4.4, Dimension3D), so this
+        /// axis-aligned <see cref="Bounds.Contains"/> is exact here; labelled approximate in case a future level
+        /// rotates the graph. This is the smoking gun: if the sample is OUTSIDE before SnapBoundsToScene and
+        /// INSIDE after, the missing call was the whole reason our floor never rasterized.</summary>
+        private static void ReportBounds(ProbeReport report, string tag, RecastGraph recast, Vector3 sample)
+        {
+            var box = new Bounds(recast.forcedBoundsCenter, recast.forcedBoundsSize);
+            report.Value($"[{tag}] forcedBounds (center / size)",
+                $"{recast.forcedBoundsCenter} / {recast.forcedBoundsSize}");
+            report.Value($"[{tag}] our floor sample inside bounds? (approx, graph rot=0)", box.Contains(sample));
         }
 
         private static Vector3[] Append(Vector3[] points, Vector3 add)
