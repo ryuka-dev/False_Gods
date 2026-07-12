@@ -5,7 +5,7 @@ A BepInEx plugin that reads real values out of a running SULFUR, so the highest-
 and **P4** ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
 
 **P0/P1/P2 are read-only** (F10). **P3 is a visible render check** (F11): it shows real objects on screen so
-you can judge pink/no-pink with your eyes. **P4 is a collision check** (F12): it places our sealed arena
+you can judge pink/no-pink with your eyes. **P4 is a collision check** (F9): it places our sealed arena
 around you so you can walk it on foot. Both show real objects — see the read-only note below for exactly how
 far they depart from read-only, and how they are contained.
 
@@ -105,18 +105,19 @@ Turn `VisualFixOurMaterials` **off** to see the raw pink.
 Press **F11** again to tear the stage down and restore the environment. Needs the deployed bundle (build it in
 `FalseGods.Unity`, then `-p:DeployProbe=true` copies it); without it the P3 stage reports "skipped".
 
-**P4 (F12) — the collision check.** Stand in a loaded level and press **F12**: our sealed arena appears
-*around* you, with its `PlayerSpawn` marker under your feet — so you are inside it, on the floor, clear of the
-central pillar and the walls. The room's four boundary walls seal it by design, which is why the P3 stage 18 m
-away could only be entered with F3/noclip; P4 puts you inside without teleporting the player. Geometry may be
-**pink** (P4 judges collision, not colour — P3 covered colour). Then judge, on foot:
+**P4 (F9) — the collision check.** Stand in a loaded level and press **F9** (not F12 — that is the
+screenshot key): our sealed arena appears *around* you, with its `PlayerSpawn` marker under your feet — so you
+are inside it, on the floor, clear of the central pillar and the walls. The room's four boundary walls seal it
+by design, which is why the P3 stage 18 m away could only be entered with F3/noclip; P4 puts you inside without
+teleporting the player. It wears the same borrowed vanilla material as P3 (the donor prefab sits outside the
+walls — ignore it), so the arena reads normally rather than pink. Then judge, on foot:
 
 1. Do you stand **on** our floor — not sinking through, not floating? (R3)
 2. Does the central **pillar block** you (no clipping, no snagging)?
 3. Do the four **walls contain** you (you cannot walk out)?
 4. Circle the pillar and the perimeter — any **snagging** on edges or corners?
 
-Press **F12** again to remove the room; you drop back onto the level floor. Same bundle requirement as P3.
+Press **F9** again to remove the room; you drop back onto the level floor. Same bundle requirement as P3.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.

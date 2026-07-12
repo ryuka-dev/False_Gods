@@ -108,99 +108,102 @@ namespace FalseGods.Probe
                 yield break;
             }
 
-            // P4: place the room around the player and hand off — collision is judged on foot, nothing to
-            // render-dress or light for the eye, so the render-only steps below are skipped.
-            if (mode == StageMode.Collision)
+            // Placement is the only structural difference between the modes. Render puts the stage 18 m ahead
+            // to look at; Collision drops the room around you — its PlayerSpawn marker under your feet — to
+            // walk. Everything after (shader diagnostic, vanilla donor + material fix, lighting) is shared, so
+            // the P4 arena wears the same working vanilla material as P3 and is NOT left pink/material-less.
+            Vector3 donorBase;
+            Vector3 right;
+            if (mode == StageMode.Render)
             {
-                RaiseCollision(report, camera, ourPrefab);
-                yield break;
+                var origin = StageOrigin(camera, out right);
+                report.Try("instantiate our room 18 m ahead (active — its LightingRoot lights the stage)", () =>
+                {
+                    _ourRoom = UnityEngine.Object.Instantiate(ourPrefab, origin, Quaternion.identity);
+                    _ourRoom.name = "FalseGodsP3_OurRoom";
+                });
+                donorBase = origin;
+            }
+            else
+            {
+                var foot = EnclosePlacement(camera, out right);
+                report.Try("instantiate our room around you (PlayerSpawn under your feet)", () =>
+                {
+                    _ourRoom = UnityEngine.Object.Instantiate(ourPrefab, foot, Quaternion.identity);
+                    _ourRoom.name = "FalseGodsP4_OurRoom";
+
+                    // Shift the whole room so PlayerSpawn sits exactly at your feet: floor top under you,
+                    // ~10 m clear of the central pillar, ~3 m inside the nearest walls — no capsule overlap.
+                    var spawn = _ourRoom.GetComponentsInChildren<Transform>(true)
+                        .FirstOrDefault(t => t.name == PlayerSpawnMarkerName);
+                    if (spawn != null)
+                        _ourRoom.transform.position += foot - spawn.position;
+                    else
+                        report.Line("  (No PlayerSpawn marker — room left centred on you; you may overlap the pillar.)");
+
+                    report.Value("your feet at", foot);
+                    report.Value("colliders in room", _ourRoom.GetComponentsInChildren<Collider>(true).Length);
+                });
+                donorBase = _ourRoom != null ? _ourRoom.transform.position : foot;
             }
 
-            var origin = StageOrigin(camera, out var right);
-            report.Try("instantiate our room (active — its LightingRoot lights the stage)", () =>
+            if (_ourRoom != null)
             {
-                _ourRoom = UnityEngine.Object.Instantiate(ourPrefab, origin, Quaternion.identity);
-                _ourRoom.name = "FalseGodsP3_OurRoom";
-                report.Value("our room at", origin);
+                report.Value("our room at", _ourRoom.transform.position);
                 report.Value("our room lights", _ourRoom.GetComponentsInChildren<Light>(true).Length);
-            });
+            }
 
             // Our own materials use stock "Universal Render Pipeline/Lit". Packed into a bundle whose project
             // never renders them, the needed variants are stripped — they show PINK in-game even though the
-            // shader reports isSupported=true. Measured P3 (2026-07-12): the game has NO resident
-            // "Universal Render Pipeline/Lit" (Shader.Find misses — all vanilla content uses Shader Graphs/*),
-            // so there is no game-side twin to adopt by name. The diagnostic records that; the working fixes
-            // are a ShaderVariantCollection for original shaders, or reusing a vanilla material (report §3.6/§3.8).
+            // shader reports isSupported=true (P3, 2026-07-12: the game has NO resident URP/Lit to adopt —
+            // Shader.Find misses — so the fixes are a ShaderVariantCollection or reusing a vanilla material).
             report.Try("diagnose our materials (is there a resident twin to adopt?)", () => DiagnoseOurShaders(report));
 
-            // ── the vanilla prefab, rendered next to our lighting, scripts stripped ────────────────────
-            yield return RaiseVanilla(report, origin + right * VanillaSideOffset);
+            // The vanilla prefab is the P3 render reference AND the donor of the working material fix below.
+            // In Collision mode it lands outside the sealed walls — ignore it; only its material matters here.
+            yield return RaiseVanilla(report, donorBase + right * VanillaSideOffset);
 
-            // ── the working fix + the report §3.4 test: put a vanilla material on OUR own meshes ───────
             if (fixOurMaterials)
                 report.Try("dress our own meshes with a vanilla material (the working fix)",
                     () => DressOurMeshesWithVanilla(report));
             else
                 report.Line("  (VisualFixOurMaterials off: our own URP/Lit materials left raw — expect pink.)");
 
-            // ── ambient/fog: scene state the prefab cannot carry; apply and remember to restore ────────
-            if (applyEnvironment)
+            // Ambient/fog sharpens the render check but would only obscure the walk, so apply it in Render only.
+            if (applyEnvironment && mode == StageMode.Render)
                 report.Try("apply basic ambient/fog (restored on teardown)", () => ApplyEnvironment(report));
 
             report.Line();
-            report.Line("  >>> NOW LOOK, with the stage in front of you:");
-            report.Line("      1. Is the vanilla prefab PINK/black, or correctly textured and lit?  (R6/R13)");
-            report.Line("      2. With VisualFixOurMaterials on: do our floor AND pillar now wear the vanilla");
-            report.Line("         material (no pink)? Does it sit right on our flat mesh or swim/mis-scale? (§3.4)");
-            report.Line("      3. Is the arena lit by OUR LightingRoot (it should read as lit even where the");
-            report.Line("         level's own lights don't reach)?");
-            report.Line("  Press the visual hotkey again to tear the stage down and restore the environment.");
+            if (mode == StageMode.Render)
+            {
+                report.Line("  >>> NOW LOOK, with the stage in front of you:");
+                report.Line("      1. Is the vanilla prefab PINK/black, or correctly textured and lit?  (R6/R13)");
+                report.Line("      2. With VisualFixOurMaterials on: do our floor AND pillar now wear the vanilla");
+                report.Line("         material (no pink)? Does it sit right on our flat mesh or swim/mis-scale? (§3.4)");
+                report.Line("      3. Is the arena lit by OUR LightingRoot (it should read as lit even where the");
+                report.Line("         level's own lights don't reach)?");
+                report.Line("  Press the visual hotkey again to tear the stage down and restore the environment.");
+            }
+            else
+            {
+                report.Line("  >>> NOW WALK IT, no F3 / noclip (the prefab outside the walls is just the material donor):");
+                report.Line("      1. Do you stand ON our floor — not sinking through, not floating?  (R3)");
+                report.Line("      2. Walk into the central pillar: does it BLOCK you (no clipping, no snagging)?");
+                report.Line("      3. Walk into the four walls: do they CONTAIN you? (this seal is why P3 needed F3)");
+                report.Line("      4. Circle the pillar and the perimeter: any snagging on edges or corners?");
+                report.Line("  Press the collision hotkey again to remove the room — you drop onto the level floor.");
+            }
         }
 
-        /// <summary>
-        /// P4 — RiskList R3, MinimalProofOfConceptPlan §7.2: is our arena solid to the player on foot? The
-        /// four boundary walls seal the room by design (which is exactly why P3's 18 m stage could only be
-        /// entered with F3/noclip). So rather than teleport the player in — the movement controller is a CMF
-        /// <c>AdvancedWalkerController</c> whose position-set path is not in our decompiled reference, so we
-        /// do not depend on it — this moves the ROOM: it drops so the PlayerSpawn marker lands under your
-        /// feet, leaving you standing inside the sealed arena, clear of the pillar and walls. Teardown
-        /// destroys the room and you fall back onto the level floor.
-        /// </summary>
-        private void RaiseCollision(ProbeReport report, Camera camera, GameObject ourPrefab)
+        /// <summary>Camera-foot placement for P4's enclose: the point under the player where PlayerSpawn is
+        /// aligned, plus the ground-plane right vector used to offset the material-donor prefab.</summary>
+        private static Vector3 EnclosePlacement(Camera camera, out Vector3 right)
         {
-            var foot = camera.transform.position - Vector3.up * EyeToFootDrop;
-
-            report.Try("instantiate our room around you (PlayerSpawn under your feet)", () =>
-            {
-                _ourRoom = UnityEngine.Object.Instantiate(ourPrefab, foot, Quaternion.identity);
-                _ourRoom.name = "FalseGodsP4_OurRoom";
-
-                var spawn = _ourRoom.GetComponentsInChildren<Transform>(true)
-                    .FirstOrDefault(t => t.name == PlayerSpawnMarkerName);
-                if (spawn != null)
-                {
-                    // Shift the whole room so PlayerSpawn sits exactly at your feet: floor top under you,
-                    // ~10 m clear of the central pillar, ~3 m inside the nearest walls — no capsule overlap.
-                    _ourRoom.transform.position += foot - spawn.position;
-                }
-                else
-                {
-                    report.Line("  (No PlayerSpawn marker found — room left centred on you; you may overlap the pillar.)");
-                }
-
-                report.Value("our room at", _ourRoom.transform.position);
-                report.Value("your feet at", foot);
-                report.Value("colliders in room", _ourRoom.GetComponentsInChildren<Collider>(true).Length);
-            });
-
-            report.Line();
-            report.Line("  Geometry may be PINK — P4 judges COLLISION, not colour (P3 covered colour).");
-            report.Line("  >>> NOW WALK IT, no F3 / noclip:");
-            report.Line("      1. Do you stand ON our floor — not sinking through, not floating?  (R3)");
-            report.Line("      2. Walk into the central pillar: does it BLOCK you (no clipping, no snagging)?");
-            report.Line("      3. Walk into the four walls: do they CONTAIN you? (this seal is why P3 needed F3)");
-            report.Line("      4. Circle the pillar and the perimeter: any snagging on edges or corners?");
-            report.Line("  Press the collision hotkey again to remove the room — you drop onto the level floor.");
+            var forward = camera.transform.forward;
+            forward.y = 0f;
+            forward = forward.sqrMagnitude > 1e-4f ? forward.normalized : Vector3.forward;
+            right = Vector3.Cross(Vector3.up, forward);
+            return camera.transform.position - Vector3.up * EyeToFootDrop;
         }
 
         private IEnumerator RaiseVanilla(ProbeReport report, Vector3 position)

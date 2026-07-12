@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.6.0";
+        public const string PluginVersion = "0.7.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -74,11 +74,12 @@ namespace FalseGods.Probe
                 "material — the working fix for our bundle's pink URP/Lit materials (the game has no resident " +
                 "URP/Lit to adopt; originals need a ShaderVariantCollection). Turn OFF to see the raw pink.");
 
-            _collisionHotkey = Config.Bind("Probe", "CollisionHotkey", Key.F12,
+            _collisionHotkey = Config.Bind("Probe", "CollisionHotkey", Key.F9,
                 "P4 collision check: press once to place our sealed arena around you (its PlayerSpawn marker " +
                 "under your feet) so you can walk it on foot — stand on the floor, hit the pillar, test the " +
                 "walls — press again to remove it. The room's four walls seal it by design, which is why the " +
-                "P3 stage could only be entered with F3; P4 puts you inside without teleporting the player.");
+                "P3 stage could only be entered with F3; P4 puts you inside without teleporting the player. " +
+                "Not F12 — that is the Steam/Windows screenshot key. Rebind here if F9 also conflicts.");
 
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
