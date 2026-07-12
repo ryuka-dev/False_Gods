@@ -51,9 +51,9 @@ and the instance is destroyed immediately after inspection. The Addressables han
   movement controller is untouched (its position-set path is not in our decompiled reference, so we do not
   depend on it); when you drop the room you simply fall onto the level floor.
 - P5 is the one step that **writes to shared state** — `AstarPath.active`, the level's nav graph. It only
-  *appends* to `NavMeshCleaner.validNavMeshPoints` (the level's own areas stay valid), restores that list and
-  re-updates the region before it returns, and destroys its island. Any residue is wiped on the next level
-  change — GameManager rebuilds `astarPathPrefab` per level (P0). Run it in a throwaway level all the same.
+  *appends* to `NavMeshCleaner.validNavMeshPoints` (the level's own areas stay valid), restores that list, and
+  re-bakes the nav (`ScanAsync`) before it returns, and destroys its island. Any residue is wiped on the next
+  level change — GameManager rebuilds `astarPathPrefab` per level (P0). Run it in a throwaway level all the same.
 
 ## When it runs (timing matters)
 
@@ -127,20 +127,24 @@ Press **F9** again to remove the room; you drop back onto the level floor. Same 
 
 **P5 (F8) — the A\* nav check.** Stand in a **throwaway** loaded level and press **F8**. There is nothing to
 judge by eye — read the report. It spawns our room as an isolated island ~3 m above your feet (so its floor is
-its own nav area, not merged with the level floor below) and runs two phases against the live recast graph:
+its own nav area, not merged with the level floor below) and runs two phases. Each phase **re-bakes the whole
+level's nav** with `AstarPath.ScanAsync` — the game's own bake path (`NavMeshManager.BakeNavMesh` /
+`BuildNavMeshNode`). `UpdateGraphs(bounds)` was tried first and does **not** work: it only edits existing node
+walkability (that is all `MetalGate` uses it for), so our floor was never rasterized — the first run showed the
+node total unchanged and our floor 3.9 m from the nearest node.
 
-1. **Phase 1 — no anchor:** `UpdateGraphs` over the island with the cleaner's points unchanged. R5 predicts
-   the floor is **erased** — the report should show `nearest node … walkable=False`.
-2. **Phase 2 — anchored:** append one `validNavMeshPoint` on our floor and `UpdateGraphs` again. The floor
-   should **survive** — `walkable=True`, and the walkable-node count rises.
+1. **Phase 1 — no anchor:** re-bake with the cleaner's points unchanged. R5 predicts our floor is **erased**
+   (`nearest node … walkable=False`, `nodes inside island bounds` ~0).
+2. **Phase 2 — anchored:** append one `validNavMeshPoint` on our floor and re-bake again. The floor should
+   **survive** — `walkable=True`, `distance` ~0.1 m, and the in-bounds walkable count rises.
 
-The report prints an **`R5 verdict`** line (`CONFIRMED` when phase 1 is unwalkable and phase 2 walkable). It
-then restores the cleaner's points, destroys the island, and re-updates the region.
+The report prints an **`R5 verdict`** line (`CONFIRMED` when phase 1 is unwalkable-or-absent and phase 2 is
+walkable-and-close). It then restores the cleaner's points, destroys the island, and re-bakes once more.
 
-> **This is the one probe that writes to shared authoritative state** — `AstarPath.active`. It only appends a
-> point and restores it, and a level change rebuilds the graph, but do not run it in a level you care about.
-> The async settle after each `UpdateGraphs` is a fixed 1 s wait; if a phase reads mid-update the report will
-> look wrong — re-run it, and if it is consistently off we lengthen the wait.
+> **This is the one probe that writes to shared authoritative state** — `AstarPath.active` — and it re-bakes
+> the whole level's nav three times, so **NPCs will re-path** while it runs. It only appends a point and
+> restores it, and a level change rebuilds the graph, but run it in a level you do not care about. The scan is
+> driven over frames (no freeze); each is followed by a fixed 1 s settle for the cleaner's work item.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.

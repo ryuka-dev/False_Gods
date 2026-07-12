@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.9.0";
+        public const string PluginVersion = "0.10.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -84,10 +84,11 @@ namespace FalseGods.Probe
 
             _navHotkey = Config.Bind("Probe", "NavHotkey", Key.F8,
                 "P5 A* nav check: spawns our room as an isolated island a few metres up and runs a two-phase " +
-                "test — rescan with no anchor (the NavMeshCleaner should ERASE our floor), then with a " +
-                "validNavMeshPoint on it (our floor should SURVIVE, walkable). WARNING: this mutates " +
-                "AstarPath.active, the live level's shared nav graph. It only appends a point and restores it " +
-                "afterwards, and a level change fully rebuilds the graph — but run it in a throwaway level.");
+                "test — rebake with no anchor (the NavMeshCleaner should ERASE our floor), then with a " +
+                "validNavMeshPoint on it (our floor should SURVIVE, walkable). WARNING: this re-bakes the " +
+                "WHOLE level's nav (AstarPath.ScanAsync, the game's own BakeNavMesh path) three times. It only " +
+                "appends a cleaner point and restores it, and a level change rebuilds nav — but run it in a " +
+                "throwaway level; NPCs will re-path while it re-bakes.");
 
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
@@ -222,6 +223,10 @@ namespace FalseGods.Probe
             report.Line(new string('═', 78));
 
             yield return new NavmeshProbe().Run(report);
+
+            // P5's own ScanAsync calls fired AstarPath.OnPostScan; clear the flag so they do not also kick off
+            // an automatic P0/P1/P2 run once the guard drops.
+            _scanCompletePending = false;
 
             try
             {

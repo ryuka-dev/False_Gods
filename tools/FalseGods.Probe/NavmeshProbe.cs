@@ -116,8 +116,10 @@ namespace FalseGods.Probe
             report.Value("floor sample point (clear of the pillar)", sample);
             report.Value("update bounds", bounds);
             report.Value("existing validNavMeshPoints", savedPoints?.Length ?? 0);
-            report.Line("  NOTE: this mutates AstarPath.active (the live level's nav). It only APPENDS a point,");
-            report.Line("  and a level change rebuilds the graph — so the change is additive and recoverable.");
+            report.Line("  NOTE: this re-bakes the WHOLE level's nav (AstarPath.ScanAsync — the game's own");
+            report.Line("  BuildNavMeshNode/BakeNavMesh path). UpdateGraphs(bounds) only edits node walkability and");
+            report.Line("  never rasterizes new geometry (that was the first attempt's mistake — MetalGate uses it");
+            report.Line("  that way). It only APPENDS a cleaner point, and a level change rebuilds nav — recoverable.");
 
             // Recast reads mesh triangles on the CPU (rasterizeMeshes=true, rasterizeColliders=false — P0), so
             // a bundle mesh that is not read/write enabled is invisible to it even though it renders fine.
@@ -127,19 +129,17 @@ namespace FalseGods.Probe
             report.Line("  -- Baseline (before any UpdateGraphs): our island floor should not be in the graph yet");
             ReportPhase(report, "baseline", recast, sample, bounds);
 
-            // ── Phase 1: rescan our island with the cleaner points unchanged. R5 predicts our floor is erased.
+            // ── Phase 1: full re-bake with the cleaner points unchanged. R5 predicts our floor is erased.
             report.Line();
-            report.Line("  -- Phase 1: UpdateGraphs(island) with NO anchor on our floor (R5 predicts UNWALKABLE)");
-            astar.UpdateGraphs(bounds);
-            yield return new WaitForSeconds(SettleSeconds);
+            report.Line("  -- Phase 1: full ScanAsync with NO anchor on our floor (R5 predicts UNWALKABLE)");
+            yield return Rescan(astar);
             var walkable1 = ReportPhase(report, "phase 1 / no anchor", recast, sample, bounds);
 
-            // ── Phase 2: append a valid point on our floor and rescan again. Expect the island to survive.
+            // ── Phase 2: append a valid point on our floor and re-bake again. Expect the island to survive.
             report.Line();
-            report.Line("  -- Phase 2: append a validNavMeshPoint on our floor, UpdateGraphs again (expect WALKABLE)");
+            report.Line("  -- Phase 2: append a validNavMeshPoint on our floor, ScanAsync again (expect WALKABLE)");
             cleaner.validNavMeshPoints = Append(savedPoints, sample);
-            astar.UpdateGraphs(bounds);
-            yield return new WaitForSeconds(SettleSeconds);
+            yield return Rescan(astar);
             var walkable2 = ReportPhase(report, "phase 2 / anchored", recast, sample, bounds);
 
             report.Line();
@@ -152,9 +152,8 @@ namespace FalseGods.Probe
             report.Line();
             cleaner.validNavMeshPoints = savedPoints;
             if (_room != null) { UnityEngine.Object.Destroy(_room); _room = null; }
-            yield return null; // let the destroy take effect before we re-rasterize the region
-            astar.UpdateGraphs(bounds);
-            yield return new WaitForSeconds(SettleSeconds);
+            yield return null; // let the destroy take effect before we re-bake without the island
+            yield return Rescan(astar);
             UnloadBundle();
 
             report.Section("P5 — teardown");
@@ -232,6 +231,19 @@ namespace FalseGods.Probe
                 bounds.Encapsulate(renderer.bounds);
             bounds.Expand(2f); // a margin so the rescan comfortably covers the whole floor
             return bounds;
+        }
+
+        /// <summary>Re-bakes every graph with the game's own runtime mechanism — <c>AstarPath.ScanAsync</c>,
+        /// as <c>BuildNavMeshNode</c> uses while playing — driven to completion over frames so it does not
+        /// freeze, then waits for the <see cref="NavMeshCleaner"/>'s post-scan work item to apply. Unlike
+        /// <c>UpdateGraphs(bounds)</c> this re-rasterizes scene geometry, so our floor can actually enter the
+        /// navmesh.</summary>
+        private static IEnumerator Rescan(AstarPath astar)
+        {
+            var scan = astar.ScanAsync().GetEnumerator();
+            while (scan.MoveNext())
+                yield return null;
+            yield return new WaitForSeconds(SettleSeconds);
         }
 
         private static Vector3[] Append(Vector3[] points, Vector3 add)
