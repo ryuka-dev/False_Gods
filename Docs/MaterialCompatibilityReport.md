@@ -86,10 +86,11 @@ large filler surfaces after confirming the shader is projection-based.
 > in-render. **Measured (probe 0.4.0):** `Shader.Find("Universal Render Pipeline/Lit")` **misses** — the game
 > keeps no resident stock URP/Lit (all vanilla content uses `Shader Graphs/*`), so adopting a game shader by
 > name is **not** an available fix here. **Working fixes:** reuse a vanilla material (proven — a `CaveFloor`
-> material renders on our own mesh; probe 0.5.0's `VisualFixOurMaterials` now dresses our floor + pillar with a
+> material renders on our own mesh; probe 0.5.0's `VisualFixOurMaterials` dresses our floor + pillar with a
 > borrowed vanilla material to demonstrate it), or, for genuinely original shaders, ship a
-> `ShaderVariantCollection` that preserves the needed variants. Visual confirmation of the vanilla-material fix
-> is pending one more F11 run.
+> `ShaderVariantCollection` that preserves the needed variants. **Visual confirmation of the vanilla-material
+> fix landed (F11, 2026-07-12): floor and pillar wear the borrowed `CaveFloor` material and are no longer
+> pink.**
 
 ## 3.7 Original False Gods content is a first-class path
 

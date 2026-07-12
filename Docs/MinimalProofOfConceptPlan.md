@@ -76,9 +76,10 @@ documents describe one plan.
 > - **Our own `URP/Lit` bundle materials went pink** (the pillar) — the predicted variant-stripping (report
 >   §3.2/§3.8). Measured: `Shader.Find("Universal Render Pipeline/Lit")` **misses** — the game has no resident
 >   stock URP/Lit to adopt (all vanilla content uses `Shader Graphs/*`). Working fixes: reuse a vanilla
->   material (proven), or a `ShaderVariantCollection` for original shaders. The probe now dresses our meshes
->   with a borrowed vanilla material (`VisualFixOurMaterials`, 0.5.0) to demonstrate it — pending one F11
->   confirmation run. Recorded in RiskList R6/R13 and report §3.6.
+>   material (proven), or a `ShaderVariantCollection` for original shaders. The probe dresses our meshes
+>   with a borrowed vanilla material (`VisualFixOurMaterials`, 0.5.0) to demonstrate it — **confirmed in-game
+>   (F11, 2026-07-12): floor and pillar wear the borrowed `CaveFloor` material, no longer pink.** Recorded in
+>   RiskList R6/R13 and report §3.6.
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
