@@ -1,13 +1,14 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5)
 
 A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
-[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**
-and **P4** ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
+[RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**,
+**P4** and **P5** ([MinimalProofOfConceptPlan.md §7.2](../../Docs/MinimalProofOfConceptPlan.md)).
 
 **P0/P1/P2 are read-only** (F10). **P3 is a visible render check** (F11): it shows real objects on screen so
 you can judge pink/no-pink with your eyes. **P4 is a collision check** (F9): it places our sealed arena
-around you so you can walk it on foot. Both show real objects — see the read-only note below for exactly how
-far they depart from read-only, and how they are contained.
+around you so you can walk it on foot. **P5 is an A\* nav check** (F8): it makes our floor walkable at runtime
+and confirms it survives the `NavMeshCleaner`. P3/P4 show real objects; **P5 mutates the live level's nav
+graph** — see the notes below for exactly how far each departs from read-only, and how it is contained.
 
 **This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
 results transcribed into report 4.2/4.4 and RiskList R1/R3/R5. P2 (our own AssetBundle loads) runs from the
@@ -30,6 +31,7 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P2 / **R2** | Does an AssetBundle built in the game's exact Unity version (`FalseGods.Unity`, 6000.3.6f1) load under BepInEx with meshes/materials/collider layers intact? | `AssetBundle.LoadFromFileAsync` on `BepInEx/FalseGods.Probe/falsegods-poc-room.bundle` → instantiate under an inactive holder → inspect → `Unload(true)` |
 | P3 / **R6, R13** | Does a vanilla prefab render correctly (no pink) under **our** `LightingRoot`, and does one vanilla floor material behave on our own flat ground mesh? | shows our room (bundle, now with lights) + a vanilla prefab, borrows a vanilla floor material onto our floor — **you judge on screen** (report §3.4) |
 | P4 / **R3** | Is our arena solid to the player on foot — floor holds, pillar blocks, walls contain, no snagging? | places our room so its `PlayerSpawn` marker sits under your feet, leaving you inside the sealed arena — **you judge on foot** (no teleport, no F3) |
+| P5 / **R4, R5** | Can a mod make its own arena floor walkable at runtime, and does it survive `NavMeshCleaner`'s flood-fill? | spawns our room as an isolated island, `UpdateGraphs` over it with **no** anchor (cleaner erases it) then **with** a `validNavMeshPoint` on it (it survives) — read from `GetNearest(...).node.Walkable` |
 
 P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
 P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
@@ -48,6 +50,10 @@ and the instance is destroyed immediately after inspection. The Addressables han
 - P4 **never moves the player** — it moves the room so `PlayerSpawn` lands under your feet. The player's CMF
   movement controller is untouched (its position-set path is not in our decompiled reference, so we do not
   depend on it); when you drop the room you simply fall onto the level floor.
+- P5 is the one step that **writes to shared state** — `AstarPath.active`, the level's nav graph. It only
+  *appends* to `NavMeshCleaner.validNavMeshPoints` (the level's own areas stay valid), restores that list and
+  re-updates the region before it returns, and destroys its island. Any residue is wiped on the next level
+  change — GameManager rebuilds `astarPathPrefab` per level (P0). Run it in a throwaway level all the same.
 
 ## When it runs (timing matters)
 
@@ -118,6 +124,23 @@ walls — ignore it), so the arena reads normally rather than pink. Then judge, 
 4. Circle the pillar and the perimeter — any **snagging** on edges or corners?
 
 Press **F9** again to remove the room; you drop back onto the level floor. Same bundle requirement as P3.
+
+**P5 (F8) — the A\* nav check.** Stand in a **throwaway** loaded level and press **F8**. There is nothing to
+judge by eye — read the report. It spawns our room as an isolated island ~3 m above your feet (so its floor is
+its own nav area, not merged with the level floor below) and runs two phases against the live recast graph:
+
+1. **Phase 1 — no anchor:** `UpdateGraphs` over the island with the cleaner's points unchanged. R5 predicts
+   the floor is **erased** — the report should show `nearest node … walkable=False`.
+2. **Phase 2 — anchored:** append one `validNavMeshPoint` on our floor and `UpdateGraphs` again. The floor
+   should **survive** — `walkable=True`, and the walkable-node count rises.
+
+The report prints an **`R5 verdict`** line (`CONFIRMED` when phase 1 is unwalkable and phase 2 walkable). It
+then restores the cleaner's points, destroys the island, and re-updates the region.
+
+> **This is the one probe that writes to shared authoritative state** — `AstarPath.active`. It only appends a
+> point and restores it, and a level change rebuilds the graph, but do not run it in a level you care about.
+> The async settle after each `UpdateGraphs` is a fixed 1 s wait; if a phase reads mid-update the report will
+> look wrong — re-run it, and if it is consistently off we lengthen the wait.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.

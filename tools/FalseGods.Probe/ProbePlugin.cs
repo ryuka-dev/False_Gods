@@ -30,12 +30,13 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.7.0";
+        public const string PluginVersion = "0.8.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
         private ConfigEntry<Key> _visualHotkey;
         private ConfigEntry<Key> _collisionHotkey;
+        private ConfigEntry<Key> _navHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
 
@@ -81,6 +82,13 @@ namespace FalseGods.Probe
                 "P3 stage could only be entered with F3; P4 puts you inside without teleporting the player. " +
                 "Not F12 — that is the Steam/Windows screenshot key. Rebind here if F9 also conflicts.");
 
+            _navHotkey = Config.Bind("Probe", "NavHotkey", Key.F8,
+                "P5 A* nav check: spawns our room as an isolated island a few metres up and runs a two-phase " +
+                "test — rescan with no anchor (the NavMeshCleaner should ERASE our floor), then with a " +
+                "validNavMeshPoint on it (our floor should SURVIVE, walkable). WARNING: this mutates " +
+                "AstarPath.active, the live level's shared nav graph. It only appends a point and restores it " +
+                "afterwards, and a level change fully rebuilds the graph — but run it in a throwaway level.");
+
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
             _scanHandler = OnNavigationScanComplete;
@@ -89,7 +97,7 @@ namespace FalseGods.Probe
             Logger.LogMessage($"{PluginName} {PluginVersion} loaded. " +
                               $"Auto-run after each nav scan: {_runAfterEachScan.Value}. " +
                               $"P0/P1/P2 hotkey: {_hotkey.Value}. P3 visible hotkey: {_visualHotkey.Value}. " +
-                              $"P4 collision hotkey: {_collisionHotkey.Value}.");
+                              $"P4 collision hotkey: {_collisionHotkey.Value}. P5 nav hotkey: {_navHotkey.Value}.");
         }
 
         private void OnDestroy()
@@ -126,6 +134,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_collisionHotkey.Value))
             {
                 StartCoroutine(RunVisualToggle(VisualProbe.StageMode.Collision));
+                return;
+            }
+
+            if (HotkeyPressed(_navHotkey.Value))
+            {
+                StartCoroutine(RunNav());
                 return;
             }
 
@@ -188,6 +202,35 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write {label} report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P5: run the A* nav check. Self-contained (spawns its own isolated island, mutates and then restores
+        /// AstarPath.active), so a fresh <see cref="NavmeshProbe"/> is used each time. Shares the _running
+        /// guard with the other probes so nothing overlaps a graph update.
+        /// </summary>
+        private IEnumerator RunNav()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P5 (A* nav check)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new NavmeshProbe().Run(report);
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P5 nav check done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P5 report: {exception}");
             }
 
             _running = false;
