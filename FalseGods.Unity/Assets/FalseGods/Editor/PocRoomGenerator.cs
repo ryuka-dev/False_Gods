@@ -40,6 +40,15 @@ namespace FalseGods.EditorTools
         private const float PillarSize = 2f;
         private const float PillarHeight = 4f;
 
+        // LightingRoot — two realtime lights per Docs/MinimalProofOfConceptPlan.md §7.1. No baked lightmaps:
+        // SULFUR generates levels at runtime, so the arena must light itself (Docs/MaterialCompatibilityReport
+        // §3.3). These travel in the bundle as real Light components; ambient/fog are scene RenderSettings and
+        // cannot ride a prefab, so the arena loader (for the PoC, the probe's P3 section) applies those.
+        private const float KeyLightIntensity = 1.1f;   // directional key, global
+        private const float FillLightIntensity = 3f;    // point fill, range-limited
+        private const float FillLightRange = 30f;
+        private const float FillLightHeight = 6f;
+
         private const string ArenaFolder = "Assets/FalseGods/Arenas/PocRoom";
         private const string MaterialsFolder = "Assets/FalseGods/Materials";
 
@@ -105,7 +114,7 @@ namespace FalseGods.EditorTools
         {
             var visualRoot = Child(root, "VisualRoot");
             var collisionRoot = Child(root, "CollisionRoot");
-            Child(root, "LightingRoot");   // P3 — lights come later
+            BuildLighting(Child(root, "LightingRoot")); // P3 — realtime lights, no baked lightmaps
             Child(root, "NavigationRoot"); // P5 — NavmeshPrefab / rescan comes later
             var gameplayRoot = Child(root, "GameplayRoot");
 
@@ -137,6 +146,34 @@ namespace FalseGods.EditorTools
             // Markers only — spawn logic is not the bundle's business.
             Child(gameplayRoot, "PlayerSpawn").transform.localPosition = new Vector3(-7f, 0f, -7f);
             Child(gameplayRoot, "EnemySpawn").transform.localPosition = new Vector3(7f, 0f, 7f);
+        }
+
+        /// <summary>
+        /// Two realtime lights under the LightingRoot (§7.1): a directional "key" that lights the arena — and
+        /// any runtime-instantiated vanilla prefab placed in it (P3) — regardless of position, plus a local
+        /// point "fill" over the room centre. Both are explicitly Realtime: the bundle must never depend on a
+        /// source scene's baked lightmaps (Docs/MaterialCompatibilityReport §3.3).
+        /// </summary>
+        private static void BuildLighting(GameObject lightingRoot)
+        {
+            var key = Child(lightingRoot, "KeyLight");
+            key.transform.localRotation = Quaternion.Euler(50f, -30f, 0f);
+            var keyLight = key.AddComponent<Light>();
+            keyLight.type = LightType.Directional;
+            keyLight.lightmapBakeType = LightmapBakeType.Realtime;
+            keyLight.intensity = KeyLightIntensity;
+            keyLight.color = new Color(1f, 0.96f, 0.9f); // faintly warm
+            keyLight.shadows = LightShadows.Soft;
+
+            var fill = Child(lightingRoot, "FillLight");
+            fill.transform.localPosition = new Vector3(0f, FillLightHeight, 0f);
+            var fillLight = fill.AddComponent<Light>();
+            fillLight.type = LightType.Point;
+            fillLight.lightmapBakeType = LightmapBakeType.Realtime;
+            fillLight.intensity = FillLightIntensity;
+            fillLight.range = FillLightRange;
+            fillLight.color = new Color(0.85f, 0.9f, 1f); // faintly cool
+            fillLight.shadows = LightShadows.None;
         }
 
         private static GameObject Child(GameObject parent, string name)
