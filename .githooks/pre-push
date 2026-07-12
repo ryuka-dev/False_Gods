@@ -27,11 +27,11 @@ cd "$repo_root" || {
 }
 
 # Verify BOTH configurations on every push. It is tempting to verify Release only when pushing master or a
-# tag, but under branch protection nobody pushes master directly: a feature branch is pushed, and GitHub
-# merges the PR server-side, which never runs this hook. CI, in turn, runs only the Debug inner subset
-# (verify.ps1 -CiSafe). So a feature-branch push is the ONLY place a full Release build happens before code
-# reaches master. Skipping it here would let Release-only breakage merge unverified. The cost is a second
-# full build per push (~30s each); that is the price of Release being checked somewhere at all.
+# tag, but this hook is now the blocking gate: master is pushed directly, and CI (verify.ps1 -CiSafe) runs
+# only the Debug inner subset and no longer blocks anything server-side. So this hook is the ONLY place a
+# full Release build happens before code reaches master. Skipping it here would let Release-only breakage
+# land unverified. The cost is a second full build per push (~30s each); that is the price of Release being
+# checked at all.
 #
 # The stdin ref list is consumed (git always provides it) so it does not clog the pipe, even though the ref
 # no longer changes what we run.

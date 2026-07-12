@@ -38,8 +38,9 @@ unverified* until validated by the proof-of-concept.
 - **[DependencyRules.md](DependencyRules.md)** — what is allowed and forbidden (the rules themselves).
 - **[ArchitectureEnforcement.md](ArchitectureEnforcement.md)** — how those rules get checked: the `FG-ARCH-*`
   rule registry, CI levels, exception process, and current status. `FG-ARCH-002` and `FG-ARCH-010` have working
-  checks (`.\scripts\verify.ps1`), and are `Required in CI` (branch protection blocks a merge on a red check —
-  the FG-ARCH-002 project-graph layer and FG-ARCH-010); the other eight rules are `Planned`.
+  checks (`.\scripts\verify.ps1`), run in CI on every push, and block the local pre-push hook — the FG-ARCH-002
+  project-graph layer and FG-ARCH-010; the other eight rules are `Planned`. Branch protection was removed, so
+  CI no longer blocks anything server-side; the pre-push hook is the gate.
 - **[DefinitionOfDone.md](DefinitionOfDone.md)** — completion gates and the development process rules.
 - **[ADRs/](ADRs/README.md)** — architecture decision records (ADR-001 … ADR-006).
 

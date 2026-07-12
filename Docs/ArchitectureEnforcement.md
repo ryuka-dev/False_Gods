@@ -6,9 +6,10 @@ added, excepted, or retired.*
 **Partially implemented.** The module skeleton's restricted project references give the compiler protection
 described in §5; **five rules have working automated checks** — `FG-ARCH-002`, `FG-ARCH-003`, `FG-ARCH-005`,
 `FG-ARCH-006` and `FG-ARCH-010` — run by `.\scripts\verify.ps1`; a **CI workflow**
-(`.github/workflows/verify.yml`) runs the game-independent subset on every push and PR; and **branch
-protection makes that CI check required to merge `master`**, so each of those five has at least one layer
-**`Required in CI`**.
+(`.github/workflows/verify.yml`) runs the game-independent subset on every push and PR; and the **local
+pre-push hook runs the full `verify.ps1` and blocks a red push**, so each of those five has at least one layer
+**`Required in CI`** (the term's meaning is pinned in §4.1: run in CI *and* enforced by the pre-push hook —
+no longer a server-side merge gate, since branch protection was removed).
 
 **A rule is not a single check, and its status is not a single word.** Most rules are verified at more than
 one layer — the evaluated project graph, the compiled assembly metadata, a public-API scan — and the layers
@@ -152,12 +153,14 @@ reached *through* another assembly's references. So "FG-ARCH-006 is `Required in
 project that names `0Harmony`; it does not mean CI would notice a `[HarmonyPatch]` attribute, and the
 registry says so in as many words (§5.1).
 
-**"Blocking" is branch protection, which is separate from this file — and is now configured.** A repository
-ruleset marks the CI `verify` check required and requires a pull request before `master` is updated, so a red
-result *prevents* the merge. Because a feature branch is pushed and GitHub merges the PR server-side, the
-local pre-push hook does not run on that merge — CI is the gate there (which is also why the hook verifies both
-Debug and Release on every feature-branch push; see the hook's own comment). The checks that CI actually runs
-(§4.1) are now `Required in CI`; the ones it cannot run stay L0/L3.
+**"Blocking" is the local pre-push hook, not branch protection.** Branch protection was removed: `master` is
+pushed directly, there is no required server-side check, and CI (`verify.yml`, which runs on every push and PR)
+is a **visible re-check, not a merge gate**. What actually blocks a red change from reaching `master` is the
+pre-push hook, which runs the full `verify.ps1` in **both Debug and Release** and refuses the push on failure
+(which is why the hook verifies both configurations — see the hook's own comment). So in this registry
+**`Required in CI` means: the check runs in CI *and* is enforced by the pre-push hook** — a client-side gate a
+`git push --no-verify` or an un-hooked clone can bypass, weaker than a server-side required check. The checks
+CI actually runs (§4.1) are `Required in CI`; the ones it cannot run stay L0/L3.
 
 ## 5. Rule registry
 
@@ -677,9 +680,10 @@ cannot say: what each rule's *enforced* layer actually buys, and what it leaves 
 | FG-ARCH-009 | `project graph` of FG-ARCH-002 | the behavioural half (needs a Composition Root) | `Partial`, via FG-ARCH-002 |
 | **FG-ARCH-010** | `registry consistency` ✅ CI | whether a rule is *right* | `None` |
 
-**Branch protection is configured**, so a red CI result blocks the merge. Five rules now have a layer that is
-`Required in CI`. What CI cannot run — every metadata layer, and the outer assemblies' compile-time protection
-— remains L0 (the pre-push hook runs the full verify, Debug and Release) and L3.
+**The pre-push hook is the blocking gate** (branch protection was removed; CI re-checks but does not block).
+Five rules have a layer that is `Required in CI` — run in CI and enforced by that hook. What CI cannot run —
+every metadata layer, and the outer assemblies' compile-time protection — remains L0 (the pre-push hook runs
+the full verify, Debug and Release) and L3.
 
 **Say it precisely: five rules have an enforced layer; zero rules are fully enforced.** FG-ARCH-005 and
 FG-ARCH-006 in particular each have a second half — broker access, and the `[HarmonyPatch]` scan — that

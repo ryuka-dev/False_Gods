@@ -96,11 +96,11 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the structure and
 - The **project reference graph already gives compile-time protection** for several rules. Core cannot see
   `UnityEngine`; `UnityRuntime` cannot see `FalseGods.Protocol`; only `Integration.Sulfur` can see `0Harmony`;
   `FalseGods.Plugin` cannot see the ST adapter. Using a forbidden type does not compile.
-- **Two automated checks gate every pull request.** `FG-ARCH-002` (the plugin must not reference the optional
-  ST adapter) and `FG-ARCH-010` (every check cites a registered rule id) are **`Required in CI`** — branch
-  protection blocks a merge while either is red. CI runs the game-independent layer via
-  `.\scripts\verify.ps1 -CiSafe`: the FG-ARCH-002 **evaluated project-graph** check (evaluated for every
-  configuration declared in `Directory.Build.props`) and FG-ARCH-010.
+- **Two automated checks run on every push and block the local pre-push hook.** `FG-ARCH-002` (the plugin must
+  not reference the optional ST adapter) and `FG-ARCH-010` (every check cites a registered rule id) run in CI
+  via `.\scripts\verify.ps1 -CiSafe`: the FG-ARCH-002 **evaluated project-graph** check (evaluated for every
+  configuration declared in `Directory.Build.props`) and FG-ARCH-010. Branch protection was removed, so CI is a
+  visible re-check, not a merge gate — the pre-push hook (full `verify.ps1`) is what blocks a red push.
 - **What CI cannot build stays local + pre-push.** The FG-ARCH-002 **metadata** layer (reading the compiled
   `AssemblyRef` table of the assembly built by that same run) and a full build of the outer assemblies need the
   game + BepInEx DLLs a CI runner does not have, so they run only in the full `.\scripts\verify.ps1` (optionally
@@ -165,9 +165,9 @@ machine with no game and no BepInEx installed, which is what makes the domain un
 `setup-dev.ps1` points git at the tracked `.githooks/` directory (`git config --local core.hooksPath
 .githooks`). That activates **`.githooks/pre-push`**, which runs the full `scripts/verify.ps1` **before every
 `git push`** and **blocks the push** if verification fails. It verifies **both Debug and Release on every
-push** — because under branch protection nobody pushes `master` directly (GitHub merges the PR server-side,
-which never runs this hook), and CI only builds the Debug inner subset, so a feature-branch push is the only
-place a full Release build happens before code reaches `master`. The cost is a second full build per push.
+push** — because this hook is now the blocking gate (`master` is pushed directly), and CI only builds the Debug
+inner subset and no longer blocks anything server-side, so this hook is the only place a full Release build
+happens before code reaches `master`. The cost is a second full build per push.
 
 - **Install once per clone.** The setting lives in this clone's `.git/config`, so re-run `setup-dev.ps1` after
   a fresh clone, on a new machine, or if the repo's `.git` config is lost or reset. `setup-dev.ps1` is
