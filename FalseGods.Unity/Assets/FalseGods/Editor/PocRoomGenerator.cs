@@ -249,13 +249,18 @@ namespace FalseGods.EditorTools
                 uv[v + 2] = new Vector2(faceSize.x, faceSize.y);
                 uv[v + 3] = new Vector2(faceSize.x, 0f);
 
+                // Wind each face so its GEOMETRIC normal (cross(v1-v0, v2-v0)) points along `normal` — i.e.
+                // outward. A* recast decides walkability from this triangle winding, NOT the supplied vertex
+                // normals, so the floor's top face must wind to face UP; the earlier order wound it the other
+                // way, so recast read the floor top as a ceiling and rasterized zero walkable nodes (measured
+                // in-game, probe P5c, RiskList R4). Outward winding also renders correctly single-sided.
                 var t = face * 6;
                 triangles[t + 0] = v + 0;
-                triangles[t + 1] = v + 1;
-                triangles[t + 2] = v + 2;
+                triangles[t + 1] = v + 2;
+                triangles[t + 2] = v + 1;
                 triangles[t + 3] = v + 0;
-                triangles[t + 4] = v + 2;
-                triangles[t + 5] = v + 3;
+                triangles[t + 4] = v + 3;
+                triangles[t + 5] = v + 2;
             }
 
             var mesh = new Mesh

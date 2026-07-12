@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.15.0";
+        public const string PluginVersion = "0.17.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -38,6 +38,7 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _collisionHotkey;
         private ConfigEntry<Key> _navHotkey;
         private ConfigEntry<Key> _navPrefabHotkey;
+        private ConfigEntry<Key> _navBakeHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
 
@@ -100,6 +101,13 @@ namespace FalseGods.Probe
                 "geometry (R4 rasterization) and whether a walkable node lands on our floor (Apply from a mod). " +
                 "Adds tiles then ClearTiles-es them; a level change rebuilds nav. Run it in a throwaway level.");
 
+            _navBakeHotkey = Config.Bind("Probe", "NavBakeHotkey", Key.F6,
+                "P5c bake & capture: spawns our room high above the level (clear of all geometry) and runs the " +
+                "game's NavmeshPrefab.Scan() to bake a clean navmesh of just our arena, then writes the " +
+                "serialized bytes to arena-nav-PocRoom-cell<size>.bytes next to the reports. This is the " +
+                "shippable Option-1 artifact (baked once, applied by every peer). Read-only: it never touches " +
+                "the live graph. Run once per distinct environment cellSize (0.1, 0.3).");
+
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
             _scanHandler = OnNavigationScanComplete;
@@ -109,7 +117,8 @@ namespace FalseGods.Probe
                               $"Auto-run after each nav scan: {_runAfterEachScan.Value}. " +
                               $"P0/P1/P2 hotkey: {_hotkey.Value}. P3 visible hotkey: {_visualHotkey.Value}. " +
                               $"P4 collision hotkey: {_collisionHotkey.Value}. P5 nav hotkey: {_navHotkey.Value}. " +
-                              $"P5b nav-prefab hotkey: {_navPrefabHotkey.Value}.");
+                              $"P5b nav-prefab hotkey: {_navPrefabHotkey.Value}. " +
+                              $"P5c bake hotkey: {_navBakeHotkey.Value}.");
         }
 
         private void OnDestroy()
@@ -158,6 +167,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_navPrefabHotkey.Value))
             {
                 StartCoroutine(RunNavPrefab());
+                return;
+            }
+
+            if (HotkeyPressed(_navBakeHotkey.Value))
+            {
+                StartCoroutine(RunNavBake());
                 return;
             }
 
@@ -286,6 +301,37 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P5b report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P5c: bake our arena's navmesh in-game and write the shippable bytes to disk. Self-contained and
+        /// read-only w.r.t. the live graph (Scan builds a separate TileBuilder), so a fresh
+        /// <see cref="NavmeshBakeProbe"/> is used each time. Shares the _running guard.
+        /// </summary>
+        private IEnumerator RunNavBake()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P5c (bake & capture arena navmesh)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new NavmeshBakeProbe().Run(report);
+
+            _scanCompletePending = false;
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P5c bake done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P5c report: {exception}");
             }
 
             _running = false;

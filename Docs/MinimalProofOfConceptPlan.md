@@ -113,14 +113,15 @@ documents describe one plan.
 > is a rasterization/walkability failure, not a collection failure; the path to Option 1 is unchanged and is the
 > determinism-correct choice for host+client parity anyway (see RiskList R4).
 >
-> **P5b — Option 1 mechanism PROVEN from a mod (probe 0.15.0, F7, 2026-07-12).** Running the Option 1 path at
-> runtime with no editor bake: `NavmeshPrefab.Scan(recastGraph)` baked our floor into a valid tile navmesh
-> (161 tris / 245 verts, 1x1 tile at `cellSize` 0.3), and replicating `NavmeshPrefab.Apply()`
-> (`SnapToGraph` + `RecastGraph.ReplaceTiles`) inserted **21 walkable nodes at our floor height**; `ClearTiles`
-> cleaned up. So our floor DOES rasterize (P5's Option-2 failure was graph-wide-rescan-specific) and a mod can
-> apply a prebaked navmesh. Remaining for shipping: the editor bake in `FalseGods.Unity` (A\* 5.3.8) → a
-> `NavmeshPrefab` in the bundle for byte-identical host/client parity, plus `SnapToClosestTileAlignment`. See
-> RiskList R4.
+> **P5b/P5c — Option 1 plumbing works, but our floor mesh had inverted winding (probes 0.15.0–0.17.0, F7/F6,
+> 2026-07-12).** The `NavmeshPrefab.Scan` + `ReplaceTiles` path works from a mod, but P5b's "our floor is
+> walkable" was a **false positive** — that arena sat at ground level, so the nodes it applied were *level*
+> geometry, not ours. An isolated bake in clear space (+300 m, P5c) baked our floor to **0 triangles**, and a
+> side-by-side test showed the top-face geometric normal points DOWN (`(0,-1,0)`): `BuildBoxMesh` wound the box
+> inside-out, and recast reads walkability from the winding, not the vertex normals (so it still rendered). A
+> winding-reversed copy baked fine (`(0,1,0)`, 2 tris). Fixed the winding; bundle rebuild + re-verify pending.
+> The shipping pipeline then bakes in-game once → ships the serialized bytes as a bundle `TextAsset` → applies
+> from the plugin via `Deserialize` + `ReplaceTiles` (no A* in `FalseGods.Unity`). See RiskList R4.
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
 | P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
 | P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest; the canonical `ContentHash` is stable across two loads with different Addressables completion order | P1–P7, R14, R34 |
