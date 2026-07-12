@@ -81,6 +81,15 @@ documents describe one plan.
 >   (F11, 2026-07-12): floor and pillar wear the borrowed `CaveFloor` material, no longer pink.** Recorded in
 >   RiskList R6/R13 and report §3.6.
 | P4 | Arena colliders behave (player walks, no snagging on decoration) | R3 |
+
+> **P4 — RUN AND PASSED (probe collision check, F9, in-game 2026-07-12).** The arena's four boundary walls
+> (`GeometryNoNavMesh(22)`) seal it by design — which is exactly why P3's 18 m stage could only be entered with
+> F3/noclip — so P4 places the room *around* the player (its `PlayerSpawn` marker, §7.1 local (-7,0,-7), under
+> the feet) rather than teleporting the CMF-controlled player, whose position-set path is not in our decompiled
+> reference. Judged on foot: the player stands on our floor (no clip, no float), the central pillar blocks, the
+> four walls contain, and there is no snagging on edges or corners. Our box colliders on `Geometry(3)`
+> (floor/pillar) and `GeometryNoNavMesh(22)` (walls) are solid to the player → RiskList **R3** player-collision
+> half verified. Nav *walkability* of that floor is P5; enemy pathing around the pillar is P6.
 | P5 | A\* nav works: bake `NavmeshPrefab` + `Apply()` **or** rescan; confirm floor walkable (watch `NavMeshCleaner`) | R4, R5 |
 | P6 | The ordinary enemy tracks the player and **paths around the pillar** | P4, P5, R9 |
 | P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
