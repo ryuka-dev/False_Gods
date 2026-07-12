@@ -69,6 +69,25 @@ large filler surfaces after confirming the shader is projection-based.
    projection/vertex-color/UV2. Record the result; choose floor strategy accordingly.
 3. Confirm no reliance on the source scene's baked lightmaps (lighting comes from our `LightingRoot`).
 
+> **Result — PoC step P3, run in-game 2026-07-12 (probe `VisualProbe`, F11).**
+> 1. **Vanilla prefab renders correctly, no pink.** The visible `CaveGrubGrub` (430 renderers, 0 null
+>    materials, all shaders `Shader Graphs/*` / `ProBuilder6/*` reporting `supported`) rendered correctly under
+>    our two-light `LightingRoot`. The reuse path of §3.1 holds in-render, not just on load.
+> 2. **A vanilla floor material works on our own flat mesh — the ideal §3.4 case.** `CaveFloor`
+>    (`Shader Graphs/MasterShader`) assigned to our untextured 20×20 floor rendered correctly, so it is
+>    projection-based / UV-tolerant. **Floor strategy:** reusing a vanilla floor material directly on our own
+>    ground mesh is viable; we need not reuse the whole vanilla floor mesh for large surfaces.
+> 3. **Lightmaps:** our `LightingRoot` (realtime directional + point, no baked lightmaps) lit the stage; no
+>    reliance on a source scene's bake.
+>
+> **New finding — our *own* materials went pink.** Our `Universal Render Pipeline/Lit` materials packed into
+> the bundle rendered **pink** (the pillar), confirming §3.2 row 1 / §3.8: a stock URP shader packed by an
+> authoring project that never renders it has its variants stripped, so `isSupported = true` at load yet pink
+> in-render. **Two fixes for original materials:** adopt the game's resident shader at runtime with
+> `Shader.Find("Universal Render Pipeline/Lit")` (cheapest — the probe now does this under
+> `VisualRepointOurShaders`), or ship a `ShaderVariantCollection` that preserves the needed variants. The
+> runtime `Shader.Find` fix is deployed (probe 0.4.0); its in-game confirmation is pending one more F11 run.
+
 ## 3.7 Original False Gods content is a first-class path
 
 Runtime reuse of vanilla materials is optional. False Gods must also support fully original:
