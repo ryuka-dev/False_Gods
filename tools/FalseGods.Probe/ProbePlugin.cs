@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.24.2";
+        public const string PluginVersion = "0.25.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -42,8 +42,10 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _navApplyHotkey;
         private ConfigEntry<Key> _navEnemyHotkey;
         private ConfigEntry<Key> _navTeardownHotkey;
+        private ConfigEntry<Key> _arenaContentHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
+        private ConfigEntry<bool> _p8RunFightAndLeave;
         private ConfigEntry<string> _enemyUnitId;
 
         private readonly VisualProbe _visual = new VisualProbe();
@@ -137,6 +139,21 @@ namespace FalseGods.Probe
                 "Run in a throwaway level, standing on solid level nav. Bound to '=' because F1-F3 are the game's " +
                 "debug keys and F4-F12 are taken; the number row (1..=) is free. Rebind here if '=' conflicts.");
 
+            _arenaContentHotkey = Config.Bind("Probe", "ArenaContentHotkey", Key.Minus,
+                "P8 single-player full loop: reads the shipped arena-content artifact and recomputes its canonical "
+                + "ContentHash IN-GAME through FalseGods.Protocol (R34 — must equal the golden hash the offline "
+                + "fixture pinned, and be unchanged when the authored lists are reversed), loads the arena and "
+                + "checks every authored parity node's runtime local transform against the authored map (R14), runs "
+                + "the single-peer ready-gate sequence, then (if P8RunFightAndLeave) REUSES P6 (dummy paths our "
+                + "arena) and P7 (teardown restores the level) so the loop runs end to end. Mutates AstarPath.active "
+                + "exactly as P6/P7 do; run in a throwaway level on solid level nav. Bound to '-' (number row); F1-F3 "
+                + "are the game's debug keys. Rebind here if '-' conflicts.");
+
+            _p8RunFightAndLeave = Config.Bind("Probe", "P8RunFightAndLeave", true,
+                "P8: after the ready gate resolves, also run the physical fight (P6) and leave (P7) into the same "
+                + "report so the whole loop runs on one keypress. Turn OFF to run only the fast content-identity "
+                + "half (R34 hash + R14 parity + ready gate) and drive P6/P7 by hand (F4 then '=').");
+
             _enemyUnitId = Config.Bind("Probe", "EnemyUnitId", "HellshrewSticka",
                 "P6 live-enemy: the UnitIds field name of the vanilla enemy to spawn (resolved by reflection, " +
                 "loaded via Addressables). Pick a normal grounded melee enemy. Change here to try another if " +
@@ -155,7 +172,9 @@ namespace FalseGods.Probe
                               $"P5c bake hotkey: {_navBakeHotkey.Value}. " +
                               $"P5d apply hotkey: {_navApplyHotkey.Value}. " +
                               $"P6 enemy hotkey: {_navEnemyHotkey.Value} (enemy: {_enemyUnitId.Value}). " +
-                              $"P7 teardown hotkey: {_navTeardownHotkey.Value}.");
+                              $"P7 teardown hotkey: {_navTeardownHotkey.Value}. " +
+                              $"P8 arena-content hotkey: {_arenaContentHotkey.Value} " +
+                              $"(fight+leave: {_p8RunFightAndLeave.Value}).");
         }
 
         private void OnDestroy()
@@ -228,6 +247,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_navTeardownHotkey.Value))
             {
                 StartCoroutine(RunNavTeardown());
+                return;
+            }
+
+            if (HotkeyPressed(_arenaContentHotkey.Value))
+            {
+                StartCoroutine(RunArenaContent());
                 return;
             }
 
@@ -482,6 +507,41 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P7 report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P8: the single-player full loop over our authored arena content — recompute the shipped artifact's
+        /// canonical hash in-game (R34), check runtime hierarchy parity (R14), resolve the single-peer ready gate,
+        /// then reuse P6 (fight) + P7 (leave). Self-contained; a fresh <see cref="ArenaContentProbe"/> each time.
+        /// The reused P6/P7 run INSIDE this coroutine (not via StartCoroutine), so the _running guard is held for
+        /// the whole loop and nothing overlaps a graph update. Shares the _running guard.
+        /// </summary>
+        private IEnumerator RunArenaContent()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P8 (single-player full loop: content identity + parity + ready gate)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new ArenaContentProbe(_p8RunFightAndLeave.Value, _enemyUnitId.Value).Run(report);
+
+            // The reused P6/P7 fire AstarPath.OnPostScan during their bakes; clear the flag so they do not also
+            // kick off an automatic P0/P1/P2 run once the guard drops.
+            _scanCompletePending = false;
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P8 arena-content loop done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P8 report: {exception}");
             }
 
             _running = false;

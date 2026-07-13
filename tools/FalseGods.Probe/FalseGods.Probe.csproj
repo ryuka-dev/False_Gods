@@ -50,6 +50,19 @@
     </Reference>
   </ItemGroup>
 
+  <!--
+    P8 runs the REAL production content-identity code in-game: it reads the shipped artifact and recomputes the
+    canonical ContentHash through FalseGods.Protocol, exactly as a peer would. This is a probe->src reference,
+    the allowed direction (ProbeIsIsolatedChecks only forbids the reverse: no src/ project may reference the
+    probe). Private=true so FalseGods.Protocol.dll is copied into the probe output and, by DeployProbe, next to
+    the probe DLL — Protocol carries no game/BepInEx dependency, so this does not affect deletability of the probe.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FalseGods.Protocol\FalseGods.Protocol.csproj">
+      <Private>true</Private>
+    </ProjectReference>
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Game -->
     <Reference Include="PerfectRandom.Sulfur.Core">
@@ -122,14 +135,28 @@
       <!-- P2: the PoC bundle, if it has been built (FalseGods.Unity/Build is gitignored build output).
            BundleProbe looks for it in BepInEx/FalseGods.Probe/, next to the probe reports. -->
       <_PocBundlePath>$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\falsegods-poc-room.bundle</_PocBundlePath>
+      <!-- P8: the shipped arena-content artifact the Unity bundle build writes beside the bundle. -->
+      <_PocArtifactPath>$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\arena-content-PocRoom.artifact</_PocArtifactPath>
       <_ProbeDataDir>$(BepInExPluginDir)\..\FalseGods.Probe</_ProbeDataDir>
     </PropertyGroup>
+    <ItemGroup>
+      <!-- P8: every production DLL the ProjectReference dragged into the output (Protocol + its transitive Core)
+           must sit next to the probe so BepInEx's resolver loads them. Globbing covers transitive deps if the
+           graph grows, and re-copying the probe DLL itself is harmless. -->
+      <_ProbeProductionDll Include="$(TargetDir)FalseGods.*.dll" />
+    </ItemGroup>
     <MakeDir Directories="$(_ProbeDeployDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(_ProbeDeployDir)" OverwriteReadOnlyFiles="true" />
     <Message Text="Probe deployed → $(_ProbeDeployDir)" Importance="high" />
+    <Copy SourceFiles="@(_ProbeProductionDll)" DestinationFolder="$(_ProbeDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Text="Production DLLs deployed → $(_ProbeDeployDir): @(_ProbeProductionDll->'%(Filename)%(Extension)')" Importance="high" />
     <Copy Condition="Exists('$(_PocBundlePath)')" SourceFiles="$(_PocBundlePath)" DestinationFolder="$(_ProbeDataDir)" OverwriteReadOnlyFiles="true" />
     <Message Condition="Exists('$(_PocBundlePath)')" Text="PoC bundle deployed → $(_ProbeDataDir)" Importance="high" />
     <Message Condition="!Exists('$(_PocBundlePath)')" Text="PoC bundle not found ($(_PocBundlePath)) — P2 will report 'skipped'. Build it in FalseGods.Unity first." Importance="high" />
+    <!-- P8: the arena-content artifact goes next to the bundle; the probe reads it from BepInEx/FalseGods.Probe/. -->
+    <Copy Condition="Exists('$(_PocArtifactPath)')" SourceFiles="$(_PocArtifactPath)" DestinationFolder="$(_ProbeDataDir)" OverwriteReadOnlyFiles="true" />
+    <Message Condition="Exists('$(_PocArtifactPath)')" Text="Arena content artifact deployed → $(_ProbeDataDir)" Importance="high" />
+    <Message Condition="!Exists('$(_PocArtifactPath)')" Text="Arena content artifact not found ($(_PocArtifactPath)) — P8 will report 'skipped'. Build the bundle in FalseGods.Unity first." Importance="high" />
   </Target>
 
 </Project>

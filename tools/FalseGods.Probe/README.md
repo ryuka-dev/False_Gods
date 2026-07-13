@@ -1,4 +1,4 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6 / P7)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6 / P7 / P8)
 
 A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
 [RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**,
@@ -9,8 +9,11 @@ you can judge pink/no-pink with your eyes. **P4 is a collision check** (F9): it 
 around you so you can walk it on foot. **P5 is an A\* nav check** (F8): it makes our floor walkable at runtime
 and confirms it survives the `NavMeshCleaner`. **P6 is an A\* pathing check** (F4). **P7 is a teardown check**
 (`=`): it applies our arena nav into the live graph then restores the level to baseline, proving nothing is left
-behind. P3/P4 show real objects; **P5/P6/P7 mutate the live level's nav graph** — see the notes below for
-exactly how far each departs from read-only, and how it is contained.
+behind. **P8 is the single-player full loop** (`-`): it recomputes the shipped arena artifact's canonical
+content hash **in-game** through `FalseGods.Protocol` (R34), checks the loaded hierarchy against the authored
+parity map (R14), resolves a single-peer ready gate, then reuses P6 (fight) and P7 (leave). P3/P4 show real
+objects; **P5/P6/P7/P8 mutate the live level's nav graph** — see the notes below for exactly how far each
+departs from read-only, and how it is contained.
 
 **This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
 results transcribed into report 4.2/4.4 and RiskList R1/R3/R5. P2 (our own AssetBundle loads) runs from the
@@ -36,6 +39,7 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P5 / **R4, R5** | Can a mod make its own arena floor walkable at runtime, and does it survive `NavMeshCleaner`'s flood-fill? | spawns our room as an isolated island, `UpdateGraphs` over it with **no** anchor (cleaner erases it) then **with** a `validNavMeshPoint` on it (it survives) — read from `GetNearest(...).node.Walkable` |
 | P6 / **R9** | Does A\* pathing work on our applied arena — does a path route **around** the pillar, and does a real vanilla enemy follow it? | bakes+applies our navmesh (P5c+P5d) on an isolated island, then (1) an `ABPath` between the EnemySpawn/PlayerSpawn corners whose straight line crosses the pillar must route around it, and (2) a real vanilla `Npc` (by `UnitId`) is spawned, activated and driven past the pillar to the far corner |
 | P7 / **R8, R30** | Does teardown leave the level we stay in clean — no arena objects, no arena nav nodes, level's own nav restored to baseline? | snapshots the level's own tiles in the arena footprint, applies our arena nav over them (clobbering that level nav), then `ReplaceTiles`-es the snapshot back; measures whole-graph + footprint walkable node counts at BASELINE / APPLIED / RESTORED and counts leftover `FalseGodsP7_*` objects |
+| P8 / **R14, R34** | Does the shipped artifact recompute to the pinned hash **in-game**, is that hash order-independent, and does the realized hierarchy match the authored map? | reads `BepInEx/FalseGods.Probe/arena-content-PocRoom.artifact`, recomputes `ContentHash` via `FalseGods.Protocol.Arena.ContentHashComputer` (must equal the golden the offline fixture pins, and be unchanged when the authored lists are reversed), then loads the arena and compares every authored parity node's runtime local transform; then reuses P6 + P7 for the physical fight + leave |
 
 P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
 P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
@@ -89,8 +93,10 @@ are `[Obsolete]` shims. This was found at compile time, before the game was ever
 dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj
 
 # Build AND deploy into the BepInEx plugins folder from LocalPaths.props (opt-in).
-# Also copies FalseGods.Unity/Build/falsegods-poc-room.bundle → BepInEx/FalseGods.Probe/ when it exists;
-# without the bundle, the P2 section reports "skipped" and P0/P1 still run.
+# Also copies FalseGods.Unity/Build/falsegods-poc-room.bundle and (for P8) arena-content-PocRoom.artifact
+# → BepInEx/FalseGods.Probe/ when they exist, and the production DLLs the probe needs
+# (FalseGods.Protocol.dll + FalseGods.Core.dll) next to the probe. Without the bundle the P2/P6/P7 sections
+# report "skipped"; without the artifact the P8 section reports "skipped"; P0/P1 still run.
 dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj -p:DeployProbe=true
 ```
 
@@ -200,6 +206,38 @@ to confirm the graph is a fresh instance with no arena residue.
 > then restoring them from the snapshot. A level change rebuilds nav anyway, but run it in a level you do not
 > care about, standing on real level nav (on an empty tile the restore-to-baseline check is trivial and the
 > report says so).
+
+**P8 (`-`) — the single-player full loop.** Stand in a **throwaway** loaded level, **on solid level nav**, and
+press the **`-`** key (number row, like P7's `=`; F1-F3 are the game's debug keys). Nothing to judge by eye —
+read the report. This is the first probe that runs **our production content code inside the game**: it reads the
+arena-content artifact the Unity build shipped and recomputes the canonical hash through `FalseGods.Protocol`,
+exactly as a peer would. Phases:
+
+1. **P8.2 — R34 (content identity).** Parses `arena-content-PocRoom.artifact` and recomputes its `ContentHash`.
+   The `R34: matches offline golden` line is `true` when the in-game digest equals the hash pinned by
+   `tests/FalseGods.ProtocolTests/ArenaContentArtifactFixtureTests.cs` — proving the deployed artifact and
+   `Protocol.dll` are what CI verified. `R34: order-independent` reverses every authored list (the stand-in for a
+   different Addressables completion order) and confirms the hash does **not** move.
+2. **P8.3a — R14 (runtime parity).** Loads the arena from the bundle under an inactive holder and locates every
+   authored parity node by path, comparing its runtime **local** transform to the authored one. `R14 verdict`
+   reads `MATCH` when all authored nodes are found in place — the realized arena is the arena the hash covers.
+3. **P8.3b — ready gate.** A throwaway single-peer gate (`LocalReadyGate`) models the loading-contract sequence:
+   fail-closed until the local peer readies, rejects a ready from an unknown peer, resolves once content is
+   validated. A two-peer gate with one member ready is shown still waiting, so single-player resolving is not a
+   fail-open bug.
+4. **P8.3c — fight + leave (reused).** With the gate resolved, it runs **P6** (a real dummy paths our applied
+   arena) and **P7** (snapshot + restore leaves the level at baseline) into the same report, then asserts no
+   `FalseGods*` object survived the whole loop. Turn `Probe/P8RunFightAndLeave` **off** to run only the fast
+   content-identity half and drive P6/P7 by hand.
+
+The `P8 verdict` line reads `FULL LOOP OK` when R34 (golden + order-independent), R14, the ready-gate sequence,
+and a zero-residue teardown all hold. The live-enemy line inside P6 is best-effort; the P8 verdict does not
+depend on it (the nav-graph proof and teardown do).
+
+> **This probe writes to shared authoritative state** — `AstarPath.active` and (via the reused P6) one NPC in
+> `GameManager.npcs` — through the reused P6/P7, each of which restores exactly what it added. It also loads
+> `FalseGods.Protocol.dll` (+ its `FalseGods.Core.dll`), which `-p:DeployProbe=true` copies next to the probe.
+> A level change rebuilds nav anyway, but run it in a level you do not care about, on real level nav.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.

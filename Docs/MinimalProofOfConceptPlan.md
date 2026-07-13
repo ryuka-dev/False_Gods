@@ -169,6 +169,26 @@ documents describe one plan.
 > real arena controller's teardown owner must **snapshot + restore the overwritten tiles (geometry + walkability)**,
 > not merely clear them (RiskList R8/R30). A big/special-boss teardown (B10) stays in Phase B.
 | P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest; the canonical `ContentHash` is stable across two loads with different Addressables completion order | P1–P7, R14, R34 |
+
+> **P8 — RUN AND PASSED (probe P8, `-` key, 0.25.0, in-game 2026-07-13, Act_03_Desert).** The first probe that
+> runs our production content code (`FalseGods.Protocol`) inside the game. `P8 verdict = FULL LOOP OK`:
+> - **R34** — the shipped `arena-content-PocRoom.artifact` (2451 bytes; 7 nodes / 6 colliders / 1 nav / 2 spawns /
+>   14 parity) recomputes **in-game** through the deployed `Protocol.dll` to
+>   `dbed0d2a…221c5acf` — byte-identical to the golden hash the offline fixture pins — and reversing every
+>   authored list (a stand-in for a different Addressables completion order) does **not** move it.
+> - **R14** — the arena is loaded from the bundle and **all 14** authored parity nodes are found by path with the
+>   authored **local** transform (`14/14 MATCH`). The realized arena is the arena the hash was computed over.
+> - **Ready gate** — the single-peer `LocalReadyGate` is fail-closed before ready, rejects a ready from an unknown
+>   peer, resolves once content is validated, and a two-peer gate with one member ready still waits.
+> - **Fight + leave (reused)** — P6 ran on solid applied nav (`ROUTES AROUND`, closest approach 4.20 m vs the
+>   1.0 m pillar; the live `HellshrewSticka` walked 16.5 m around the pillar to within 3.5 m of the far corner),
+>   then P7 restored the level to baseline, and **no `FalseGods*` object survived** the whole loop.
+>
+> One honest caveat: the **P7-inside-P8** teardown floated onto a footprint tile with **0 level-ground nodes**
+> (the player was above level nav for that sub-check), so the R8 *clobber* demonstration was the trivial case
+> there — but that hard case is already VERIFIED standalone (P7 run, footprint 64 → 0 → 64), and P8's own
+> teardown still restored to exactly baseline (whole-graph 2664 → 2664) with zero residue. The live-enemy line
+> is best-effort and the P8 verdict does not depend on it; here it passed anyway.
 | P9 | **Host+client**: both load the identical room and exchange `(ContentHashSchemaVersion, ContentHash)` in `ArenaReady`; the two machines produce **byte-identical** hashes; the gate blocks seal/teleport until both match; an NPC wakes for a client who enters first while the host is far away; a forced hash mismatch, schema mismatch, or timeout **aborts** instead of starting | R7, R10, R33, R34, report 5 |
 
 ### 7.3 Pass/fail criteria (the request's acceptance list)
