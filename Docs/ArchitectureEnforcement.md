@@ -662,9 +662,10 @@ Retiring a rule is the same sequence in reverse, and the id stays burned.
 The module skeleton exists: eight projects under `src/`, a `Directory.Build.props`/`.targets` pair,
 `global.json`, and `False Gods.slnx`. All **four inner** projects now carry source and unit tests —
 `FalseGods.Protocol` (the arena content artifact and canonical `ContentHash`, from PoC Phase A), `FalseGods.Core`
-(the temporary `BossSimulation` and its three ports), `FalseGods.RuntimeContracts` (the boss presentation
-contracts), and `FalseGods.Application` (the domain→presentation mapper), the last three being the first Phase B
-slices — while the **four outer** projects (UnityRuntime, both Integration.* adapters, Plugin) remain
+(the temporary `BossSimulation`, `ArenaSimulation`, `EncounterCoordinator`, and its ports),
+`FalseGods.RuntimeContracts` (the boss presentation contracts), and `FalseGods.Application` (the
+domain→presentation mapper), the last three being Phase B slices — while the **four outer** projects
+(UnityRuntime, both Integration.* adapters, Plugin) remain
 reference-graph-only skeletons; that graph is already doing work. The architecture test project,
 `scripts/verify.ps1` (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
 
