@@ -191,6 +191,26 @@ documents describe one plan.
 > is best-effort and the P8 verdict does not depend on it; here it passed anyway.
 | P9 | **Host+client**: both load the identical room and exchange `(ContentHashSchemaVersion, ContentHash)` in `ArenaReady`; the two machines produce **byte-identical** hashes; the gate blocks seal/teleport until both match; an NPC wakes for a client who enters first while the host is far away; a forced hash mismatch, schema mismatch, or timeout **aborts** instead of starting | R7, R10, R33, R34, report 5 |
 
+> **P9 — RUN AND PASSED (probe P9, `[`, 0.26.0, two instances 2026-07-13; host + Sandboxie-isolated client).**
+> The first probe to run over SULFUR Together's **public bridge** (`SULFURTogether.Api.NetExternalChannel` /
+> `NetSessionInfo`, built this session on ST branch `feature/external-mod-channel` — no reflection into ST). Both
+> instances registered the opaque channel; the host saw `role=Host, peers=[host(local), client-1]`, broadcast
+> `EnterArena`, and each peer recomputed its own `ContentHash` through the deployed `FalseGods.Protocol`. All four
+> fail-closed scenarios (client `P9ClientMode`) landed exactly:
+> - **Normal** → both computed byte-identical `dbed0d2a644fb8a2…` (= P8's in-game digest = the golden fixture); the
+>   gate resolved **2/2**; `PARITY OK` (the FG-owned notional seal would fire). **R7 / R33 / R34 cross-instance.**
+> - **ForceHashMismatch** → client sent `24ed0d2a…` (byte 0 flipped); host `ABORT ContentMismatch`.
+> - **ForceSchemaMismatch** → client sent schema 8; host `ABORT ContentHashSchemaMismatch` — hashes **not** compared.
+> - **StaySilent** → client sent nothing; host `ABORT Timeout`. Nothing sealed/teleported/started in any abort.
+>
+> In-game `P9ClientMode` changes took effect on the client with **no restart**; zero exceptions either end. **Two
+> honest limits:** (1) host + client were two processes on **one** machine (Sandboxie isolation), not two physical
+> PCs — but the canonical hash is defined over authored data with no machine/GPU input, so this proves the
+> cross-process determinism the gate needs; (2) **the NPC-activation half of P9 (R10) is NOT covered** — it needs
+> ST's remote-activation/position surface, a deferred "channel + session only" bridge ask
+> ([ADR-004](ADRs/ADR-004-Optional-Sulfur-Together-Adapter.md)). This probe proves the channel + session identity
+> + cross-instance hash parity + fail-closed aborts the bridge enables.
+
 ### 7.3 Pass/fail criteria (the request's acceptance list)
 
 - ✅ Vanilla assets load at runtime from the player's install (no redistribution).
