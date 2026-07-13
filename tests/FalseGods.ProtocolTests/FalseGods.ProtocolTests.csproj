@@ -32,4 +32,13 @@
     <ProjectReference Include="..\..\src\FalseGods.Protocol\FalseGods.Protocol.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The real artifact the Unity exporter produced from the PoC room. Committed and pinned by a golden-hash
+         test so a drift between the editor writer and the Protocol reader (they are re-implemented separately —
+         Unity is .NET Standard, Protocol is net472) fails here, not in a session. -->
+    <None Include="Fixtures\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

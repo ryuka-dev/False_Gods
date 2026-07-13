@@ -1,0 +1,37 @@
+FGARENA	1
+arenaId	false_gods.arena.poc_room
+arenaVersion	1
+arenaContentId	assets/falsegods/arenas/pocroom/pocroom.prefab
+schemaVersion	1
+protocolVersion	1
+bundleVersion	false_gods.poc.1
+node	fa15e900-0000-0000-0000-000000000001	ArenaRoot	-	0	0	0	0	0	0	1	1	1	1
+node	fa15e900-0000-0000-0000-000000000002	VisualRoot	fa15e900-0000-0000-0000-000000000001	0	0	0	0	0	0	1	1	1	1
+node	fa15e900-0000-0000-0000-000000000003	CollisionRoot	fa15e900-0000-0000-0000-000000000001	0	0	0	0	0	0	1	1	1	1
+node	fa15e900-0000-0000-0000-000000000004	NavigationRoot	fa15e900-0000-0000-0000-000000000001	0	0	0	0	0	0	1	1	1	1
+node	fa15e900-0000-0000-0000-000000000005	GameplayRoot	fa15e900-0000-0000-0000-000000000001	0	0	0	0	0	0	1	1	1	1
+node	fa15e900-0000-0000-0000-000000000006	Floor	fa15e900-0000-0000-0000-000000000002	0	-0.25	0	0	0	0	1	1	1	1
+node	fa15e900-0000-0000-0000-000000000007	Pillar	fa15e900-0000-0000-0000-000000000002	0	2	0	0	0	0	1	1	1	1
+collider	fa15e900-0000-0000-0000-000000000010	Box	Geometry	3	10	0.25	10
+collider	fa15e900-0000-0000-0000-000000000011	Box	Geometry	3	1	2	1
+collider	fa15e900-0000-0000-0000-000000000012	Box	GeometryNoNavMesh	3	11	2	0.5
+collider	fa15e900-0000-0000-0000-000000000013	Box	GeometryNoNavMesh	3	11	2	0.5
+collider	fa15e900-0000-0000-0000-000000000014	Box	GeometryNoNavMesh	3	0.5	2	11
+collider	fa15e900-0000-0000-0000-000000000015	Box	GeometryNoNavMesh	3	0.5	2	11
+nav	fa15e900-0000-0000-0000-000000000020	WalkableSurface	arena-nav-PocRoom	0	0	0	20	0.1	20
+spawn	fa15e900-0000-0000-0000-000000000030	Player	false_gods.spawn.player	-7	0	-7	0	0	0	1	1	1	1
+spawn	fa15e900-0000-0000-0000-000000000031	Enemy	false_gods.spawn.dummy	7	0	7	0	0	0	1	1	1	1
+parity	VisualRoot	VisualRoot	0	0	0	0	0	0	1	1	1	1
+parity	CollisionRoot	CollisionRoot	0	0	0	0	0	0	1	1	1	1
+parity	NavigationRoot	NavigationRoot	0	0	0	0	0	0	1	1	1	1
+parity	GameplayRoot	GameplayRoot	0	0	0	0	0	0	1	1	1	1
+parity	VisualRoot/Floor	Floor	0	-0.25	0	0	0	0	1	1	1	1
+parity	VisualRoot/Pillar	Pillar	0	2	0	0	0	0	1	1	1	1
+parity	CollisionRoot/FloorCollider	Box	0	-0.25	0	0	0	0	1	1	1	1
+parity	CollisionRoot/PillarCollider	Box	0	2	0	0	0	0	1	1	1	1
+parity	CollisionRoot/WallNorth	Box	0	2	10.5	0	0	0	1	1	1	1
+parity	CollisionRoot/WallSouth	Box	0	2	-10.5	0	0	0	1	1	1	1
+parity	CollisionRoot/WallEast	Box	10.5	2	0	0	0	0	1	1	1	1
+parity	CollisionRoot/WallWest	Box	-10.5	2	0	0	0	0	1	1	1	1
+parity	GameplayRoot/PlayerSpawn	Player	-7	0	-7	0	0	0	1	1	1	1
+parity	GameplayRoot/EnemySpawn	Enemy	7	0	7	0	0	0	1	1	1	1
