@@ -27,7 +27,9 @@ namespace FalseGods.Probe
         public static void Run(ProbeReport report)
         {
             report.Section("P0 — environment");
-            report.Value("Application.unityVersion", Application.unityVersion);
+            // Fully qualified: the probe now also references the FalseGods.Application assembly, whose namespace
+            // would otherwise shadow UnityEngine.Application here.
+            report.Value("Application.unityVersion", UnityEngine.Application.unityVersion);
             report.Value("Time.time", Time.time);
 
             report.Section("P0 — GameManager (R3: geometry layer)");

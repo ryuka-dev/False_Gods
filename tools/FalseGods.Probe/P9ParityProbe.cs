@@ -56,8 +56,20 @@ namespace FalseGods.Probe
         private const byte KindArenaReady = 2;
         private const int MaxHashBytes = 1024; // a well-formed ContentHash is 32; guard the reader anyway.
 
+        // Plain mirror of SULFURTogether.Api.SessionRole, so the coroutines branch on an int and never hold the ST
+        // enum as an iterator local (which would become an unloadable field when ST is absent).
+        private const int RoleOffline = 0;
+        private const int RoleHost = 1;
+        private const int RoleClient = 2;
+
         private readonly ManualLogSource _log;
-        private IExternalChannelRegistration _registration;
+
+        // Held as IDisposable, NOT the ST type IExternalChannelRegistration (which extends IDisposable), on purpose:
+        // this type is constructed in ProbePlugin.Awake, so the CLR lays it out at plugin load. A field of an ST type
+        // would force the SULFUR Together assembly to load THERE — a TypeLoadException that kills the whole probe when
+        // ST is absent, which is exactly the case B0 must run in (single-player, no ST). Keeping every ST type inside
+        // method bodies (JIT'd only on the guarded P9 path) lets P0-P8 and B0 load with no ST installed.
+        private IDisposable _registration;
 
         // Host-side collected client responses. Written by OnReceive and read by RunHost — both on the Unity main
         // thread (the bridge dispatches on it), so no lock is needed.
@@ -117,18 +129,23 @@ namespace FalseGods.Probe
         public IEnumerator RunOrArm(ProbeReport report, float timeoutSeconds)
         {
             report.Section("P9 — host+client arena parity over the ST bridge");
-            var role = NetSessionInfo.Role;
-            report.Value("role", role);
-            report.Value("session active", NetSessionInfo.IsSessionActive);
-            report.Value("local peer id", NetSessionInfo.LocalPeerId);
-            var peers = NetSessionInfo.Peers;
-            report.Value("session peers", peers.Count == 0 ? "<none>" : string.Join(", ", peers.Select(Describe)));
 
-            if (role == SessionRole.Host)
+            // Read all ST session state in ONE regular (non-iterator) method and keep only plain types in this
+            // coroutine. An iterator hoists its locals into state-machine fields, and a field of an ST type makes the
+            // whole probe assembly fail Assembly.GetTypes() when ST is absent — which breaks every unrelated
+            // GetTypes() scanner in the process (XNode, EasySettings, ...). So no ST type may live in an iterator
+            // local or a lambda anywhere in this file; only regular-method bodies/signatures may name one.
+            var session = ReadSession();
+            report.Value("role", session.RoleName);
+            report.Value("session active", session.Active);
+            report.Value("local peer id", session.LocalPeerId);
+            report.Value("session peers", session.PeersSummary);
+
+            if (session.RoleCode == RoleHost)
             {
-                yield return RunHost(report, peers, timeoutSeconds);
+                yield return RunHost(report, session.RemotePeerIds, session.LocalPeerId, timeoutSeconds);
             }
-            else if (role == SessionRole.Client)
+            else if (session.RoleCode == RoleClient)
             {
                 report.Line($"  Armed as CLIENT (channel handler registered, mode={ClientMode}). Waiting for the host's");
                 report.Line("  EnterArena; the response is logged to this console when it arrives. Set the mode you want");
@@ -143,9 +160,8 @@ namespace FalseGods.Probe
 
         // ── host ──
 
-        private IEnumerator RunHost(ProbeReport report, IReadOnlyList<ExternalPeer> peers, float timeoutSeconds)
+        private IEnumerator RunHost(ProbeReport report, List<string> required, string localPeerId, float timeoutSeconds)
         {
-            var required = peers.Where(p => !p.IsLocal).Select(p => p.PeerId).ToList();
             if (required.Count == 0)
             {
                 report.Line("  No remote client connected. Join a second instance as a client, then press P9 here again.");
@@ -165,7 +181,7 @@ namespace FalseGods.Probe
             _responses.Clear();
             _malformed.Clear();
             var enter = Encode(KindEnterArena, hm);
-            bool announced = NetExternalChannel.Send(ChannelId, enter, ExternalDelivery.ReliableOrdered, ExternalTarget.AllClients);
+            bool announced = SendEnterArena(enter);
             report.Value("EnterArena -> all clients", announced ? "sent" : "NOT sent (no live session?)");
             report.Value("awaiting ArenaReady from", string.Join(", ", required));
 
@@ -180,8 +196,8 @@ namespace FalseGods.Probe
 
             // VALIDATE: schema first (never compare hashes across schemas), then versions, then the full hash.
             report.Section("P9 — validation (host compares each peer to its own manifest)");
-            var gate = new LocalReadyGate(new[] { NetSessionInfo.LocalPeerId }.Concat(required).ToList());
-            gate.MarkReady(NetSessionInfo.LocalPeerId); // the host validated its own content locally
+            var gate = new LocalReadyGate(new[] { localPeerId }.Concat(required).ToList());
+            gate.MarkReady(localPeerId); // the host validated its own content locally
 
             string abortReason = null;
             var outstanding = new List<string>();
@@ -378,8 +394,56 @@ namespace FalseGods.Probe
 
         // ── helpers ──
 
-        private static string Describe(ExternalPeer p) =>
-            $"{p.PeerId}{(p.IsHost ? "(host)" : "")}{(p.IsLocal ? "(local)" : "")}";
+        // ── ST boundary (regular methods only — every ST type is named here, never in an iterator local/lambda) ──
+
+        /// <summary>
+        /// Read the whole ST session into plain types in one regular method, so the coroutines can branch and address
+        /// peers without ever holding a <see cref="SessionRole"/> or <see cref="ExternalPeer"/> in a hoisted iterator
+        /// field. The foreach enumerator and the <c>ExternalPeer</c> loop variable are ordinary stack locals here.
+        /// </summary>
+        private SessionSnapshot ReadSession()
+        {
+            var snapshot = new SessionSnapshot
+            {
+                RoleName = NetSessionInfo.Role.ToString(),
+                Active = NetSessionInfo.IsSessionActive,
+                LocalPeerId = NetSessionInfo.LocalPeerId,
+                RemotePeerIds = new List<string>(),
+            };
+
+            switch (NetSessionInfo.Role)
+            {
+                case SessionRole.Host: snapshot.RoleCode = RoleHost; break;
+                case SessionRole.Client: snapshot.RoleCode = RoleClient; break;
+                default: snapshot.RoleCode = RoleOffline; break;
+            }
+
+            var parts = new List<string>();
+            foreach (var peer in NetSessionInfo.Peers)
+            {
+                parts.Add($"{peer.PeerId}{(peer.IsHost ? "(host)" : "")}{(peer.IsLocal ? "(local)" : "")}");
+                if (!peer.IsLocal)
+                    snapshot.RemotePeerIds.Add(peer.PeerId);
+            }
+
+            snapshot.PeersSummary = parts.Count == 0 ? "<none>" : string.Join(", ", parts);
+            return snapshot;
+        }
+
+        /// <summary>Broadcast EnterArena to all clients. Wrapped so the ST enums stay out of the RunHost iterator.</summary>
+        private static bool SendEnterArena(byte[] payload) =>
+            NetExternalChannel.Send(ChannelId, payload, ExternalDelivery.ReliableOrdered, ExternalTarget.AllClients);
+
+        /// <summary>Plain, ST-free projection of the session, safe to hold across a coroutine yield.</summary>
+        private sealed class SessionSnapshot
+        {
+            public int RoleCode;
+            public string RoleName;
+            public bool Active;
+            public string LocalPeerId;
+            public string PeersSummary;
+            public List<string> RemotePeerIds;
+        }
 
         private static string DescribeManifest(Manifest m) =>
             $"schema={m.Schema} hash={Hex(m.Hash)} arena={m.ArenaId} v{m.ArenaVersion} proto={m.ProtocolVersion} bundle={m.BundleVersion}";

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using BepInEx;
 using BepInEx.Configuration;
+using FalseGods.Probe.Boss;
 using Pathfinding;
 using PerfectRandom.Sulfur.Core;
 using UnityEngine.InputSystem;
@@ -46,12 +47,23 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _p9Hotkey;
         private ConfigEntry<P9ClientMode> _p9ClientMode;
         private ConfigEntry<float> _p9TimeoutSeconds;
+        private ConfigEntry<Key> _bossHotkey;
+        private ConfigEntry<Key> _bossDamageHotkey;
+        private ConfigEntry<BossFacingMode> _bossFacingMode;
+        private ConfigEntry<bool> _bossLockPitch;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
         private ConfigEntry<bool> _p8RunFightAndLeave;
         private ConfigEntry<string> _enemyUnitId;
 
         private readonly VisualProbe _visual = new VisualProbe();
+
+        // B0 boss first light. Unlike the one-shot P0-P9 steps this stays up across frames and is advanced every
+        // frame in Update while raised, so it is a long-lived instance rather than a per-run one.
+        private readonly BossVisualProbe _boss = new BossVisualProbe();
+
+        // A single report captures the whole boss session (raise, every damage hit, teardown); written on drop.
+        private ProbeReport _bossReport;
 
         // P9 holds a persistent channel registration and receives async messages, so unlike the per-run probes it
         // is one long-lived instance (created in Awake, disposed in OnDestroy).
@@ -176,6 +188,29 @@ namespace FalseGods.Probe
                 "P9 HOST: how long to wait for every required peer's ArenaReady before aborting the gate as a "
                 + "timeout. The StaySilent scenario relies on this firing.");
 
+            _bossHotkey = Config.Bind("Probe", "BossHotkey", Key.RightBracket,
+                "B0 boss first light: press once to raise the temporary test boss in front of you and again to "
+                + "tear it down. It drives the REAL FalseGods.Core.BossSimulation through the REAL "
+                + "BossPresenter/BossPresentationMapping into a minimal probe billboard renderer — no networking, "
+                + "no game state touched. Watch the sim's idle->telegraph->commit->recover cycle; use the damage "
+                + "key to hit it. Single-player only. Bound to ']' (F4-F12, '-', '=', '[' are taken).");
+
+            _bossDamageHotkey = Config.Bind("Probe", "BossDamageHotkey", Key.Backslash,
+                "B0: damage the boss where the screen centre is aimed (raycast against its body/weak-point "
+                + "triggers). Hit it during the weak-point (recover) window for amplified damage, drop it to half "
+                + "for phase two, to zero for death. Damage goes to the authoritative BossSimulation.ApplyDamage. "
+                + "Bound to '\\'.");
+
+            _bossFacingMode = Config.Bind("Probe", "BossFacingMode", BossFacingMode.LocalBillboard,
+                "B0 sprite facing (changeable live, like SULFUR's BillboardNpc): Fixed = a static/scripted world "
+                + "facing (for a very large boss); LocalBillboard = face the local player's camera position, each "
+                + "player sees it turned to themselves (the vanilla NPC default; honours BossLockPitch); "
+                + "NearestPlayer = face the authoritative nearest-player direction, the same for every viewer.");
+
+            _bossLockPitch = Config.Bind("Probe", "BossLockPitch", false,
+                "B0: in LocalBillboard facing, false = yaw + natural elevation pitch toward the camera (vanilla), "
+                + "true = yaw only (upright). Ignored by the Fixed and NearestPlayer modes, which are always upright.");
+
             _p8RunFightAndLeave = Config.Bind("Probe", "P8RunFightAndLeave", true,
                 "P8: after the ready gate resolves, also run the physical fight (P6) and leave (P7) into the same "
                 + "report so the whole loop runs on one keypress. Turn OFF to run only the fast content-identity "
@@ -205,7 +240,9 @@ namespace FalseGods.Probe
                               $"P8 arena-content hotkey: {_arenaContentHotkey.Value} " +
                               $"(fight+leave: {_p8RunFightAndLeave.Value}). " +
                               $"P9 host+client hotkey: {_p9Hotkey.Value} " +
-                              $"(client mode: {_p9ClientMode.Value}, timeout: {_p9TimeoutSeconds.Value}s).");
+                              $"(client mode: {_p9ClientMode.Value}, timeout: {_p9TimeoutSeconds.Value}s). " +
+                              $"B0 boss hotkey: {_bossHotkey.Value} (damage: {_bossDamageHotkey.Value}, " +
+                              $"facing: {_bossFacingMode.Value}, lockPitch: {_bossLockPitch.Value}).");
         }
 
         private void OnDestroy()
@@ -216,6 +253,14 @@ namespace FalseGods.Probe
             // Never leave the P3 stage (or its RenderSettings change) behind if the plugin unloads while up.
             if (_visual.IsUp)
                 _visual.Drop(new ProbeReport(Logger));
+
+            // Same for the B0 boss stage: tear it down so no probe objects survive a plugin unload.
+            if (_boss.IsUp)
+            {
+                var report = _bossReport ?? new ProbeReport(Logger);
+                _boss.Drop(report);
+                _bossReport = null;
+            }
 
             // Release the P9 channel registration if it was ever taken. Guarded because ST may be absent, in which
             // case _p9 never touched an ST type and there is nothing to release.
@@ -228,6 +273,10 @@ namespace FalseGods.Probe
 
         private void Update()
         {
+            // The B0 boss stage is persistent (up across frames) and independent of the one-shot _running guard, so
+            // advance it and handle its keys first, every frame — even while another probe coroutine is running.
+            TickBoss();
+
             if (_running)
                 return;
 
@@ -305,6 +354,65 @@ namespace FalseGods.Probe
                 if (_runAfterEachScan.Value)
                     StartCoroutine(RunProbe("AstarPath.OnPostScan (navigation scan complete)"));
             }
+        }
+
+        /// <summary>
+        /// Drive the B0 boss stage: toggle it on its hotkey, damage it on the damage key while up, and advance it
+        /// one frame every call. Unlike the P0-P9 steps this holds no coroutine and no _running guard — the boss is
+        /// a pure read of the camera plus the boss sim, so it is safe to tick alongside anything else.
+        /// </summary>
+        private void TickBoss()
+        {
+            if (HotkeyPressed(_bossHotkey.Value))
+            {
+                ToggleBoss();
+            }
+            else if (_boss.IsUp && _bossReport != null && HotkeyPressed(_bossDamageHotkey.Value))
+            {
+                _boss.Damage(_bossReport);
+            }
+
+            if (_boss.IsUp)
+            {
+                _boss.SetFacing(_bossFacingMode.Value, _bossLockPitch.Value);
+                _boss.Tick(UnityEngine.Time.deltaTime);
+            }
+        }
+
+        private void ToggleBoss()
+        {
+            if (_boss.IsUp)
+            {
+                _boss.Drop(_bossReport ?? new ProbeReport(Logger));
+                WriteBossReport("torn down");
+                return;
+            }
+
+            _bossReport = new ProbeReport(Logger);
+            _bossReport.Line("False Gods — PoC probe B0 (boss first light)");
+            _bossReport.Line($"utc:     {DateTime.UtcNow:O}");
+            _bossReport.Line(new string('═', 78));
+
+            if (!_boss.Raise(_bossReport))
+                WriteBossReport("not raised (no camera)");
+        }
+
+        private void WriteBossReport(string outcome)
+        {
+            if (_bossReport == null)
+                return;
+
+            try
+            {
+                var path = _bossReport.WriteToDisk();
+                Logger.LogMessage($"B0 boss stage {outcome}. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write B0 report: {exception}");
+            }
+
+            _bossReport = null;
         }
 
         private static bool HotkeyPressed(Key key)

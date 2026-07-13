@@ -64,6 +64,21 @@
   </ItemGroup>
 
   <!--
+    The B0 boss-first-light step (Boss/BossVisualProbe) drives the REAL boss stack in-game: a live
+    FalseGods.Core.BossSimulation mapped through FalseGods.Application's BossPresenter/BossPresentationMapping
+    into a probe-local renderer that implements the RuntimeContracts presentation seam. Referencing Application
+    pulls in Core + RuntimeContracts (+ Protocol) transitively — all inner, game/BepInEx-free assemblies, so this
+    stays a probe->src reference (the allowed direction; ProbeIsIsolatedChecks only forbids src->probe) and does
+    not affect the probe's deletability. Private=true so the DLLs are copied into the probe output and, under
+    DeployProbe, next to the probe DLL for BepInEx's resolver.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FalseGods.Application\FalseGods.Application.csproj">
+      <Private>true</Private>
+    </ProjectReference>
+  </ItemGroup>
+
+  <!--
     P9 references the SULFUR Together PUBLIC integration bridge (SULFURTogether.Api.NetExternalChannel /
     NetSessionInfo). Provided at RUNTIME by the installed ST plugin, so Private=false (never copied into the
     probe output). Compile-time only; points at the bridge-enabled ST build. BOTH game instances in the P9

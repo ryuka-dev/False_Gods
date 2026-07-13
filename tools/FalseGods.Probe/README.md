@@ -1,4 +1,4 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6 / P7 / P8 / P9)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6 / P7 / P8 / P9 / B0)
 
 A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
 [RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**,
@@ -45,6 +45,7 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P7 / **R8, R30** | Does teardown leave the level we stay in clean — no arena objects, no arena nav nodes, level's own nav restored to baseline? | snapshots the level's own tiles in the arena footprint, applies our arena nav over them (clobbering that level nav), then `ReplaceTiles`-es the snapshot back; measures whole-graph + footprint walkable node counts at BASELINE / APPLIED / RESTORED and counts leftover `FalseGodsP7_*` objects |
 | P8 / **R14, R34** | Does the shipped artifact recompute to the pinned hash **in-game**, is that hash order-independent, and does the realized hierarchy match the authored map? | reads `BepInEx/FalseGods.Probe/arena-content-PocRoom.artifact`, recomputes `ContentHash` via `FalseGods.Protocol.Arena.ContentHashComputer` (must equal the golden the offline fixture pins, and be unchanged when the authored lists are reversed), then loads the arena and compares every authored parity node's runtime local transform; then reuses P6 + P7 for the physical fight + leave |
 | P9 / **R33, R34** | Do a host and client produce **byte-identical** `(schema, ContentHash)` and does the gate block the seal until they match — and does a hash mismatch / schema mismatch / silent peer **abort** instead of starting? | over the ST public bridge: host `NetExternalChannel.Send` EnterArena → each peer recomputes its own `ContentHash` (same `FalseGods.Protocol` path as P8) → client replies ArenaReady → host compares to its own and a `LocalReadyGate` resolves only when every peer matches (schema first, hashes never compared across schemas); the client's `Probe/P9ClientMode` drives Normal / ForceHashMismatch / ForceSchemaMismatch / StaySilent |
+| B0 / **R15, R16, R27** | Do the presentation contracts alone drive a renderer — a multi-part billboard boss that faces the camera, sorts against the arena, keeps its hitboxes on its visible parts, and is inert unless driven? | drives the **real** `FalseGods.Core.BossSimulation` (probe ports) through the **real** `FalseGods.Application` `BossPresenter`/`BossPresentationMapping` into a probe-local renderer implementing the real `RuntimeContracts` `IEncounterPresentation`; damage goes to the authoritative `BossSimulation.ApplyDamage`, and the renderer decides nothing |
 
 P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
 P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
@@ -269,6 +270,47 @@ identity, cross-instance hash parity, and the abort paths the bridge enables, no
 > reads its own artifact. It does load `FalseGods.Protocol.dll` (as P8 does) and references the ST bridge, which
 > is provided at runtime by the installed ST plugin (never copied into the probe). With the old (non-bridge) ST
 > or ST absent, the P9 report says the bridge is unavailable and every other step is unaffected.
+
+**B0 (`]`) — boss first light (single-player, no networking).** Stand in a loaded level and press **`]`** (F4-F12,
+`-`, `=`, `[` are taken): a temporary test boss appears ~7 m in front of you and starts its cycle. Unlike every
+step above, B0 is a **Phase B** step and touches no nav graph and no game state — it reads the camera as the sole
+encounter participant and spawns its own procedural billboard (no bundle needed). Its whole point is that the
+**real** boss stack drives it:
+
+- `FalseGods.Core.BossSimulation` (the authoritative domain: idle → telegraph → commit → recover, two phases, a
+  weak point, death) advanced against a probe `ISimulationClock` fed by the game's own frame time (B3);
+- mapped by the **real** `FalseGods.Application` `BossPresentationMapping` + `BossPresenter` into
+  `PresentationState` / `IPresentationEvent`;
+- consumed by a probe-local renderer that implements the **real** `RuntimeContracts.IEncounterPresentation` and
+  decides **nothing** authoritative — it only draws what state and cues it is handed (R16/R27).
+
+Watch, with your eyes:
+
+1. Does the billboard body **face you** as you circle it, and **sort correctly** against the arena (not punching
+   through walls or vanishing behind the floor)? (R15) Facing follows SULFUR's own `BillboardNpc` math (turn
+   toward the camera *position*, not its look direction), and `Probe/BossFacingMode` (live-switchable) picks the
+   strategy: **LocalBillboard** (face the local player, vanilla default; `Probe/BossLockPitch` toggles yaw-only vs
+   yaw+pitch), **Fixed** (a static/scripted facing, for a very large boss), or **NearestPlayer** (the
+   authoritative facing, the same for every viewer). The health bar always faces you regardless.
+2. When it **telegraphs** (a tightening ring for the aimed projectile, a growing disc for the area attack) and
+   then **commits**, does the wind-up read, and does timing track the sim (not the frame rate)? (B3)
+3. Press the **damage key `\`** (aim the screen centre at it): the report says whether you hit the **body** or the
+   **weak point** — proving the hitboxes sit on the visible parts (R15). Hit it during the **recover** window
+   (weak point glowing yellow) for amplified damage.
+4. Drop it below **half** health — it crosses to **phase two** (recolours). Drop it to **zero** — it **dies**
+   (terminal). Every one of these is a decision the *sim* made and the renderer merely showed.
+5. Walk into it — it **blocks you** like a vanilla NPC. The physical body is a solid `CapsuleCollider` on the
+   **Entities** layer (where SULFUR's `Npc.mainCollider` lives) with a kinematic `Rigidbody`, separate from the
+   thin billboard trigger boxes the aim-ray uses.
+
+Press **`]`** again to tear it down (nothing remains). One report per session captures the raise, each damage
+hit, and teardown. B0 is single-player only; the host/client half of the boss slice (B1–B10) needs the ST
+adapter and two instances, which this step deliberately does not build.
+
+> **B0 loads the inner production DLLs** (`FalseGods.Application` + its `Core` / `RuntimeContracts` / `Protocol`),
+> which `-p:DeployProbe=true` copies next to the probe — all game/BepInEx-free, so the probe stays deletable. If
+> no colour shader resolves the report says so and the boss renders magenta (a visible, honest signal), the same
+> URP/Lit pink hazard P3 measured.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.
