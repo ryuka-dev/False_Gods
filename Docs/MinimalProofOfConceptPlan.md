@@ -146,6 +146,28 @@ documents describe one plan.
 > `SnapToGraph`/`Scan` origin mismatch shifts the floor (it left half the floor unwalkable on the 38.4 m-tile
 > boss levels until fixed). A **big / special-movement** boss (raycast-ground-follow) is deferred to Phase B.
 | P7 | **Teardown**: leave the room and *keep playing the same level* — vanilla NPCs still path, no arena objects or nav nodes remain; then load a normal level and assert handles released and its nav is correct | R8, R30 |
+
+> **P7 — RUN AND PASSED (probe P7, `=` key, 0.24.2, in-game 2026-07-13, Act_03_Desert).** Teardown leaves the
+> level we stay in clean. One run floats our arena onto a footprint tile the player is standing on (so it carries
+> the level's own ground nav — the honest worst case) and measures three stages:
+> - **BASELINE** — 64 walkable level-ground nodes in the footprint (whole-graph 2704). The level tiles there are
+>   snapshotted: geometry (`TileMeshes`) **and** per-node `Walkable` flags.
+> - **APPLIED** — `ReplaceTiles(arena)` makes our floor walkable (16 nodes at +3 m) and **clobbers the level
+>   ground in that tile, 64 → 0** — the R8 hazard, measured. A `ClearTiles`-only teardown (all A\*'s own
+>   `NavmeshPrefab.OnDisable` does) would leave that hole.
+> - **RESTORED** — `ReplaceTiles(saved level tiles)` **+ reapply the saved `Walkable` flags** returns the
+>   footprint to **exactly baseline** (level-ground 64 → 64, arena-band 0 → 0, whole-graph 2704 → 2690 within
+>   tolerance), with **0 arena GameObjects** and the bundle unloaded → `R8/R30 verdict (same level) = CLEAN`.
+>
+> The walkability step is the iteration's real finding. `RecastGraph.ReplaceTiles`/`ClearTiles` operate on whole
+> XZ tiles across the full Y column, so floating the arena +3 m over the player and applying it **destroys the
+> level's own ground nav in that 38.4 m tile**; and `ReplaceTiles` rebuilds nodes walkable-by-geometry and does
+> **not** re-run the `NavMeshCleaner` flood-fill (the same side-step P5d relied on at R5), so restoring geometry
+> alone *over-restores* — the first run measured footprint 25 → 131. Snapshotting and reapplying the per-node
+> `Walkable` flags fixes it exactly. **Cross-level half:** the game rebuilds `AstarPath.active` per level (a fresh
+> instance each load — P0), so residue cannot cross a level change; confirmed by F10 on the next level. So the
+> real arena controller's teardown owner must **snapshot + restore the overwritten tiles (geometry + walkability)**,
+> not merely clear them (RiskList R8/R30). A big/special-boss teardown (B10) stays in Phase B.
 | P8 | **Single-player** full loop: enter → ready-gate resolves for the single local peer → fight the dummy enemy → leave, all stable; runtime hierarchy matches the authored manifest; the canonical `ContentHash` is stable across two loads with different Addressables completion order | P1–P7, R14, R34 |
 | P9 | **Host+client**: both load the identical room and exchange `(ContentHashSchemaVersion, ContentHash)` in `ArenaReady`; the two machines produce **byte-identical** hashes; the gate blocks seal/teleport until both match; an NPC wakes for a client who enters first while the host is far away; a forced hash mismatch, schema mismatch, or timeout **aborts** instead of starting | R7, R10, R33, R34, report 5 |
 

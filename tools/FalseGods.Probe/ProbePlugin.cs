@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.23.0";
+        public const string PluginVersion = "0.24.2";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -41,6 +41,7 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _navBakeHotkey;
         private ConfigEntry<Key> _navApplyHotkey;
         private ConfigEntry<Key> _navEnemyHotkey;
+        private ConfigEntry<Key> _navTeardownHotkey;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
         private ConfigEntry<string> _enemyUnitId;
@@ -126,6 +127,16 @@ namespace FalseGods.Probe
                 "and driven to the far corner past the pillar. WARNING: mutates AstarPath.active (adds tiles + " +
                 "one NPC) then removes exactly that; a level change rebuilds nav. Run in a throwaway level.");
 
+            _navTeardownHotkey = Config.Bind("Probe", "NavTeardownHotkey", Key.Equals,
+                "P7 teardown check: spawns our arena as an isolated island, snapshots the level's own nav tiles " +
+                "in the arena footprint, applies our baked arena nav over them (which clobbers that level nav), " +
+                "then RESTORES the snapshot and destroys the arena. Measures whole-graph + footprint walkable " +
+                "node counts at BASELINE / APPLIED / RESTORED to prove the level we stay in returns to baseline " +
+                "(no arena objects, no arena nav nodes, level nav intact — R8/R30). WARNING: mutates " +
+                "AstarPath.active (replaces then restores the footprint tiles); a level change rebuilds nav. " +
+                "Run in a throwaway level, standing on solid level nav. Bound to '=' because F1-F3 are the game's " +
+                "debug keys and F4-F12 are taken; the number row (1..=) is free. Rebind here if '=' conflicts.");
+
             _enemyUnitId = Config.Bind("Probe", "EnemyUnitId", "HellshrewSticka",
                 "P6 live-enemy: the UnitIds field name of the vanilla enemy to spawn (resolved by reflection, " +
                 "loaded via Addressables). Pick a normal grounded melee enemy. Change here to try another if " +
@@ -143,7 +154,8 @@ namespace FalseGods.Probe
                               $"P5b nav-prefab hotkey: {_navPrefabHotkey.Value}. " +
                               $"P5c bake hotkey: {_navBakeHotkey.Value}. " +
                               $"P5d apply hotkey: {_navApplyHotkey.Value}. " +
-                              $"P6 enemy hotkey: {_navEnemyHotkey.Value} (enemy: {_enemyUnitId.Value}).");
+                              $"P6 enemy hotkey: {_navEnemyHotkey.Value} (enemy: {_enemyUnitId.Value}). " +
+                              $"P7 teardown hotkey: {_navTeardownHotkey.Value}.");
         }
 
         private void OnDestroy()
@@ -210,6 +222,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_navEnemyHotkey.Value))
             {
                 StartCoroutine(RunNavEnemy());
+                return;
+            }
+
+            if (HotkeyPressed(_navTeardownHotkey.Value))
+            {
+                StartCoroutine(RunNavTeardown());
                 return;
             }
 
@@ -432,6 +450,38 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P6 report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P7: prove teardown leaves the level we stay in clean — snapshot the level's footprint tiles, apply our
+        /// arena nav over them, then restore the snapshot and assert the level returns to baseline (R8/R30).
+        /// Self-contained (spawns its own island, replaces then restores AstarPath.active tiles), so a fresh
+        /// <see cref="NavmeshTeardownProbe"/> is used each time. Shares the _running guard.
+        /// </summary>
+        private IEnumerator RunNavTeardown()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P7 (teardown: apply arena nav, restore level to baseline)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new NavmeshTeardownProbe().Run(report);
+
+            _scanCompletePending = false;
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P7 teardown check done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P7 report: {exception}");
             }
 
             _running = false;

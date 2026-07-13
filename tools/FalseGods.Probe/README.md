@@ -1,4 +1,4 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6 / P7)
 
 A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
 [RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**,
@@ -7,8 +7,10 @@ A BepInEx plugin that reads real values out of a running SULFUR, so the highest-
 **P0/P1/P2 are read-only** (F10). **P3 is a visible render check** (F11): it shows real objects on screen so
 you can judge pink/no-pink with your eyes. **P4 is a collision check** (F9): it places our sealed arena
 around you so you can walk it on foot. **P5 is an A\* nav check** (F8): it makes our floor walkable at runtime
-and confirms it survives the `NavMeshCleaner`. P3/P4 show real objects; **P5 mutates the live level's nav
-graph** — see the notes below for exactly how far each departs from read-only, and how it is contained.
+and confirms it survives the `NavMeshCleaner`. **P6 is an A\* pathing check** (F4). **P7 is a teardown check**
+(`=`): it applies our arena nav into the live graph then restores the level to baseline, proving nothing is left
+behind. P3/P4 show real objects; **P5/P6/P7 mutate the live level's nav graph** — see the notes below for
+exactly how far each departs from read-only, and how it is contained.
 
 **This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
 results transcribed into report 4.2/4.4 and RiskList R1/R3/R5. P2 (our own AssetBundle loads) runs from the
@@ -33,6 +35,7 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P4 / **R3** | Is our arena solid to the player on foot — floor holds, pillar blocks, walls contain, no snagging? | places our room so its `PlayerSpawn` marker sits under your feet, leaving you inside the sealed arena — **you judge on foot** (no teleport, no F3) |
 | P5 / **R4, R5** | Can a mod make its own arena floor walkable at runtime, and does it survive `NavMeshCleaner`'s flood-fill? | spawns our room as an isolated island, `UpdateGraphs` over it with **no** anchor (cleaner erases it) then **with** a `validNavMeshPoint` on it (it survives) — read from `GetNearest(...).node.Walkable` |
 | P6 / **R9** | Does A\* pathing work on our applied arena — does a path route **around** the pillar, and does a real vanilla enemy follow it? | bakes+applies our navmesh (P5c+P5d) on an isolated island, then (1) an `ABPath` between the EnemySpawn/PlayerSpawn corners whose straight line crosses the pillar must route around it, and (2) a real vanilla `Npc` (by `UnitId`) is spawned, activated and driven past the pillar to the far corner |
+| P7 / **R8, R30** | Does teardown leave the level we stay in clean — no arena objects, no arena nav nodes, level's own nav restored to baseline? | snapshots the level's own tiles in the arena footprint, applies our arena nav over them (clobbering that level nav), then `ReplaceTiles`-es the snapshot back; measures whole-graph + footprint walkable node counts at BASELINE / APPLIED / RESTORED and counts leftover `FalseGodsP7_*` objects |
 
 P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
 P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
@@ -168,6 +171,35 @@ then runs two layers:
 > **This probe writes to shared authoritative state** — `AstarPath.active` (adds tiles) and
 > `GameManager.npcs` (one NPC) — then removes exactly what it added (`ClearTiles` over the same rect,
 > unregister + destroy the NPC). A level change rebuilds nav anyway, but run it in a level you do not care about.
+
+**P7 (`=`) — the teardown check.** Stand in a **throwaway** loaded level, **on solid level nav**, and press the
+**`=`** key (F1-F3 are the game's debug keys, F4-F12 are taken by the game/other probes, so P7 uses the free
+number row). Nothing to judge by eye — read the report. It floats our arena as a
+tile-centred island +3 m over your feet, i.e. onto a tile that carries the level's own ground nav, then:
+
+1. **BASELINE** — counts the level's walkable nodes in that footprint tile (and the whole graph), and snapshots
+   the level's original tiles there.
+2. **APPLIED** — `ReplaceTiles`-es our baked arena nav into the footprint. Because `ReplaceTiles` overwrites
+   whole XZ tiles, the level's ground nav in that tile is **clobbered** (the report shows it fall to ~0) while
+   our arena floor becomes walkable at +3 m. This is the R8 hazard, measured — a `ClearTiles`-only teardown (all
+   A\*'s own `NavmeshPrefab.OnDisable` does) would leave that hole.
+3. **RESTORED** — `ReplaceTiles`-es the **snapshotted level tiles back** *and reapplies their saved per-node
+   `Walkable` flags*, then destroys the island and unloads the bundle. The walkability step matters: `ReplaceTiles`
+   rebuilds nodes as walkable-by-geometry and does **not** re-run the `NavMeshCleaner` flood-fill (the same
+   side-step P5d relied on), so restoring geometry alone would bring back nodes the cleaner had culled and
+   *over-restore* the count. Reapplying the saved flags returns the tile to its exact baseline. The report then
+   asserts the level we stay in is clean: **no `FalseGodsP7_*` objects, no arena nav nodes, and the level's own
+   nav count back at baseline** (whole-graph and footprint). The `R8/R30 verdict` line reads `CLEAN` when all
+   three hold.
+
+The **cross-level half** of R8 (load a normal level, its nav is correct, no arena object survived) is the game's
+own per-level graph rebuild (`ClearGraphs` + `Instantiate`, proven in P0). After F2, change level and press F10
+to confirm the graph is a fresh instance with no arena residue.
+
+> **This probe writes to shared authoritative state** — `AstarPath.active` — replacing the footprint tiles and
+> then restoring them from the snapshot. A level change rebuilds nav anyway, but run it in a level you do not
+> care about, standing on real level nav (on an empty tile the restore-to-baseline check is trivial and the
+> report says so).
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.
