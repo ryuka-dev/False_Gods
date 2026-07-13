@@ -253,8 +253,13 @@ module skeleton (`FalseGods.Core` / `.Protocol` / `.RuntimeContracts` / `.Applic
 `IEncounterPresentation` in `RuntimeContracts`) and the **domain→presentation mapper** in `Application`
 (**done: `BossPresentationMapping` + `BossPresenter`, unit-tested in `FalseGods.ApplicationTests`; the
 `BossPresentation` renderer that implements `IEncounterPresentation` in UnityRuntime needs the game and is
-still to build**) → single-player → transport-neutral snapshots/events in Protocol plus
-the Application wire→presentation mapper → connect through the **optional, separately-loaded**
+still to build**) → transport-neutral snapshots/events in Protocol plus the Application
+replication/wire→presentation mappers and the fail-closed ready gate (**done: `Protocol/Wire`
+(`BossSnapshot`/`ArenaSnapshot`/`BossEvent`/`ArenaEvent`/`EncounterBaseline` + `WireCodec`),
+`Application` (`BossWireMapping`, `WirePresentationMapping`, `ReplicationSender`/`Receiver` with per-stream
+idempotence + baseline restore, `EncounterReadyGate`), and the `RuntimeContracts` transport carriers +
+session/roster/channel ports — all unit-tested; single-player and host/client wiring in the outer projects
+needs the game**) → connect through the **optional, separately-loaded**
 `FalseGods.Integration.SulfurTogether` (a companion plugin that self-registers through `FalseGodsIntegrations`,
 never referenced by `FalseGods.Plugin`)
 → host/client validation. Extract shared abstractions **only** from demonstrated repetition — do not build a

@@ -666,8 +666,10 @@ replication wire DTOs — `BossSnapshot`/`ArenaSnapshot`/`BossEvent`/`ArenaEvent
 `WireCodec`; the FG-ARCH-008 boss/arena separation is guarded by a `FalseGods.ProtocolTests` test, pending its
 promotion to a registered check), `FalseGods.Core`
 (the temporary `BossSimulation`, `ArenaSimulation`, `EncounterCoordinator`, and its ports),
-`FalseGods.RuntimeContracts` (the boss presentation contracts), and `FalseGods.Application` (the
-domain→presentation mapper), the last three being Phase B slices — while the **four outer** projects
+`FalseGods.RuntimeContracts` (the boss presentation contracts plus the transport carriers and multiplayer
+session/roster/channel ports), and `FalseGods.Application` (the domain→presentation and wire→presentation
+mappers, the replication sender/receiver over `IEncounterChannel`, and the fail-closed `EncounterReadyGate`),
+the last three being Phase B slices — while the **four outer** projects
 (UnityRuntime, both Integration.* adapters, Plugin) remain
 reference-graph-only skeletons; that graph is already doing work. The architecture test project,
 `scripts/verify.ps1` (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
