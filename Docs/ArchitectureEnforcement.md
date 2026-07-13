@@ -660,12 +660,13 @@ Retiring a rule is the same sequence in reverse, and the id stays burned.
 ## 13. Current implementation status
 
 The module skeleton exists: eight projects under `src/`, a `Directory.Build.props`/`.targets` pair,
-`global.json`, and `False Gods.slnx`. Two **inner** projects now carry source and unit tests — `FalseGods.Protocol`
-(the arena content artifact and canonical `ContentHash`, from PoC Phase A) and `FalseGods.Core` (the temporary
-`BossSimulation` and its three ports, the first Phase B slice) — while the **four outer** projects and the two
-other inner ones remain reference-graph-only skeletons; that graph is already doing work. The architecture test
-project, `scripts/verify.ps1` (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all
-exist.
+`global.json`, and `False Gods.slnx`. All **four inner** projects now carry source and unit tests —
+`FalseGods.Protocol` (the arena content artifact and canonical `ContentHash`, from PoC Phase A), `FalseGods.Core`
+(the temporary `BossSimulation` and its three ports), `FalseGods.RuntimeContracts` (the boss presentation
+contracts), and `FalseGods.Application` (the domain→presentation mapper), the last three being the first Phase B
+slices — while the **four outer** projects (UnityRuntime, both Integration.* adapters, Plugin) remain
+reference-graph-only skeletons; that graph is already doing work. The architecture test project,
+`scripts/verify.ps1` (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
 
 Per-layer statuses are in **§5.1**, which is the machine-checked authority. This table adds what a status
 cannot say: what each rule's *enforced* layer actually buys, and what it leaves open.
@@ -711,8 +712,8 @@ Still not created:
   a rule whose other half is now a merge gate.
 - any `.asmdef` (the Unity authoring project is separate — see
   [OriginalContentPipeline.md §8.2](OriginalContentPipeline.md))
-- any source file in the **six** production projects that are still skeletons (every project except
-  `FalseGods.Core` and `FalseGods.Protocol`)
+- any source file in the **four outer** production projects that are still skeletons (UnityRuntime, both
+  Integration.* adapters, and Plugin)
 
 **Next.** The cheapest remaining win is the `assembly metadata` layer for FG-ARCH-001/003/007 — one allow-list
 of assembly names each, over `AssemblyReferenceInspector`, which already exists and is already fixture-tested.

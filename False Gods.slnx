@@ -10,6 +10,7 @@
     <Project Path="src/FalseGods.UnityRuntime/FalseGods.UnityRuntime.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/FalseGods.ApplicationTests/FalseGods.ApplicationTests.csproj" />
     <Project Path="tests/FalseGods.ArchitectureTests/FalseGods.ArchitectureTests.csproj" />
     <Project Path="tests/FalseGods.CoreTests/FalseGods.CoreTests.csproj" />
     <Project Path="tests/FalseGods.ProtocolTests/FalseGods.ProtocolTests.csproj" />

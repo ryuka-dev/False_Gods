@@ -249,9 +249,12 @@ module skeleton (`FalseGods.Core` / `.Protocol` / `.RuntimeContracts` / `.Applic
 `FalseGods.Protocol` also carries the Phase A arena content/`ContentHash`, [ArchitectureEnforcement.md
 §13](ArchitectureEnforcement.md)) → arena PoC (Phase A, **done**, §7.1–7.5) → one temporary
 `BossSimulation` in Core (**done: `FalseGods.Core/Bosses` + `Simulation` ports, unit-tested in
-`FalseGods.CoreTests`; not yet wired to a host or presentation**) → one `BossPresentation` in UnityRuntime, driven through
-`PresentationState`/`PresentationEvent` → single-player → transport-neutral snapshots/events in Protocol plus
-the Application mapper → connect through the **optional, separately-loaded**
+`FalseGods.CoreTests`**) → the presentation contracts (`PresentationState`/`PresentationEvent`/
+`IEncounterPresentation` in `RuntimeContracts`) and the **domain→presentation mapper** in `Application`
+(**done: `BossPresentationMapping` + `BossPresenter`, unit-tested in `FalseGods.ApplicationTests`; the
+`BossPresentation` renderer that implements `IEncounterPresentation` in UnityRuntime needs the game and is
+still to build**) → single-player → transport-neutral snapshots/events in Protocol plus
+the Application wire→presentation mapper → connect through the **optional, separately-loaded**
 `FalseGods.Integration.SulfurTogether` (a companion plugin that self-registers through `FalseGodsIntegrations`,
 never referenced by `FalseGods.Plugin`)
 → host/client validation. Extract shared abstractions **only** from demonstrated repetition — do not build a

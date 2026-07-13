@@ -67,6 +67,9 @@ namespace FalseGods.Core.Bosses
         /// <summary>Current health. Zero once dead; never negative.</summary>
         public int Health { get; private set; }
 
+        /// <summary>The boss's full health, from its definition. Constant for the encounter.</summary>
+        public int MaxHealth => _definition.MaxHealth;
+
         /// <summary>Current phase (Docs/MinimalProofOfConceptPlan.md §7.6.1 — two phases).</summary>
         public BossPhase Phase { get; private set; }
 

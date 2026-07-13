@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit tests for FalseGods.Application — the encounter/arena orchestration and the mappers. Like
+    FalseGods.CoreTests and FalseGods.ProtocolTests (and unlike the build-time FalseGods.ArchitectureTests),
+    these are ordinary unit tests: they reference the production assembly and exercise its behaviour, so they
+    keep the repo-wide net472 target and ProjectReference FalseGods.Application directly.
+
+    Scope today: the domain -> presentation mapper (BossPresentationMapping) and the presentation driver
+    (BossPresenter) — Core boss state/events translated into the RuntimeContracts presentation contracts and
+    pushed through the single IEncounterPresentation entry point (Docs/Architecture.md §7). No game, no Unity,
+    no network: exactly the boundary that must stay verifiable on a bare machine.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.ApplicationTests</AssemblyName>
+    <RootNamespace>FalseGods.ApplicationTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <!-- A test host must carry the test platform into its own output to start; the repo-wide default is the
+         opposite (false) because the production plugins must not litter the plugins folder. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FalseGods.Application\FalseGods.Application.csproj" />
+  </ItemGroup>
+
+</Project>
