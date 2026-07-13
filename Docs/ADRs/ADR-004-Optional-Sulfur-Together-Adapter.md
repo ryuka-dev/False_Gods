@@ -57,13 +57,23 @@ Either way the Composition Root only ever sees `IFalseGodsIntegration` and the R
 (`IMultiplayerSession`, `IEncounterChannel`, `IPlayerRoster`, `IArenaLockdownPort`, `IEncounterReadyGate`,
 `IRemoteNpcActivationPort`).
 
-**3. The adapter cannot assume it can compile against ST.** Measured against the current ST source, ST declares
-roughly **189 `internal` types to 38 `public`**, with **no `[InternalsVisibleTo]`**. The capabilities False Gods
-wants are on the internal side — `CoopConnection`, `ArenaLockdownManager`, `NetBossEncounterManager`,
-`NetLoadBarrier`, and `RemotePlayerRegistryManager` are all `internal`; `NetService` is public. So the adapter
-must either reach them via **reflection** (guarded, version-fragile) or ST must expose a **public integration
-bridge**. The latter is the preferred long-term path and is a coordination item with the ST project; the former
-is what exists today. Either way the fragility is confined to the adapter and surfaces outward only as
+**3. The channel + session capabilities now have a public ST bridge; the rest is still internal.** Measured
+against the ST source, ST declared roughly **189 `internal` types to 38 `public`** with **no
+`[InternalsVisibleTo]`**, and every capability False Gods wanted was on the internal side (`CoopConnection`,
+`ArenaLockdownManager`, `NetBossEncounterManager`, `NetLoadBarrier`, `RemotePlayerRegistryManager`; only
+`NetService` was public). As of **2026-07-13 ST ships a public integration bridge on `main`** (PR #13) for the two
+capabilities the vertical slice needed first — an opaque message channel and read-only session identity:
+
+- `SULFURTogether.Api.NetExternalChannel` — register a handler for a mod-owned channel id and `Send` opaque bytes
+  with a delivery mode and target; carried by the new `NetMessageType.ExternalModPayload`. ST relays but never
+  interprets the payload, and the sender id is stamped from the authenticated connection.
+- `SULFURTogether.Api.NetSessionInfo` — read-only `Role` / `LocalPeerId` / `Peers`.
+
+So `IEncounterChannel` maps onto `NetExternalChannel` and `IMultiplayerSession` / `IPlayerRoster` (identity) onto
+`NetSessionInfo` — **no reflection** for the channel or session. The still-internal capabilities — arena
+**seal/teleport** (`ArenaLockdownManager`) and **remote-NPC activation** (`RemotePlayerRegistryManager`) — were
+deliberately left out of that first "channel + session only" bridge and remain reflection-or-future-bridge, the
+next ST coordination item. Either way the fragility is confined to the adapter and surfaces outward only as
 "capability registered" / "capability unavailable".
 
 **4. Replication is application logic over an opaque channel.** `IEncounterChannel` carries `EncodedPayload` +
@@ -86,9 +96,10 @@ is what exists today. Either way the fragility is confined to the adapter and su
 - **A general DI container / service locator in RuntimeContracts** — solves a problem we do not have and would
   let any module pull any service, dissolving the boundary this ADR defends. Rejected in favour of a single
   slot with one reader.
-- **Adapter compiles directly against ST's managers** — impossible today (they are `internal`); would also
-  couple the adapter's build to an ST source checkout. Rejected in favour of reflection now, a public ST bridge
-  later.
+- **Adapter compiles directly against ST's managers** — impossible (they are `internal`); would also couple the
+  adapter's build to an ST source checkout. Rejected in favour of the public ST bridge, now shipped for the
+  channel + session capabilities (`SULFURTogether.Api.*`); reflection remains only where no bridge exists yet
+  (seal/teleport, activation).
 
 ## Consequences
 - Core/UnityRuntime/Plugin never reference ST; a second transport or ST refactor changes only this adapter.
@@ -99,11 +110,18 @@ is what exists today. Either way the fragility is confined to the adapter and su
   is bounded by: one slot, one type, one reader, no `Resolve`, token-scoped revocation. If any of those five
   properties is relaxed, this ADR is what has been violated.
 - Reflection into ST internals is version-fragile: every ST update needs a re-probe, and every reflective call
-  must degrade to "capability unavailable" rather than throw. This is accepted debt, tracked as a coordination
-  request to ST for a public bridge.
+  must degrade to "capability unavailable" rather than throw. The public bridge removed this debt for the
+  **channel + session** capabilities (2026-07-13); it remains only for the capabilities without a bridge yet
+  (seal/teleport, activation), tracked as the next coordination request to ST.
 
 ## Verification status
-Unverified. Gates: "loads and plays with the adapter DLL deleted" (RiskList R20/R29, PoC B0) and a metadata
-check that `FalseGods.Plugin.dll` references no adapter assembly (rules `FG-ARCH-002` / `FG-ARCH-009` in
-[ArchitectureEnforcement.md](../ArchitectureEnforcement.md)). ST visibility counts were read from the ST source
-in this repository's neighbouring checkout and will drift with ST releases.
+Adapter itself unverified (not built yet — Phase B). Gates: "loads and plays with the adapter DLL deleted"
+(RiskList R20/R29, PoC B0) and a metadata check that `FalseGods.Plugin.dll` references no adapter assembly (rules
+`FG-ARCH-002` / `FG-ARCH-009` in [ArchitectureEnforcement.md](../ArchitectureEnforcement.md)). ST visibility
+counts were read from the ST source in this repository's neighbouring checkout and will drift with ST releases.
+
+**The bridge this ADR calls for now exists and is proven.** The public `SULFURTogether.Api.NetExternalChannel` /
+`NetSessionInfo` surface landed on ST `main` (PR #13, 2026-07-13) and was verified in-game by the P9 probe across
+two instances — byte-identical cross-instance `ContentHash`, a fail-closed gate, and the abort paths — over the
+channel + session bridge with **no reflection** (MinimalProofOfConceptPlan.md §7.2 P9). The remaining reflection
+question is confined to the not-yet-bridged seal/teleport and activation capabilities.

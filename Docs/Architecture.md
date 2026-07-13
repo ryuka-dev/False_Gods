@@ -160,11 +160,17 @@ The systems False Gods wants are on the internal side:
 | `NetService` | `public` |
 
 So the ST adapter must either (a) reach these through **reflection**, accepting the version-fragility and
-guarding every call, or (b) depend on SULFUR Together exposing a **public integration bridge** for the
-capabilities False Gods needs. Option (b) is the preferred long-term path and is a coordination item with the ST
-project; option (a) is what is available today. Either way the fragility is confined to
-`FalseGods.Integration.SulfurTogether` and surfaces to the rest of the mod as "capability registered" or
-"capability unavailable".
+guarding every call, or (b) depend on SULFUR Together exposing a **public integration bridge**. Option (b) has
+now happened for the first two capabilities the slice needed: as of **2026-07-13 ST ships `SULFURTogether.Api`
+on `main`** (PR #13) — `NetExternalChannel` (an opaque message channel, backed by `NetMessageType.ExternalModPayload`)
+and `NetSessionInfo` (read-only role / local peer id / peers). The adapter maps `IEncounterChannel` onto
+`NetExternalChannel` and `IMultiplayerSession` / `IPlayerRoster` (identity) onto `NetSessionInfo` with **no
+reflection**; the P9 probe proved this end-to-end (Architecture is structure — see
+[MinimalProofOfConceptPlan.md §7.2](MinimalProofOfConceptPlan.md) P9). Option (a) still applies only to the
+capabilities left out of that "channel + session only" bridge — arena seal/teleport (`ArenaLockdownManager`) and
+remote-NPC activation (`RemotePlayerRegistryManager`), the next ST coordination item. Either way the fragility is
+confined to `FalseGods.Integration.SulfurTogether` and surfaces to the rest of the mod as "capability registered"
+or "capability unavailable".
 
 ### 4.3 The three compositions
 

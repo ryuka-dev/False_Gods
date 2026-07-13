@@ -152,8 +152,11 @@ it.
   unavailable" and a working single-player game, never a type-load failure (RiskList R20/R29).
 - **Do not assume the adapter can compile against ST directly.** ST's relevant systems (`CoopConnection`,
   `ArenaLockdownManager`, `NetBossEncounterManager`, `NetLoadBarrier`, `RemotePlayerRegistryManager`) are
-  `internal` and ST publishes no `[InternalsVisibleTo]`. The adapter must use reflection, or ST must expose a
-  public integration bridge. Either way the fragility stays inside the adapter (Architecture §4.2).
+  `internal` and ST publishes no `[InternalsVisibleTo]`. ST now ships a **public integration bridge**
+  (`SULFURTogether.Api.NetExternalChannel` / `NetSessionInfo`, ST `main` 2026-07-13) for the channel + session
+  capabilities, so the adapter uses it directly with no reflection; the still-internal seal/teleport and
+  activation systems stay behind reflection until bridged. Either way the fragility stays inside the adapter
+  (Architecture §4.2).
 
 ## 7. Enforcement
 

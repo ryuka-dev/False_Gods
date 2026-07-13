@@ -37,10 +37,14 @@ adapter implementation notes) and nowhere else. Note also that most of them are 
 Do not plan on compiling against these types. In the current ST source, roughly **189 types are `internal` and
 38 are `public`**, and there is **no `[InternalsVisibleTo]`**. `CoopConnection`, `ArenaLockdownManager`,
 `NetBossEncounterManager`, `NetLoadBarrier`, and `RemotePlayerRegistryManager` are all `internal`; `NetService`
-is public. The adapter therefore reaches them by **reflection** (guarded, version-fragile), or ST exposes a
-**public integration bridge** for the capabilities False Gods needs. The latter is preferable and is a
-coordination item with the ST project. Either way the fragility stays inside the adapter and surfaces as
-"capability registered" / "capability unavailable" ([ADR-004](ADRs/ADR-004-Optional-Sulfur-Together-Adapter.md)).
+is public. For the **channel + session** capabilities ST now ships a **public integration bridge** on `main`
+(PR #13, 2026-07-13): `SULFURTogether.Api.NetExternalChannel` (opaque payload relay, `NetMessageType.ExternalModPayload`)
+and `NetSessionInfo` (role / local peer id / peers). The adapter uses those directly — **no reflection** — and
+the P9 probe proved the path in-game (§7.2 P9). The **still-internal** systems (`ArenaLockdownManager` for
+seal/teleport, `RemotePlayerRegistryManager` for activation) stay behind **reflection** (guarded, version-fragile)
+until ST bridges them too — the next coordination item. Either way the fragility stays inside the adapter and
+surfaces as "capability registered" / "capability unavailable"
+([ADR-004](ADRs/ADR-004-Optional-Sulfur-Together-Adapter.md)).
 
 ### 5.1.2 ST's `NetLoadBarrier` is not a blocking gate
 
@@ -501,24 +505,25 @@ it.
 
 ## 5.10 Message strategy
 
-Do not pre-commit to "no new boss message ids."
-
-First determine whether the existing generic message envelope can carry False Gods snapshots/events cleanly.
-If it can, reuse the envelope and add False Gods codecs/payloads.
-
-If it cannot, add a small versioned message family dedicated to original bosses. Avoid one-off message types
-per individual boss.
+This question — "does ST have a generic envelope False Gods snapshots/events can ride, or must ST gain a
+message family?" — is now **resolved by the bridge**. As of 2026-07-13 ST provides exactly one generic opaque
+envelope, `NetMessageType.ExternalModPayload`, exposed through `SULFURTogether.Api.NetExternalChannel`. False Gods
+ships **all** its messages as opaque payloads over that single channel, disambiguated by its own kind/version byte
+*inside* the payload, so **ST gains no per-False-Gods message id and no False-Gods codec** — the envelope carries
+bytes ST never interprets. There is no longer a case where ST needs a boss-specific message family.
 
 **Message ids, codecs, and registration live entirely inside `FalseGods.Integration.SulfurTogether`.**
 `FalseGods.Protocol` defines the transport-neutral DTOs (`BossSnapshot`, `ArenaSnapshot`, `BossEvent`,
 `ArenaEvent`, `EncounterBaseline`, `ArenaManifest`); `FalseGods.Application` serializes them into an
 `EncodedPayload` with a `MessageDelivery` mode and hands that to `IEncounterChannel`. The adapter maps
-`EncodedPayload` onto whatever envelope/ids ST uses. Nothing outside the adapter knows a message id or the
-`Net*` types — and the adapter never sees a Protocol DTO.
+`EncodedPayload` + `MessageDelivery` onto a single `NetExternalChannel.Send(channelId, bytes, delivery, target)`
+call. Nothing outside the adapter knows the channel id or the `Net*` types — and the adapter never sees a Protocol
+DTO.
 
-Arena-loading messages stay minimal and (inside the adapter) follow SULFUR Together's `Net*` + `Net*Codec` +
-`Register` pattern (`NetworkingArchitecture.md`): at most `EnterArena` (host→client, reliable-ordered),
-`ArenaReady` / `ArenaLoadFailed` (client→host, reliable-ordered), with ids appended after the existing 46.
+Arena-loading messages stay minimal: `EnterArena` (host→client, reliable-ordered), `ArenaReady` /
+`ArenaLoadFailed` (client→host, reliable-ordered). These are **not** ST message ids — they are kinds inside
+False Gods' own payload on the one `NetExternalChannel` channel. The P9 probe already carries `EnterArena` /
+`ArenaReady` this way (§7.2 P9); the adapter formalizes the same shape.
 
 ## 5.11 Exit & teardown (synchronized)
 
