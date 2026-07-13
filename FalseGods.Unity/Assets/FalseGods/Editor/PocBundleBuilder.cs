@@ -80,6 +80,12 @@ namespace FalseGods.EditorTools
             if (!File.Exists(bundlePath))
                 throw new InvalidOperationException($"Build reported success but '{bundlePath}' does not exist.");
 
+            // Ship the authored content artifact alongside the bundle (P8.1): the runtime reads it to recompute
+            // the ContentHash (R34) and to check hierarchy parity (R14). The room was just generated above, so
+            // write from the current prefab rather than regenerating a second time.
+            var artifactPath = PocArenaContentExporter.WriteArtifactForCurrentPrefab();
+            Debug.Log($"[FalseGods] Arena content artifact written to {artifactPath}.");
+
             return Path.GetFullPath(bundlePath);
         }
     }
