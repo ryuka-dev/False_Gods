@@ -1,4 +1,4 @@
-# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6 / P7 / P8)
+# FalseGods.Probe — throwaway PoC probe (P0 / P1 / P2 / P3 / P4 / P5 / P6 / P7 / P8 / P9)
 
 A BepInEx plugin that reads real values out of a running SULFUR, so the highest-risk unknowns in
 [RiskList.md](../../Docs/RiskList.md) stop being guesses. It answers PoC steps **P0**, **P1**, **P2**, **P3**,
@@ -11,9 +11,13 @@ and confirms it survives the `NavMeshCleaner`. **P6 is an A\* pathing check** (F
 (`=`): it applies our arena nav into the live graph then restores the level to baseline, proving nothing is left
 behind. **P8 is the single-player full loop** (`-`): it recomputes the shipped arena artifact's canonical
 content hash **in-game** through `FalseGods.Protocol` (R34), checks the loaded hierarchy against the authored
-parity map (R14), resolves a single-peer ready gate, then reuses P6 (fight) and P7 (leave). P3/P4 show real
-objects; **P5/P6/P7/P8 mutate the live level's nav graph** — see the notes below for exactly how far each
-departs from read-only, and how it is contained.
+parity map (R14), resolves a single-peer ready gate, then reuses P6 (fight) and P7 (leave). **P9 is the
+host+client parity check** (`[`): two instances exchange `(ContentHashSchemaVersion, ContentHash)` over the
+SULFUR Together **public bridge** (`SULFURTogether.Api.NetExternalChannel` / `NetSessionInfo` — no reflection),
+and the host's gate blocks the (FG-owned, notional) seal until the hashes match byte-for-byte, else aborts. P3/P4
+show real objects; **P5/P6/P7/P8 mutate the live level's nav graph** — see the notes below for exactly how far
+each departs from read-only, and how it is contained. **P9 needs two game instances and the bridge-enabled ST on
+both**; it touches no nav graph and no authoritative game/ST state.
 
 **This is disposable.** P0/P1 have been run (game 6000.3.6f1, A\* 5.3.8, Gale profile `Bossmod开发`) and the
 results transcribed into report 4.2/4.4 and RiskList R1/R3/R5. P2 (our own AssetBundle loads) runs from the
@@ -40,6 +44,7 @@ enforced by `tests/FalseGods.ArchitectureTests/Checks/ProbeIsIsolatedChecks.cs`.
 | P6 / **R9** | Does A\* pathing work on our applied arena — does a path route **around** the pillar, and does a real vanilla enemy follow it? | bakes+applies our navmesh (P5c+P5d) on an isolated island, then (1) an `ABPath` between the EnemySpawn/PlayerSpawn corners whose straight line crosses the pillar must route around it, and (2) a real vanilla `Npc` (by `UnitId`) is spawned, activated and driven past the pillar to the far corner |
 | P7 / **R8, R30** | Does teardown leave the level we stay in clean — no arena objects, no arena nav nodes, level's own nav restored to baseline? | snapshots the level's own tiles in the arena footprint, applies our arena nav over them (clobbering that level nav), then `ReplaceTiles`-es the snapshot back; measures whole-graph + footprint walkable node counts at BASELINE / APPLIED / RESTORED and counts leftover `FalseGodsP7_*` objects |
 | P8 / **R14, R34** | Does the shipped artifact recompute to the pinned hash **in-game**, is that hash order-independent, and does the realized hierarchy match the authored map? | reads `BepInEx/FalseGods.Probe/arena-content-PocRoom.artifact`, recomputes `ContentHash` via `FalseGods.Protocol.Arena.ContentHashComputer` (must equal the golden the offline fixture pins, and be unchanged when the authored lists are reversed), then loads the arena and compares every authored parity node's runtime local transform; then reuses P6 + P7 for the physical fight + leave |
+| P9 / **R33, R34** | Do a host and client produce **byte-identical** `(schema, ContentHash)` and does the gate block the seal until they match — and does a hash mismatch / schema mismatch / silent peer **abort** instead of starting? | over the ST public bridge: host `NetExternalChannel.Send` EnterArena → each peer recomputes its own `ContentHash` (same `FalseGods.Protocol` path as P8) → client replies ArenaReady → host compares to its own and a `LocalReadyGate` resolves only when every peer matches (schema first, hashes never compared across schemas); the client's `Probe/P9ClientMode` drives Normal / ForceHashMismatch / ForceSchemaMismatch / StaySilent |
 
 P0/P1/P2 mutate **no authoritative game state**: no Harmony patches, no manager registration, no world spawn.
 P1's acceptance requires instantiation, so it does instantiate one prefab — but under an **inactive holder**, so
@@ -238,6 +243,32 @@ depend on it (the nav-graph proof and teardown do).
 > `GameManager.npcs` — through the reused P6/P7, each of which restores exactly what it added. It also loads
 > `FalseGods.Protocol.dll` (+ its `FalseGods.Core.dll`), which `-p:DeployProbe=true` copies next to the probe.
 > A level change rebuilds nav anyway, but run it in a level you do not care about, on real level nav.
+
+**P9 (`[`) — the host+client parity check (needs two instances + bridge-enabled ST on both).** This is the only
+probe that needs a live SULFUR Together session, and it consumes ST **only** through its public bridge
+(`SULFURTogether.Api.NetExternalChannel` / `NetSessionInfo`) — no reflection, no ST internal type. Behaviour is
+decided by `NetSessionInfo.Role`, so the same key does the right thing on each instance:
+
+1. On the **client** instance, set `Probe/P9ClientMode` (Normal / ForceHashMismatch / ForceSchemaMismatch /
+   StaySilent) and press **`[`** once to **arm** it — that registers the channel; it answers the host's
+   EnterArena when it arrives, logging what it sent.
+2. On the **host** instance, press **`[`** to drive the exchange: it broadcasts `EnterArena`, waits up to
+   `Probe/P9TimeoutSeconds` for each peer's `ArenaReady`, compares every peer's `(schema, ContentHash)` to its
+   own **byte-for-byte** (schema first — hashes are never compared across schemas), and a `LocalReadyGate`
+   resolves only when all match. The `P9 verdict` line reads **`PARITY OK`** (gate resolved → the FG-owned
+   notional seal would fire) or **`ABORT`** with the reason (`ContentMismatch` / `ContentHashSchemaMismatch` /
+   `Timeout`). The host report is the one to trust; the client echoes what it sent to its own console.
+
+Run the four `P9ClientMode` values in turn: `Normal` must PASS, the other three must ABORT with the matching
+reason — that is the fail-closed acceptance (§5.3.1). **Out of scope here** (deferred with the "channel + session
+only" bridge, [ADR-004](../../Docs/ADRs/ADR-004-Optional-Sulfur-Together-Adapter.md)): ST's real arena
+seal/teleport (`IArenaLockdownPort`) and remote-NPC activation (R10) — this probe proves the channel, session
+identity, cross-instance hash parity, and the abort paths the bridge enables, not the activation half of P9.
+
+> **P9 touches no nav graph and no authoritative game/ST state** — it sends one small opaque payload each way and
+> reads its own artifact. It does load `FalseGods.Protocol.dll` (as P8 does) and references the ST bridge, which
+> is provided at runtime by the installed ST plugin (never copied into the probe). With the old (non-bridge) ST
+> or ST absent, the P9 report says the bridge is unavailable and every other step is unaffected.
 
 > Not in `verify.ps1`: launching the game is the manual, pre-release level of verification
 > ([ArchitectureEnforcement.md §4](../../Docs/ArchitectureEnforcement.md)), never a per-commit gate.

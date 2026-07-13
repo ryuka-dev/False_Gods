@@ -30,7 +30,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.25.0";
+        public const string PluginVersion = "0.26.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -43,12 +43,19 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _navEnemyHotkey;
         private ConfigEntry<Key> _navTeardownHotkey;
         private ConfigEntry<Key> _arenaContentHotkey;
+        private ConfigEntry<Key> _p9Hotkey;
+        private ConfigEntry<P9ClientMode> _p9ClientMode;
+        private ConfigEntry<float> _p9TimeoutSeconds;
         private ConfigEntry<bool> _visualApplyEnvironment;
         private ConfigEntry<bool> _visualFixOurMaterials;
         private ConfigEntry<bool> _p8RunFightAndLeave;
         private ConfigEntry<string> _enemyUnitId;
 
         private readonly VisualProbe _visual = new VisualProbe();
+
+        // P9 holds a persistent channel registration and receives async messages, so unlike the per-run probes it
+        // is one long-lived instance (created in Awake, disposed in OnDestroy).
+        private P9ParityProbe _p9;
 
         private OnScanDelegate _scanHandler;
 
@@ -149,6 +156,26 @@ namespace FalseGods.Probe
                 + "exactly as P6/P7 do; run in a throwaway level on solid level nav. Bound to '-' (number row); F1-F3 "
                 + "are the game's debug keys. Rebind here if '-' conflicts.");
 
+            _p9Hotkey = Config.Bind("Probe", "P9Hotkey", Key.LeftBracket,
+                "P9 host+client arena parity over the SULFUR Together public bridge (NetExternalChannel / "
+                + "NetSessionInfo — no reflection). Needs the bridge-enabled ST on BOTH instances, one hosting and "
+                + "one joined. Press on the CLIENT to arm it (registers the channel; it answers the host's "
+                + "EnterArena per P9ClientMode). Press on the HOST to drive the exchange: broadcast EnterArena, "
+                + "collect each peer's ArenaReady, compare (schema, ContentHash) byte-for-byte, and PASS only when "
+                + "all match (else abort — fail-closed). The seal is FG-owned/notional; this does not drive ST's "
+                + "lockdown or NPC activation (deferred, ADR-004). Bound to '[' (F4-F12, '-', '=' are taken).");
+
+            _p9ClientMode = Config.Bind("Probe", "P9ClientMode", P9ClientMode.Normal,
+                "P9 CLIENT behaviour — the four scenarios, one per run (the host reports the outcome): Normal "
+                + "(send the real hash -> host PASS + seal), ForceHashMismatch (flip a hash byte -> host abort "
+                + "ContentMismatch), ForceSchemaMismatch (bump the schema -> host abort ContentHashSchemaMismatch, "
+                + "hashes never compared), StaySilent (send nothing -> host gate times out and aborts). Set this on "
+                + "the CLIENT instance before pressing P9 on the host. Ignored by the host.");
+
+            _p9TimeoutSeconds = Config.Bind("Probe", "P9TimeoutSeconds", 10f,
+                "P9 HOST: how long to wait for every required peer's ArenaReady before aborting the gate as a "
+                + "timeout. The StaySilent scenario relies on this firing.");
+
             _p8RunFightAndLeave = Config.Bind("Probe", "P8RunFightAndLeave", true,
                 "P8: after the ready gate resolves, also run the physical fight (P6) and leave (P7) into the same "
                 + "report so the whole loop runs on one keypress. Turn OFF to run only the fast content-identity "
@@ -158,6 +185,8 @@ namespace FalseGods.Probe
                 "P6 live-enemy: the UnitIds field name of the vanilla enemy to spawn (resolved by reflection, " +
                 "loaded via Addressables). Pick a normal grounded melee enemy. Change here to try another if " +
                 "one misbehaves. The nav-graph proof (layer 1) does not depend on this.");
+
+            _p9 = new P9ParityProbe(Logger);
 
             // Subscribe to the static scan-complete delegate. It survives per-level AstarPath rebuilds
             // (the field is static), so one subscription covers every level; removed in OnDestroy.
@@ -174,7 +203,9 @@ namespace FalseGods.Probe
                               $"P6 enemy hotkey: {_navEnemyHotkey.Value} (enemy: {_enemyUnitId.Value}). " +
                               $"P7 teardown hotkey: {_navTeardownHotkey.Value}. " +
                               $"P8 arena-content hotkey: {_arenaContentHotkey.Value} " +
-                              $"(fight+leave: {_p8RunFightAndLeave.Value}).");
+                              $"(fight+leave: {_p8RunFightAndLeave.Value}). " +
+                              $"P9 host+client hotkey: {_p9Hotkey.Value} " +
+                              $"(client mode: {_p9ClientMode.Value}, timeout: {_p9TimeoutSeconds.Value}s).");
         }
 
         private void OnDestroy()
@@ -185,6 +216,11 @@ namespace FalseGods.Probe
             // Never leave the P3 stage (or its RenderSettings change) behind if the plugin unloads while up.
             if (_visual.IsUp)
                 _visual.Drop(new ProbeReport(Logger));
+
+            // Release the P9 channel registration if it was ever taken. Guarded because ST may be absent, in which
+            // case _p9 never touched an ST type and there is nothing to release.
+            try { _p9?.Dispose(); }
+            catch (Exception exception) { Logger.LogWarning($"P9 dispose failed: {exception.Message}"); }
         }
 
         /// <summary>Called by A* on the main thread when a scan finishes (BuildNavMeshNode's ScanAsync path).</summary>
@@ -253,6 +289,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_arenaContentHotkey.Value))
             {
                 StartCoroutine(RunArenaContent());
+                return;
+            }
+
+            if (HotkeyPressed(_p9Hotkey.Value))
+            {
+                StartCoroutine(RunP9());
                 return;
             }
 
@@ -542,6 +584,54 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P8 report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P9: the host+client arena-parity proof over the SULFUR Together public bridge. Unlike P0-P8 this needs
+        /// two instances and a live ST session; behaviour is decided by <see cref="NetSessionInfo.Role"/> inside
+        /// <see cref="P9ParityProbe"/>. The one long-lived <see cref="_p9"/> keeps its channel registration across
+        /// runs. Shares the _running guard.
+        /// </summary>
+        private IEnumerator RunP9()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P9 (host+client arena parity over the ST bridge)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            _p9.ClientMode = _p9ClientMode.Value;
+
+            // First touch of any SULFURTogether.Api type is here. If the bridge-enabled ST is not installed, the
+            // JIT of EnsureRegistered throws (TypeLoad / FileNotFound) at THIS call — catch it so the probe
+            // degrades to a clear message instead of dying. A coroutine cannot try/catch across a yield, so arming
+            // is a plain (non-yield) call; RunOrArm below only runs when arming succeeded (ST present).
+            bool armed = false;
+            try
+            {
+                armed = _p9.EnsureRegistered(report);
+            }
+            catch (Exception exception)
+            {
+                report.Failure("P9 requires the bridge-enabled SULFUR Together (NetExternalChannel) on THIS instance", exception);
+                report.Line("  Install the ST build that carries the public bridge (SULFURTogether.Api.*) and retry.");
+            }
+
+            if (armed)
+                yield return _p9.RunOrArm(report, _p9TimeoutSeconds.Value);
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P9 host+client parity {(armed ? "run" : "unavailable")}. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P9 report: {exception}");
             }
 
             _running = false;
