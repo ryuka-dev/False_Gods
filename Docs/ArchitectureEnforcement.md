@@ -661,7 +661,10 @@ Retiring a rule is the same sequence in reverse, and the id stays burned.
 
 The module skeleton exists: eight projects under `src/`, a `Directory.Build.props`/`.targets` pair,
 `global.json`, and `False Gods.slnx`. All **four inner** projects now carry source and unit tests —
-`FalseGods.Protocol` (the arena content artifact and canonical `ContentHash`, from PoC Phase A), `FalseGods.Core`
+`FalseGods.Protocol` (the arena content artifact and canonical `ContentHash` from PoC Phase A, plus the Phase B
+replication wire DTOs — `BossSnapshot`/`ArenaSnapshot`/`BossEvent`/`ArenaEvent`/`EncounterBaseline` + the
+`WireCodec`; the FG-ARCH-008 boss/arena separation is guarded by a `FalseGods.ProtocolTests` test, pending its
+promotion to a registered check), `FalseGods.Core`
 (the temporary `BossSimulation`, `ArenaSimulation`, `EncounterCoordinator`, and its ports),
 `FalseGods.RuntimeContracts` (the boss presentation contracts), and `FalseGods.Application` (the
 domain→presentation mapper), the last three being Phase B slices — while the **four outer** projects
