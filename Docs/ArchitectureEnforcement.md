@@ -660,9 +660,12 @@ Retiring a rule is the same sequence in reverse, and the id stays burned.
 ## 13. Current implementation status
 
 The module skeleton exists: eight projects under `src/`, a `Directory.Build.props`/`.targets` pair,
-`global.json`, and `False Gods.slnx`. The production projects contain **no source files** — their entire content
-is the reference graph, and that graph is already doing work. The architecture test project, `scripts/verify.ps1`
-(with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
+`global.json`, and `False Gods.slnx`. Two **inner** projects now carry source and unit tests — `FalseGods.Protocol`
+(the arena content artifact and canonical `ContentHash`, from PoC Phase A) and `FalseGods.Core` (the temporary
+`BossSimulation` and its three ports, the first Phase B slice) — while the **four outer** projects and the two
+other inner ones remain reference-graph-only skeletons; that graph is already doing work. The architecture test
+project, `scripts/verify.ps1` (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all
+exist.
 
 Per-layer statuses are in **§5.1**, which is the machine-checked authority. This table adds what a status
 cannot say: what each rule's *enforced* layer actually buys, and what it leaves open.
@@ -706,10 +709,10 @@ Still not created:
   It reads outer DLLs, so it would be L0/L3, not CI.
 - FG-ARCH-005's `broker access` layer and FG-ARCH-006's `patch attribute scan` — each is the unchecked half of
   a rule whose other half is now a merge gate.
-- Core unit tests (Core has no code to test)
 - any `.asmdef` (the Unity authoring project is separate — see
   [OriginalContentPipeline.md §8.2](OriginalContentPipeline.md))
-- any source file in any of the eight production projects
+- any source file in the **six** production projects that are still skeletons (every project except
+  `FalseGods.Core` and `FalseGods.Protocol`)
 
 **Next.** The cheapest remaining win is the `assembly metadata` layer for FG-ARCH-001/003/007 — one allow-list
 of assembly names each, over `AssemblyReferenceInspector`, which already exists and is already fixture-tested.
