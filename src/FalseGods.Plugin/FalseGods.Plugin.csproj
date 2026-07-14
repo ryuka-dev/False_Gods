@@ -57,6 +57,35 @@
       <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Physics.RaycastAll / Collider for the temporary dev-damage raycast in the composition root. -->
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- The game ships the new Input System; legacy UnityEngine.Input.GetKeyDown throws at runtime. -->
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(SulfurManagedDir)\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
+
+  <!--
+    Opt-in deploy (parallels the probe's DeployProbe): copies the plugin and every FalseGods.*.dll it depends on
+    into BepInEx/plugins/FalseGods so BepInEx's resolver loads them. The game/Unity/BepInEx assemblies are
+    Private=false (never copied) — they are provided at runtime. An ordinary build never writes outside the repo.
+
+    Build+deploy:  dotnet build src/FalseGods.Plugin/FalseGods.Plugin.csproj -p:DeployPlugin=true
+  -->
+  <Target Name="DeployPlugin" AfterTargets="Build" Condition="'$(DeployPlugin)' == 'true' AND '$(BepInExPluginDir)' != ''">
+    <PropertyGroup>
+      <_PluginDeployDir>$(BepInExPluginDir)\FalseGods</_PluginDeployDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_PluginDll Include="$(TargetDir)FalseGods.*.dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(_PluginDeployDir)" />
+    <Copy SourceFiles="@(_PluginDll)" DestinationFolder="$(_PluginDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Text="False Gods plugin deployed -&gt; $(_PluginDeployDir): @(_PluginDll->'%(Filename)%(Extension)')" Importance="high" />
+  </Target>
 
 </Project>
