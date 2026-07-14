@@ -37,6 +37,11 @@
       <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Collider / CapsuleCollider / BoxCollider / Rigidbody for the boss's physical presence and aim-ray hitboxes. -->
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

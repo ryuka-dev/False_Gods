@@ -79,6 +79,20 @@
   </ItemGroup>
 
   <!--
+    B0 now drives the PRODUCTION renderer: the probe references FalseGods.UnityRuntime and constructs its
+    BossPresentation (implementing the real IEncounterPresentation) instead of the throwaway probe-local renderer.
+    This is a probe->src reference (the allowed direction; ProbeIsIsolatedChecks only forbids src->probe) and lets
+    the production presentation be verified in-game before the Plugin composition root exists. Private=true so
+    FalseGods.UnityRuntime.dll is copied next to the probe DLL for BepInEx's resolver; it carries no BepInEx
+    dependency, so this does not affect the probe's deletability.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FalseGods.UnityRuntime\FalseGods.UnityRuntime.csproj">
+      <Private>true</Private>
+    </ProjectReference>
+  </ItemGroup>
+
+  <!--
     P9 references the SULFUR Together PUBLIC integration bridge (SULFURTogether.Api.NetExternalChannel /
     NetSessionInfo). Provided at RUNTIME by the installed ST plugin, so Private=false (never copied into the
     probe output). Compile-time only; points at the bridge-enabled ST build. BOTH game instances in the P9

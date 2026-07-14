@@ -37,7 +37,7 @@ namespace FalseGods.Probe.Boss
         private readonly ProbeSimulationClock _clock = new ProbeSimulationClock();
         private BossSimulation _boss;
         private BossPresenter _presenter;
-        private BossPresentationRenderer _renderer;
+        private FalseGods.UnityRuntime.Presentation.BossPresentation _renderer;
 
         public bool IsUp => _renderer != null;
 
@@ -49,8 +49,23 @@ namespace FalseGods.Probe.Boss
         {
             if (_renderer != null)
             {
-                _renderer.FacingMode = mode;
+                _renderer.FacingMode = MapFacing(mode);
                 _renderer.LockPitch = lockPitch;
+            }
+        }
+
+        /// <summary>Map the probe's config enum onto the production presentation enum (same three members).</summary>
+        private static FalseGods.UnityRuntime.Presentation.BossFacingMode MapFacing(BossFacingMode mode)
+        {
+            switch (mode)
+            {
+                case BossFacingMode.Fixed:
+                    return FalseGods.UnityRuntime.Presentation.BossFacingMode.Fixed;
+                case BossFacingMode.NearestPlayer:
+                    return FalseGods.UnityRuntime.Presentation.BossFacingMode.NearestPlayer;
+                case BossFacingMode.LocalBillboard:
+                default:
+                    return FalseGods.UnityRuntime.Presentation.BossFacingMode.LocalBillboard;
             }
         }
 
@@ -92,7 +107,7 @@ namespace FalseGods.Probe.Boss
                 new ProbeAuthoritativeRandom(seed: Environment.TickCount),
                 new CameraParticipantQuery());
 
-            _renderer = new BossPresentationRenderer(report, spawn);
+            _renderer = new FalseGods.UnityRuntime.Presentation.BossPresentation(new ProbeLogger(report), spawn);
             _presenter = new BossPresenter(_renderer);
 
             _boss.Spawn(new SimVector2(spawn.x, spawn.z));
