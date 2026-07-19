@@ -86,6 +86,13 @@
     <MakeDir Directories="$(_AdapterDeployDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(_AdapterDeployDir)" OverwriteReadOnlyFiles="true" />
     <Message Text="False Gods ST adapter deployed -&gt; $(_AdapterDeployDir)" Importance="high" />
+    <!-- Optional second copy: the two-instance CLIENT profile (see LocalPaths.props.example). -->
+    <PropertyGroup Condition="'$(BepInExClientPluginDir)' != ''">
+      <_AdapterClientDeployDir>$(BepInExClientPluginDir)\FalseGods.SulfurTogether</_AdapterClientDeployDir>
+    </PropertyGroup>
+    <MakeDir Condition="'$(BepInExClientPluginDir)' != ''" Directories="$(_AdapterClientDeployDir)" />
+    <Copy Condition="'$(BepInExClientPluginDir)' != ''" SourceFiles="$(TargetPath)" DestinationFolder="$(_AdapterClientDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Condition="'$(BepInExClientPluginDir)' != ''" Text="False Gods ST adapter deployed (client) -&gt; $(_AdapterClientDeployDir)" Importance="high" />
   </Target>
 
 </Project>

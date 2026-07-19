@@ -16,5 +16,9 @@
 
     <!-- Deploy destination: the ...\plugins dir of the Gale profile you run. -->
     <BepInExPluginDir>C:\Users\YourName\AppData\Roaming\com.kesomannen.gale\sulfur\profiles\Default\BepInEx\plugins</BepInExPluginDir>
+
+    <!-- OPTIONAL: a second ...\plugins dir for a two-instance CLIENT profile. When set, the
+         DeployPlugin / DeployAdapter targets copy the same files there too. Omit if unused. -->
+    <!-- <BepInExClientPluginDir>C:\path\to\client-profile\BepInEx\plugins</BepInExClientPluginDir> -->
   </PropertyGroup>
 </Project>

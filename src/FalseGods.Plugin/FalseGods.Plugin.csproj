@@ -86,6 +86,13 @@
     <MakeDir Directories="$(_PluginDeployDir)" />
     <Copy SourceFiles="@(_PluginDll)" DestinationFolder="$(_PluginDeployDir)" OverwriteReadOnlyFiles="true" />
     <Message Text="False Gods plugin deployed -&gt; $(_PluginDeployDir): @(_PluginDll->'%(Filename)%(Extension)')" Importance="high" />
+    <!-- Optional second copy: the two-instance CLIENT profile (see LocalPaths.props.example). -->
+    <PropertyGroup Condition="'$(BepInExClientPluginDir)' != ''">
+      <_PluginClientDeployDir>$(BepInExClientPluginDir)\FalseGods</_PluginClientDeployDir>
+    </PropertyGroup>
+    <MakeDir Condition="'$(BepInExClientPluginDir)' != ''" Directories="$(_PluginClientDeployDir)" />
+    <Copy Condition="'$(BepInExClientPluginDir)' != ''" SourceFiles="@(_PluginDll)" DestinationFolder="$(_PluginClientDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Condition="'$(BepInExClientPluginDir)' != ''" Text="False Gods plugin deployed (client) -&gt; $(_PluginClientDeployDir)" Importance="high" />
   </Target>
 
 </Project>
