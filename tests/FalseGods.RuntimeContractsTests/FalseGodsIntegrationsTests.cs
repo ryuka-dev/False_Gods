@@ -177,6 +177,8 @@ namespace FalseGods.RuntimeContractsTests
             public bool IsActive => false;
 
             public SessionPeerId LocalPeer => new SessionPeerId(1);
+
+            public SessionPeerId HostPeer => new SessionPeerId(1);
         }
 
         private sealed class FakeChannel : IEncounterChannel

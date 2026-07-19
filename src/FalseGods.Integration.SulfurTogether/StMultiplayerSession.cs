@@ -32,6 +32,8 @@ namespace FalseGods.Integration.SulfurTogether
 
         public SessionPeerId LocalPeer => ReadLocalPeer();
 
+        public SessionPeerId HostPeer => ReadHostPeer();
+
         private static FgSessionRole ReadRole() =>
             NetSessionInfo.Role == StSessionRole.Host ? FgSessionRole.Host : FgSessionRole.Client;
 
@@ -42,6 +44,22 @@ namespace FalseGods.Integration.SulfurTogether
         {
             var localBridgeId = NetSessionInfo.LocalPeerId;
             return string.IsNullOrEmpty(localBridgeId) ? default : _peers.Map(localBridgeId);
+        }
+
+        /// <summary>The peer the bridge flags as host (index loop, regular method — the type-load discipline).
+        /// Default when no session / no flagged host; callers gate on <see cref="IsActive"/>.</summary>
+        private SessionPeerId ReadHostPeer()
+        {
+            var bridgePeers = NetSessionInfo.Peers;
+            for (var i = 0; i < bridgePeers.Count; i++)
+            {
+                if (bridgePeers[i].IsHost && !string.IsNullOrEmpty(bridgePeers[i].PeerId))
+                {
+                    return _peers.Map(bridgePeers[i].PeerId);
+                }
+            }
+
+            return default;
         }
     }
 }

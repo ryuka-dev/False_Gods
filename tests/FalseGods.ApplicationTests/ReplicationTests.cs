@@ -85,7 +85,7 @@ namespace FalseGods.ApplicationTests
         [Fact]
         public void A_duplicate_boss_event_is_applied_once()
         {
-            var receiver = new ReplicationReceiver(new FakeChannel());
+            var receiver = new ReplicationReceiver(new FakeChannel(), new FakeSession(SessionRole.Client));
             var payload = EncounterCodec.Encode(BossEvt(0));
 
             receiver.Apply(payload);
@@ -97,7 +97,7 @@ namespace FalseGods.ApplicationTests
         [Fact]
         public void A_dropped_arena_event_does_not_stall_the_boss_stream_and_the_streams_are_independent()
         {
-            var receiver = new ReplicationReceiver(new FakeChannel());
+            var receiver = new ReplicationReceiver(new FakeChannel(), new FakeSession(SessionRole.Client));
 
             receiver.Apply(EncounterCodec.Encode(BossEvt(0)));
             receiver.Apply(EncounterCodec.Encode(ArenaEvt(0)));
@@ -111,7 +111,7 @@ namespace FalseGods.ApplicationTests
         [Fact]
         public void A_snapshot_applies_the_latest_by_tick_and_ignores_a_stale_one()
         {
-            var receiver = new ReplicationReceiver(new FakeChannel());
+            var receiver = new ReplicationReceiver(new FakeChannel(), new FakeSession(SessionRole.Client));
 
             receiver.Apply(EncounterCodec.Encode(BossSnap(5)));
             receiver.Apply(EncounterCodec.Encode(BossSnap(3))); // stale
@@ -124,7 +124,7 @@ namespace FalseGods.ApplicationTests
         [Fact]
         public void A_re_committed_attack_lands_its_effect_only_once_by_attack_instance_id()
         {
-            var receiver = new ReplicationReceiver(new FakeChannel());
+            var receiver = new ReplicationReceiver(new FakeChannel(), new FakeSession(SessionRole.Client));
             var attack = new AttackInstanceId(3);
 
             receiver.Apply(EncounterCodec.Encode(new BossAttackCommittedEvent(new Sequence(0), new SimulationTick(0), attack, 1, SimVector2.Zero)));
@@ -140,7 +140,7 @@ namespace FalseGods.ApplicationTests
         public void One_baseline_restores_state_and_resumes_each_stream_at_its_carried_sequence()
         {
             var channel = new FakeChannel();
-            var receiver = new ReplicationReceiver(channel);
+            var receiver = new ReplicationReceiver(channel, new FakeSession(SessionRole.Client));
 
             channel.Deliver(new SessionPeerId(0), EncounterCodec.Encode(Baseline()));
 
@@ -157,7 +157,7 @@ namespace FalseGods.ApplicationTests
         [Fact]
         public void A_second_baseline_is_ignored()
         {
-            var receiver = new ReplicationReceiver(new FakeChannel());
+            var receiver = new ReplicationReceiver(new FakeChannel(), new FakeSession(SessionRole.Client));
             receiver.Apply(EncounterCodec.Encode(Baseline()));
             receiver.Apply(EncounterCodec.Encode(Baseline(bossFloor: 99)));
 

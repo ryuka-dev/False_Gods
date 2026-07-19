@@ -25,10 +25,19 @@ namespace FalseGods.Application.Replication
     /// Continuous snapshots are separate from discrete events (invariant 7): losing a snapshot never cancels or
     /// repeats an attack. This class tracks applied state for the composition to project to presentation; it makes
     /// no authoritative decision.
+    ///
+    /// <para>
+    /// <b>Untrusted input (Docs/DependencyRules.md §12).</b> On the channel path, a payload is dropped — counted,
+    /// never thrown — when its sender is not the session's host, or it does not decode, or a version-carrying DTO
+    /// (snapshot/baseline) reports a <see cref="ProtocolVersion"/> other than <see cref="ProtocolVersion.Current"/>.
+    /// Encounter <i>control</i> messages (EnterArena, ArenaReady, …) ride the same channel but are not replication:
+    /// this receiver ignores them; the load-flow choreography owns them.
+    /// </para>
     /// </remarks>
     public sealed class ReplicationReceiver : IDisposable
     {
         private readonly IEncounterChannel _channel;
+        private readonly IMultiplayerSession _session;
         private readonly HashSet<long> _appliedBossSequences = new HashSet<long>();
         private readonly HashSet<long> _appliedArenaSequences = new HashSet<long>();
         private readonly HashSet<long> _committedAttacks = new HashSet<long>();
@@ -40,11 +49,21 @@ namespace FalseGods.Application.Replication
         private long _lastBossSnapshotTick = long.MinValue;
         private long _lastArenaSnapshotTick = long.MinValue;
 
-        public ReplicationReceiver(IEncounterChannel channel)
+        public ReplicationReceiver(IEncounterChannel channel, IMultiplayerSession session)
         {
             _channel = channel ?? throw new ArgumentNullException(nameof(channel));
+            _session = session ?? throw new ArgumentNullException(nameof(session));
             _channel.Received += OnReceived;
         }
+
+        /// <summary>Channel payloads dropped because the sender was not the session host.</summary>
+        public int DroppedFromNonHost { get; private set; }
+
+        /// <summary>Channel payloads dropped because they did not decode.</summary>
+        public int DroppedMalformed { get; private set; }
+
+        /// <summary>Payloads dropped because a snapshot/baseline carried a foreign protocol version.</summary>
+        public int DroppedVersionMismatch { get; private set; }
 
         /// <summary>
         /// Unsubscribe from the channel. Part of encounter teardown (Docs/Architecture.md §9): after this, no
@@ -70,16 +89,51 @@ namespace FalseGods.Application.Replication
         /// <summary>Whether the one-time baseline has been applied.</summary>
         public bool HasBaseline { get; private set; }
 
-        /// <summary>Decode and apply one payload. Exposed so tests can feed messages without a live channel.</summary>
-        public void Apply(EncodedPayload payload)
+        /// <summary>Decode and apply one payload from a trusted source (a test, or composition-internal
+        /// delivery). A malformed payload throws here; the live channel path catches instead.</summary>
+        public void Apply(EncodedPayload payload) => ApplyDecoded(EncounterCodec.Decode(payload));
+
+        private void OnReceived(SessionPeerId sender, EncodedPayload payload)
         {
-            var message = EncounterCodec.Decode(payload);
+            // Possession of the channel is not authority: only the session host replicates encounter state.
+            if (sender != _session.HostPeer)
+            {
+                DroppedFromNonHost++;
+                return;
+            }
+
+            DecodedMessage message;
+            try
+            {
+                message = EncounterCodec.Decode(payload);
+            }
+            catch (Exception)
+            {
+                DroppedMalformed++;
+                return;
+            }
+
+            ApplyDecoded(message);
+        }
+
+        private void ApplyDecoded(DecodedMessage message)
+        {
             switch (message.Value)
             {
                 case BossSnapshot snapshot:
+                    if (RejectVersion(snapshot.ProtocolVersion))
+                    {
+                        return;
+                    }
+
                     ApplyBossSnapshot(snapshot);
                     break;
                 case ArenaSnapshot snapshot:
+                    if (RejectVersion(snapshot.ProtocolVersion))
+                    {
+                        return;
+                    }
+
                     ApplyArenaSnapshot(snapshot);
                     break;
                 case IBossWireEvent bossEvent:
@@ -89,14 +143,34 @@ namespace FalseGods.Application.Replication
                     ApplyArenaEvent(arenaEvent);
                     break;
                 case EncounterBaseline baseline:
+                    if (RejectVersion(baseline.ProtocolVersion))
+                    {
+                        return;
+                    }
+
                     ApplyBaseline(baseline);
                     break;
+                case EnterArena _:
+                case ArenaReady _:
+                case ArenaLoadFailed _:
+                case EncounterAborted _:
+                case EncounterEnded _:
+                    break; // encounter control traffic — owned by the load-flow choreography, not replication
                 default:
                     throw new InvalidOperationException($"Unhandled replication value {message.Value?.GetType().Name ?? "null"}.");
             }
         }
 
-        private void OnReceived(SessionPeerId sender, EncodedPayload payload) => Apply(payload);
+        private bool RejectVersion(ProtocolVersion version)
+        {
+            if (version != ProtocolVersion.Current)
+            {
+                DroppedVersionMismatch++;
+                return true;
+            }
+
+            return false;
+        }
 
         private void ApplyBossSnapshot(BossSnapshot snapshot)
         {

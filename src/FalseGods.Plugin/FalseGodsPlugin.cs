@@ -227,8 +227,15 @@ namespace FalseGods.Plugin
                 integration.Roster,
                 _currentEncounter,
                 new DefinitionId(TestBossDefinition),
-                PlaceholderArenaId,
-                PlaceholderArenaVersion);
+                // The dev-slice placeholder identity; the arena pipeline's real manifest replaces it when the
+                // arena joins this composition.
+                new Protocol.Arena.ArenaManifest(
+                    PlaceholderArenaId,
+                    PlaceholderArenaVersion,
+                    new Protocol.Arena.ContentHashSchemaVersion(0),
+                    ContentHash: default,
+                    Protocol.Wire.ProtocolVersion.Current.Value,
+                    BundleVersion: string.Empty));
 
         private void OnIntegrationChanged()
         {

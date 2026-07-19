@@ -43,7 +43,7 @@ namespace FalseGods.Plugin
         {
             _logger = logger;
             _integration = integration ?? throw new ArgumentNullException(nameof(integration));
-            _receiver = new ReplicationReceiver(integration.Channel);
+            _receiver = new ReplicationReceiver(integration.Channel, integration.Session);
             _logger?.Log("Client boss composition ready: listening for the host's encounter stream.");
         }
 
@@ -130,7 +130,7 @@ namespace FalseGods.Plugin
         {
             _logger?.Log($"Host started {next}; discarding the previous encounter's stream and visuals.");
             _receiver.Dispose();
-            _receiver = new ReplicationReceiver(_integration.Channel);
+            _receiver = new ReplicationReceiver(_integration.Channel, _integration.Session);
             _presentation?.Dispose();
             _presentation = null;
             _encounter = null;

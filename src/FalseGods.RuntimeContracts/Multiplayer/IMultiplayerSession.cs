@@ -23,5 +23,12 @@ namespace FalseGods.RuntimeContracts.Multiplayer
 
         /// <summary>This peer's own id in the session.</summary>
         SessionPeerId LocalPeer { get; }
+
+        /// <summary>
+        /// The authoritative host's id in the session — what inbound replication is validated against (a
+        /// payload not sent by this peer is dropped; Docs/DependencyRules.md §12). On the host it equals
+        /// <see cref="LocalPeer"/>; meaningful only while <see cref="IsActive"/>.
+        /// </summary>
+        SessionPeerId HostPeer { get; }
     }
 }

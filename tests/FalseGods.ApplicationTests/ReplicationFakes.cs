@@ -20,13 +20,15 @@ namespace FalseGods.ApplicationTests
         public void Deliver(SessionPeerId sender, EncodedPayload payload) => Received?.Invoke(sender, payload);
     }
 
-    /// <summary>A session whose role and local peer the test sets.</summary>
+    /// <summary>A session whose role, local peer, and host peer the test sets. By default the host is peer 0 —
+    /// the id the test suites use for the host side.</summary>
     internal sealed class FakeSession : IMultiplayerSession
     {
-        public FakeSession(SessionRole role, int localPeer = 0)
+        public FakeSession(SessionRole role, int localPeer = 0, int hostPeer = 0)
         {
             Role = role;
             LocalPeer = new SessionPeerId(localPeer);
+            HostPeer = new SessionPeerId(hostPeer);
         }
 
         public SessionRole Role { get; }
@@ -34,6 +36,8 @@ namespace FalseGods.ApplicationTests
         public bool IsActive => true;
 
         public SessionPeerId LocalPeer { get; }
+
+        public SessionPeerId HostPeer { get; }
     }
 
     /// <summary>A roster whose membership the test controls.</summary>

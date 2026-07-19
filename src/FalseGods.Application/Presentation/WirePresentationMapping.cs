@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using FalseGods.Core.Bosses;
 using FalseGods.Protocol.Wire;
 using FalseGods.RuntimeContracts.Presentation;
@@ -68,6 +69,48 @@ namespace FalseGods.Application.Presentation
                 default:
                     throw new ArgumentOutOfRangeException(nameof(wireEvent), wireEvent.GetType().Name, "No presentation mapping for this boss wire event.");
             }
+        }
+
+        public static IPresentationEvent ToEvent(IArenaWireEvent wireEvent)
+        {
+            switch (wireEvent)
+            {
+                case ArenaMechanismGroupActivatedEvent e:
+                    return new MechanismGroupEngaged(e.Group);
+                case ArenaExitUnlockedEvent _:
+                    return new ExitOpened();
+                case null:
+                    throw new ArgumentNullException(nameof(wireEvent));
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(wireEvent), wireEvent.GetType().Name, "No presentation mapping for this arena wire event.");
+            }
+        }
+
+        /// <summary>
+        /// Reconstruct the arena's visual state from a snapshot as cues — the late-join path: a client that
+        /// applied a baseline mid-fight replays one <see cref="MechanismGroupEngaged"/> per active group (and
+        /// <see cref="ExitOpened"/> if the exit is already unlocked) instead of having missed the live events.
+        /// The cues are idempotent visuals, so replaying them over an already-current presentation is safe.
+        /// </summary>
+        public static IReadOnlyList<IPresentationEvent> ToEvents(ArenaSnapshot snapshot)
+        {
+            if (snapshot is null)
+            {
+                throw new ArgumentNullException(nameof(snapshot));
+            }
+
+            var events = new List<IPresentationEvent>(snapshot.ActiveMechanismGroups.Count + 1);
+            for (var i = 0; i < snapshot.ActiveMechanismGroups.Count; i++)
+            {
+                events.Add(new MechanismGroupEngaged(snapshot.ActiveMechanismGroups[i]));
+            }
+
+            if (snapshot.ExitUnlocked)
+            {
+                events.Add(new ExitOpened());
+            }
+
+            return events;
         }
 
         private static BossVisualActivity ToVisualActivity(int stateId)

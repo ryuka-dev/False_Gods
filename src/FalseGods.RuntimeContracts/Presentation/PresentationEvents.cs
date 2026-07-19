@@ -1,3 +1,4 @@
+using FalseGods.Core.Arena;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Simulation;
 
@@ -40,4 +41,14 @@ namespace FalseGods.RuntimeContracts.Presentation
 
     /// <summary>The boss was defeated — play the death. Terminal, like its domain counterpart.</summary>
     public sealed record BossDefeated(BossInstanceId Boss) : IPresentationEvent;
+
+    // Arena cues. Deliberately different names from the Core domain events (MechanismGroupActivated,
+    // ArenaExitUnlocked) so a file mapping between the two vocabularies never needs alias gymnastics — the same
+    // convention that pairs domain BossDied with presentation BossDefeated.
+
+    /// <summary>An arena mechanism group switched on — show the group's active visual state.</summary>
+    public sealed record MechanismGroupEngaged(MechanismGroupId Group) : IPresentationEvent;
+
+    /// <summary>The arena exit unlocked — show the way out (the boss is defeated).</summary>
+    public sealed record ExitOpened : IPresentationEvent;
 }

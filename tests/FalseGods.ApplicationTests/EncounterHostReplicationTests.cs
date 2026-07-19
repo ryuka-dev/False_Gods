@@ -23,14 +23,30 @@ namespace FalseGods.ApplicationTests
         private readonly FakeChannel _channel = new FakeChannel();
         private readonly BossFixture _fixture = new BossFixture();
 
+        internal static Protocol.Arena.ArenaManifest TestManifest()
+        {
+            var bytes = new byte[Protocol.Arena.ContentHash.Sha256Length];
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = (byte)(i + 1);
+            }
+
+            return new Protocol.Arena.ArenaManifest(
+                "false_gods.arena.none",
+                ArenaVersion: 0,
+                new Protocol.Arena.ContentHashSchemaVersion(1),
+                new Protocol.Arena.ContentHash(bytes),
+                ProtocolVersion.Current.Value,
+                BundleVersion: "test.bundle");
+        }
+
         private EncounterHostReplication CreateDriver(FakeRoster roster) => new EncounterHostReplication(
             new ReplicationSender(_channel, new FakeSession(SessionRole.Host, HostPeer)),
             new FakeSession(SessionRole.Host, HostPeer),
             roster,
             new EncounterId(3),
             new DefinitionId(9),
-            arenaId: "false_gods.arena.none",
-            arenaVersion: 0);
+            TestManifest());
 
         private static SimulationTick Tick(long value) => new SimulationTick(value);
 
@@ -159,7 +175,7 @@ namespace FalseGods.ApplicationTests
             var joinIndex = _channel.Sent.Count;
             driver.Publish(_fixture.Boss, _fixture.Step(2f), Tick(2));
 
-            var receiver = new ReplicationReceiver(new FakeChannel());
+            var receiver = new ReplicationReceiver(new FakeChannel(), new FakeSession(SessionRole.Client));
             foreach (var send in _channel.Sent.Skip(joinIndex)) // what the joining peer receives, in order
             {
                 if (send.Target.Kind == MessageTargetKind.AllClients ||
@@ -187,7 +203,7 @@ namespace FalseGods.ApplicationTests
         public void DisposedReceiverIgnoresLaterDeliveries()
         {
             var channel = new FakeChannel();
-            var receiver = new ReplicationReceiver(channel);
+            var receiver = new ReplicationReceiver(channel, new FakeSession(SessionRole.Client));
             var driver = CreateDriver(new FakeRoster(HostPeer));
             _fixture.Boss.Spawn(new SimVector2(0f, 0f));
             driver.Publish(_fixture.Boss, _fixture.Boss.DrainEvents(), Tick(1));
