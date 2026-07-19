@@ -14,5 +14,6 @@
     <Project Path="tests/FalseGods.ArchitectureTests/FalseGods.ArchitectureTests.csproj" />
     <Project Path="tests/FalseGods.CoreTests/FalseGods.CoreTests.csproj" />
     <Project Path="tests/FalseGods.ProtocolTests/FalseGods.ProtocolTests.csproj" />
+    <Project Path="tests/FalseGods.RuntimeContractsTests/FalseGods.RuntimeContractsTests.csproj" />
   </Folder>
 </Solution>

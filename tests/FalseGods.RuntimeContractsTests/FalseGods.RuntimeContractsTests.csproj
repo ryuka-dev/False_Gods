@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit tests for FalseGods.RuntimeContracts. The contracts assembly is mostly interfaces and value types with
+    no behaviour to test — until the FalseGodsIntegrations broker, whose single-slot registration semantics
+    (first wins, duplicate rejected, token-scoped revocation, change event) are the load-bearing behaviour of
+    the optional-integration seam (ADR-004, PoC B0). Those semantics are what this project exercises.
+
+    The broker is deliberately global static state (the one bounded exception, RiskList R26), so unlike every
+    other unit test in the repo these tests DO touch it — they are the seam's integration tests: each one
+    registers, asserts, and disposes, leaving the slot clean. There is no hidden reset to forget, because the
+    broker exposes none. All broker tests stay in one class so xunit runs them sequentially.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.RuntimeContractsTests</AssemblyName>
+    <RootNamespace>FalseGods.RuntimeContractsTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <!-- A test host must carry the test platform into its own output to start; the repo-wide default is the
+         opposite (false) because the production plugins must not litter the plugins folder. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FalseGods.RuntimeContracts\FalseGods.RuntimeContracts.csproj" />
+  </ItemGroup>
+
+</Project>
