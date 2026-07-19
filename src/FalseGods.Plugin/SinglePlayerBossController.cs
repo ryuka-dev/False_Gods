@@ -1,8 +1,10 @@
 using System;
+using FalseGods.Application.Combat;
 using FalseGods.Application.Presentation;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Simulation;
+using FalseGods.Integration.Sulfur.Combat;
 using FalseGods.Integration.Sulfur.Simulation;
 using FalseGods.Protocol.Wire;
 using FalseGods.UnityRuntime.Presentation;
@@ -41,7 +43,6 @@ namespace FalseGods.Plugin
     {
         internal const float EyeToFootDrop = 1.6f;
 
-        private const int DamagePerHit = 15;
         private const float SpawnDistance = 7f;
 
         private readonly ILogger _logger;
@@ -52,6 +53,7 @@ namespace FalseGods.Plugin
         private BossPresenter? _presenter;
         private BossPresentation? _presentation;
         private EncounterHostReplication? _replication;
+        private IDisposable? _damageBinding;
 
         public SinglePlayerBossController(ILogger logger)
         {
@@ -132,13 +134,20 @@ namespace FalseGods.Plugin
             _presentation = new BossPresentation(_logger, spawn);
             _presenter = new BossPresenter(_presentation);
 
+            // Real weapon damage: the game's projectile/melee systems strike the Hitbox-layer capsule, find the
+            // receiver on it, and deliver each hit's final damage; the sim then applies its own
+            // weak-point/phase/death rules.
+            _damageBinding = BossWeaponDamage.Bind(
+                _presentation.HitCollider.gameObject, new WeaponSink(this), _logger);
+
             _boss.Spawn(new SimVector2(spawn.x, spawn.z));
             Present();
             _presentation.Render(0f);
 
             _logger?.Log($"Boss raised at ({spawn.x:0.0}, {spawn.y:0.0}, {spawn.z:0.0}); health {definition.MaxHealth}, "
                 + $"phase two at {definition.PhaseTwoHealthThreshold}. It idles -> telegraphs -> commits -> recovers; "
-                + "it faces and approaches the real player.");
+                + "it faces and approaches the real player. Shoot or melee it with real weapons; hits during the "
+                + "weak-point window are amplified.");
             return true;
         }
 
@@ -159,73 +168,59 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>
-        /// TEMPORARY development harness (not shipping gameplay): deal damage where the screen centre is aimed, so the
-        /// authoritative phase/weak-point/death path can be exercised in single-player without real weapon
-        /// integration. This raycasts against the boss's own colliders and calls the authoritative
-        /// <see cref="BossSimulation.ApplyDamage"/> — the sim, not this harness, decides amplification, the phase-two
-        /// crossing, and death. It is deliberately a stand-in for the real player-weapon-to-boss damage path, which is
-        /// a later slice (an Application IDamagePort + Integration.Sulfur), and should be replaced when that lands.
+        /// One real weapon hit delivered by the <see cref="BossWeaponDamage"/> receiver. The game's final damage
+        /// number is converted to simulation points and applied to the authoritative
+        /// <see cref="BossSimulation.ApplyDamage"/> — the sim, not the weapon path, decides weak-point
+        /// amplification, the phase-two crossing, and death. Presenting immediately keeps the hit reaction (and,
+        /// on a host, its replication) on the same tick as the decision.
         /// </summary>
-        public void Damage()
+        private void OnWeaponDamage(float amount)
         {
-            if (_boss is null || _presenter is null || _presentation is null)
+            if (_boss is null || _boss.IsDead)
             {
                 return;
             }
 
-            var camera = Camera.main;
-            if (camera == null || _boss.IsDead)
+            var raw = WeaponDamage.ToSimAmount(amount);
+            if (raw == 0)
             {
                 return;
             }
-
-            var ray = camera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-            var hits = Physics.RaycastAll(ray, 200f, ~0, QueryTriggerInteraction.Collide);
-            Collider? nearest = null;
-            var nearestDistance = float.MaxValue;
-            foreach (var hit in hits)
-            {
-                if (hit.distance < nearestDistance)
-                {
-                    nearestDistance = hit.distance;
-                    nearest = hit.collider;
-                }
-            }
-
-            // The nearest thing along the aim must be one of the boss's own colliders; anything nearer (a wall) blocks.
-            var onBoss = nearest != null &&
-                (nearest == _presentation.CollisionCollider || nearest == _presentation.BodyCollider || nearest == _presentation.WeakPointCollider);
-            if (!onBoss)
-            {
-                return;
-            }
-
-            // The weak-point box sits inside the capsule, so it is rarely the NEAREST hit; test it directly to tell a
-            // weak-point hit from a body hit.
-            var onWeakPoint = _presentation.WeakPointCollider != null &&
-                _presentation.WeakPointCollider.Raycast(ray, out _, 200f);
 
             var healthBefore = _boss.Health;
             var phaseBefore = _boss.Phase;
-            var weakExposed = _boss.IsWeakPointExposed;
+            var weakWindow = _boss.IsWeakPointExposed;
 
-            _boss.ApplyDamage(DamagePerHit);
+            _boss.ApplyDamage(raw);
             Present();
 
             _logger?.Log(
-                $"[dev-damage] hit {(onWeakPoint ? "WEAK POINT" : "body")} raw={DamagePerHit} weakExposed={weakExposed} "
+                $"[weapon-damage] raw={raw} (game {amount:0.##}) weakWindow={weakWindow} "
                 + $"health {healthBefore}->{_boss.Health} phase {phaseBefore}->{_boss.Phase}{(_boss.IsDead ? " DEAD" : string.Empty)}");
         }
 
         /// <summary>Tear the boss down; nothing from the encounter remains in the level.</summary>
         public void Drop()
         {
+            _damageBinding?.Dispose();
+            _damageBinding = null;
             _presentation?.Dispose();
             _presentation = null;
             _presenter = null;
             _boss = null;
             _replication = null; // the driver is per-encounter; the next raise gets a fresh one
             _logger?.Log("Boss torn down; nothing remains.");
+        }
+
+        /// <summary>The controller's own <see cref="IBossDamageSink"/> — a thin forwarder, so the binding holds no
+        /// direct simulation reference.</summary>
+        private sealed class WeaponSink : IBossDamageSink
+        {
+            private readonly SinglePlayerBossController _owner;
+
+            public WeaponSink(SinglePlayerBossController owner) => _owner = owner;
+
+            public void ApplyWeaponDamage(float amount) => _owner.OnWeaponDamage(amount);
         }
 
         /// <summary>

@@ -38,9 +38,9 @@ namespace FalseGods.Plugin
     ///
     /// <para>
     /// <see cref="PluginGuid"/> is stable because the ST adapter declares a <c>[BepInDependency]</c> on it. The
-    /// raise/damage keys are a development affordance (see <see cref="SinglePlayerBossController.Damage"/>), not
-    /// shipping gameplay. The encounter/arena identity below is the dev-slice placeholder — the real arena
-    /// pipeline supplies these when it joins the composition.
+    /// raise key is a development affordance, not shipping gameplay; damage is the real weapon path (the game's
+    /// projectile/melee systems hitting the boss's collision body). The encounter/arena identity below is the
+    /// dev-slice placeholder — the real arena pipeline supplies these when it joins the composition.
     /// </para>
     /// </remarks>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
@@ -48,7 +48,7 @@ namespace FalseGods.Plugin
     {
         public const string PluginGuid = "ryuka_labs.falsegods";
         public const string PluginName = "False Gods";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.3.0";
 
         private const int TestBossDefinition = 1;
         private const string PlaceholderArenaId = "false_gods.arena.none";
@@ -56,7 +56,6 @@ namespace FalseGods.Plugin
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
-        private ConfigEntry<Key> _damageKey = null!;
         private ConfigEntry<BossFacingMode> _facingMode = null!;
         private ConfigEntry<bool> _lockPitch = null!;
 
@@ -73,13 +72,8 @@ namespace FalseGods.Plugin
             _raiseKey = Config.Bind("Boss", "RaiseKey", Key.B,
                 "Raise the test boss in front of you, or tear it down if it is already up. "
                 + "Stand in a loaded level first. On a multiplayer client the key is inert - the host drives the boss. "
-                + "The game uses the new Input System.");
-
-            _damageKey = Config.Bind("Boss", "DamageKey", Key.N,
-                "Deal damage to the boss where the screen centre is aimed (a development harness, not real weapon "
-                + "damage): hit it during the weak-point window for amplified damage, drop it to half for phase two, "
-                + "to zero for death. Damage goes to the authoritative BossSimulation, so it works in single-player "
-                + "and as the host; it is inert on a client.");
+                + "Damage the boss with your real weapons (bullets and melee); hits during the weak-point window "
+                + "are amplified. The game uses the new Input System.");
 
             _facingMode = Config.Bind("Boss", "FacingMode", BossFacingMode.LocalBillboard,
                 "Sprite facing: Fixed = a static/scripted world facing (for a very large boss); LocalBillboard = "
@@ -98,8 +92,8 @@ namespace FalseGods.Plugin
             // one place; the handler only reports the transition.
             FalseGodsIntegrations.Changed += OnIntegrationChanged;
 
-            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Raise/drop the boss: {_raiseKey.Value}. "
-                + $"Damage (dev): {_damageKey.Value}. Facing: {_facingMode.Value}, lockPitch: {_lockPitch.Value}. "
+            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Raise/drop the boss: {_raiseKey.Value}; "
+                + $"damage it with real weapons. Facing: {_facingMode.Value}, lockPitch: {_lockPitch.Value}. "
                 + $"Multiplayer integration: {(FalseGodsIntegrations.Current != null ? "registered" : "none (single-player)")}.");
         }
 
@@ -171,10 +165,6 @@ namespace FalseGods.Plugin
                     _boss.Raise();
                 }
             }
-            else if (_boss.IsUp && KeyPressed(_damageKey.Value))
-            {
-                _boss.Damage();
-            }
 
             // The session can start or end mid-encounter; keep the attached driver consistent with the live role.
             var wantReplication = role == CompositionRole.Host && _boss.IsUp;
@@ -214,9 +204,9 @@ namespace FalseGods.Plugin
                 _clientIntegration = integration;
             }
 
-            if (KeyPressed(_raiseKey.Value) || KeyPressed(_damageKey.Value))
+            if (KeyPressed(_raiseKey.Value))
             {
-                Logger.LogMessage("Multiplayer client: the host drives the boss; the raise/damage keys are inert here.");
+                Logger.LogMessage("Multiplayer client: the host drives the boss; the raise key is inert here.");
             }
 
             _client.SetFacing(_facingMode.Value, _lockPitch.Value);

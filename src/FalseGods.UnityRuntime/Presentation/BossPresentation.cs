@@ -40,7 +40,8 @@ namespace FalseGods.UnityRuntime.Presentation
     /// boss, only moving does. <see cref="FacingMode"/> selects between the three strategies.</item>
     /// <item>Physical collision is a solid <c>CapsuleCollider</c> on the <c>Entities</c> layer (where
     /// <c>Npc.mainCollider</c> lives) plus a kinematic <c>Rigidbody</c>; the thin billboard boxes stay triggers used
-    /// only by an aim ray.</item>
+    /// only by an aim ray, and sit on the Ignore Raycast layer so gameplay projectiles pass through them to the
+    /// capsule (whose GameObject the composition binds into the weapon-damage pipeline).</item>
     /// </list>
     /// </para>
     /// </remarks>
@@ -76,6 +77,7 @@ namespace FalseGods.UnityRuntime.Presentation
 
         private readonly GameObject _root;
         private readonly GameObject _collisionBody;  // solid capsule on the Entities layer; physical presence
+        private readonly GameObject _hitBody;        // trigger capsule on the Hitbox layer; weapon-hit target
         private readonly Transform _bodyBillboard; // body + weak point; obeys FacingMode. Pivot at the body centre.
         private readonly Transform _aimPivot;      // gameplay-space yaw toward the target; holds the muzzle
         private readonly Transform _body;
@@ -188,10 +190,36 @@ namespace FalseGods.UnityRuntime.Presentation
             rigidbody.isKinematic = true;   // moved by the sim's position, never by physics forces
             rigidbody.useGravity = false;
 
+            // Weapon-hit body: a second capsule on the game's "Hitbox" layer — the layer every vanilla NPC hit
+            // collider lives on, which IS in the projectile raycast mask and the melee damageable mask (the
+            // Entities layer is NOT: measured in-game, mask 0x62581858 excludes it, so bullets pass straight
+            // through the physical capsule). A trigger, so it never adds physical presence — the Entities capsule
+            // keeps that job. The composition binds the game's damage receiver to this object.
+            _hitBody = new GameObject("WeaponHitBody");
+            _hitBody.transform.SetParent(_root.transform, worldPositionStays: false);
+            var hitboxLayer = LayerMask.NameToLayer("Hitbox");
+            if (hitboxLayer >= 0)
+            {
+                _hitBody.layer = hitboxLayer;
+            }
+            else
+            {
+                _logger?.LogWarning("'Hitbox' layer not found; weapon hits left on the Default layer.");
+            }
+
+            var hitCapsule = _hitBody.AddComponent<CapsuleCollider>();
+            hitCapsule.direction = 1;
+            hitCapsule.height = BodyHeight;
+            hitCapsule.radius = BodyWidth * 0.45f;
+            hitCapsule.center = new Vector3(0f, BodyHeight * 0.5f, 0f);
+            hitCapsule.isTrigger = true;
+            HitCollider = hitCapsule;
+
             _logger?.Log($"boss renderer shader: {_shaderName} (supported={(_shader != null && _shader.isSupported)})");
             _logger?.Log($"boss renderer floor y: {_floorY}");
             _logger?.Log($"boss collision: capsule h={BodyHeight} r={BodyWidth * 0.45f:0.00} on layer "
-                + $"'{(entitiesLayer >= 0 ? "Entities" : "Default")}' (kinematic Rigidbody)");
+                + $"'{(entitiesLayer >= 0 ? "Entities" : "Default")}' (kinematic Rigidbody); weapon-hit capsule on "
+                + $"'{(hitboxLayer >= 0 ? "Hitbox" : "Default")}' (trigger)");
         }
 
         /// <summary>The sprite orientation strategy (see <see cref="BossFacingMode"/>). Settable live.</summary>
@@ -208,6 +236,10 @@ namespace FalseGods.UnityRuntime.Presentation
 
         /// <summary>The solid physical capsule (Entities layer) — the boss's collision presence; classifies as a body hit.</summary>
         public Collider CollisionCollider { get; }
+
+        /// <summary>The weapon-hit capsule (Hitbox layer, trigger) — what the game's projectile/melee queries strike;
+        /// the composition binds the damage receiver to its GameObject.</summary>
+        public Collider HitCollider { get; }
 
         // ── IEncounterPresentation ────────────────────────────────────────────────────────────────────────
 
@@ -606,6 +638,12 @@ namespace FalseGods.UnityRuntime.Presentation
         {
             var box = go.AddComponent<BoxCollider>();
             box.isTrigger = true; // never blocks the player; it exists only so an aimed ray can identify the part.
+
+            // Ignore Raycast (builtin layer 2): the game's projectile raycast collides with triggers
+            // (QueryTriggerInteraction.Collide) on its mask, and these part-identification boxes must never
+            // intercept a real bullet ahead of the solid capsule — that would leave floating bullet holes and
+            // stop shots before they reach the damage receiver on the collision body.
+            go.layer = 2;
             return box;
         }
 
