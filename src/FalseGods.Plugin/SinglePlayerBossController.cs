@@ -1,8 +1,10 @@
 using System;
 using FalseGods.Application.Presentation;
+using FalseGods.Application.Replication;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Simulation;
+using FalseGods.Protocol.Wire;
 using FalseGods.UnityRuntime.Presentation;
 using UnityEngine;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
@@ -26,12 +28,21 @@ namespace FalseGods.Plugin
     /// Unity, so no game type crosses into the Composition Root — reading the game's players stays inside
     /// <see cref="SulfurParticipantQuery"/>.
     /// </para>
+    ///
+    /// <para>
+    /// This same controller <b>is</b> the multiplayer-host composition: the host adds replication to the
+    /// single-player composition rather than swapping in a different boss implementation (Architecture §4.3). When
+    /// the Composition Root attaches an <see cref="EncounterHostReplication"/> via <see cref="SetReplication"/>,
+    /// every tick's drained events — the same list the presenter gets — and the boss state are also published to
+    /// the encounter channel; with none attached, replication is simply absent.
+    /// </para>
     /// </remarks>
     internal sealed class SinglePlayerBossController
     {
+        internal const float EyeToFootDrop = 1.6f;
+
         private const int DamagePerHit = 15;
         private const float SpawnDistance = 7f;
-        private const float EyeToFootDrop = 1.6f;
 
         private readonly ILogger _logger;
         private readonly ISimulationClock _clock;
@@ -40,6 +51,7 @@ namespace FalseGods.Plugin
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
         private BossPresentation? _presentation;
+        private EncounterHostReplication? _replication;
 
         public SinglePlayerBossController(ILogger logger)
         {
@@ -51,6 +63,25 @@ namespace FalseGods.Plugin
         }
 
         public bool IsUp => _presentation != null;
+
+        /// <summary>Whether a host replication driver is currently attached.</summary>
+        public bool HasReplication => _replication != null;
+
+        /// <summary>
+        /// Attach (or, with <c>null</c>, detach) the host replication driver. The Composition Root attaches one
+        /// per encounter when this peer is the session host and detaches it when the role or session goes away —
+        /// the simulation and presentation are unaffected either way.
+        /// </summary>
+        public void SetReplication(EncounterHostReplication? replication)
+        {
+            if (!ReferenceEquals(_replication, replication))
+            {
+                _replication = replication;
+                _logger?.Log(replication != null
+                    ? "Host replication attached: boss state and events now broadcast to the session."
+                    : "Host replication detached: boss continues locally only.");
+            }
+        }
 
         /// <summary>Push the live sprite-facing choice to the renderer (changeable in-game via config).</summary>
         public void SetFacing(BossFacingMode mode, bool lockPitch)
@@ -102,7 +133,7 @@ namespace FalseGods.Plugin
             _presenter = new BossPresenter(_presentation);
 
             _boss.Spawn(new SimVector2(spawn.x, spawn.z));
-            Present(_boss, _presenter);
+            Present();
             _presentation.Render(0f);
 
             _logger?.Log($"Boss raised at ({spawn.x:0.0}, {spawn.y:0.0}, {spawn.z:0.0}); health {definition.MaxHealth}, "
@@ -123,7 +154,7 @@ namespace FalseGods.Plugin
             }
 
             _boss.Advance();
-            Present(_boss, _presenter);
+            Present();
             _presentation.Render(deltaSeconds);
         }
 
@@ -179,7 +210,7 @@ namespace FalseGods.Plugin
             var weakExposed = _boss.IsWeakPointExposed;
 
             _boss.ApplyDamage(DamagePerHit);
-            Present(_boss, _presenter);
+            Present();
 
             _logger?.Log(
                 $"[dev-damage] hit {(onWeakPoint ? "WEAK POINT" : "body")} raw={DamagePerHit} weakExposed={weakExposed} "
@@ -193,12 +224,24 @@ namespace FalseGods.Plugin
             _presentation = null;
             _presenter = null;
             _boss = null;
+            _replication = null; // the driver is per-encounter; the next raise gets a fresh one
             _logger?.Log("Boss torn down; nothing remains.");
         }
 
-        private static void Present(BossSimulation boss, BossPresenter presenter)
+        /// <summary>
+        /// Drain the simulation's events exactly once and fan them out: first to the presenter (the local view),
+        /// then — when the host driver is attached — to replication, on the same host simulation tick.
+        /// </summary>
+        private void Present()
         {
-            presenter.Present(boss, boss.DrainEvents());
+            if (_boss is null || _presenter is null)
+            {
+                return;
+            }
+
+            var events = _boss.DrainEvents();
+            _presenter.Present(_boss, events);
+            _replication?.Publish(_boss, events, new SimulationTick(_clock.Tick));
         }
     }
 }
