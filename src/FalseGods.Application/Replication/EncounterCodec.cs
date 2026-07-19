@@ -13,6 +13,11 @@ namespace FalseGods.Application.Replication
         BossEvent = 3,
         ArenaEvent = 4,
         EncounterBaseline = 5,
+        EnterArena = 6,
+        ArenaReady = 7,
+        ArenaLoadFailed = 8,
+        EncounterAborted = 9,
+        EncounterEnded = 10,
     }
 
     /// <summary>One decoded replication message: its <see cref="Kind"/> and the deserialized DTO as <see cref="Value"/>.</summary>
@@ -26,7 +31,9 @@ namespace FalseGods.Application.Replication
 
         public ReplicationKind Kind { get; }
 
-        /// <summary>The DTO — a <c>BossSnapshot</c>, <c>ArenaSnapshot</c>, <c>IBossWireEvent</c>, <c>IArenaWireEvent</c>, or <c>EncounterBaseline</c>.</summary>
+        /// <summary>The DTO — a <c>BossSnapshot</c>, <c>ArenaSnapshot</c>, <c>IBossWireEvent</c>, <c>IArenaWireEvent</c>,
+        /// <c>EncounterBaseline</c>, or an encounter control message (<c>EnterArena</c>, <c>ArenaReady</c>,
+        /// <c>ArenaLoadFailed</c>, <c>EncounterAborted</c>, <c>EncounterEnded</c>).</summary>
         public object Value { get; }
     }
 
@@ -53,6 +60,16 @@ namespace FalseGods.Application.Replication
 
         public static EncodedPayload Encode(EncounterBaseline baseline) => Wrap(ReplicationKind.EncounterBaseline, WireCodec.Serialize(baseline));
 
+        public static EncodedPayload Encode(EnterArena message) => Wrap(ReplicationKind.EnterArena, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(ArenaReady message) => Wrap(ReplicationKind.ArenaReady, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(ArenaLoadFailed message) => Wrap(ReplicationKind.ArenaLoadFailed, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(EncounterAborted message) => Wrap(ReplicationKind.EncounterAborted, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(EncounterEnded message) => Wrap(ReplicationKind.EncounterEnded, WireCodec.Serialize(message));
+
         /// <summary>Decode an opaque payload back into its DTO. Treats the payload as untrusted input.</summary>
         public static DecodedMessage Decode(EncodedPayload payload)
         {
@@ -78,6 +95,16 @@ namespace FalseGods.Application.Replication
                     return new DecodedMessage(kind, WireCodec.DeserializeArenaEvent(body));
                 case ReplicationKind.EncounterBaseline:
                     return new DecodedMessage(kind, WireCodec.DeserializeBaseline(body));
+                case ReplicationKind.EnterArena:
+                    return new DecodedMessage(kind, WireCodec.DeserializeEnterArena(body));
+                case ReplicationKind.ArenaReady:
+                    return new DecodedMessage(kind, WireCodec.DeserializeArenaReady(body));
+                case ReplicationKind.ArenaLoadFailed:
+                    return new DecodedMessage(kind, WireCodec.DeserializeArenaLoadFailed(body));
+                case ReplicationKind.EncounterAborted:
+                    return new DecodedMessage(kind, WireCodec.DeserializeEncounterAborted(body));
+                case ReplicationKind.EncounterEnded:
+                    return new DecodedMessage(kind, WireCodec.DeserializeEncounterEnded(body));
                 default:
                     throw new InvalidDataException($"Unknown replication kind tag {bytes[0]}.");
             }

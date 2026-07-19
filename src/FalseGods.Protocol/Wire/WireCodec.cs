@@ -9,8 +9,9 @@ using FalseGods.Protocol.Arena;
 namespace FalseGods.Protocol.Wire
 {
     /// <summary>
-    /// The serialization contract for the replication wire DTOs: each snapshot, event, and baseline to and from a
-    /// self-contained <c>byte[]</c> (Docs/Architecture.md §3 — Protocol owns the serialization contract).
+    /// The serialization contract for the replication wire DTOs: each snapshot, event, baseline, and encounter
+    /// control message to and from a self-contained <c>byte[]</c> (Docs/Architecture.md §3 — Protocol owns the
+    /// serialization contract).
     /// </summary>
     /// <remarks>
     /// It produces a plain <c>byte[]</c> and never an <c>EncodedPayload</c>: that carrier lives in
@@ -100,6 +101,96 @@ namespace FalseGods.Protocol.Wire
                 new Sequence(r.ReadInt64()));
             RequireEnd(r);
             return baseline;
+        }
+
+        // ---------------------------------------------------------------- encounter control messages
+
+        public static byte[] Serialize(EnterArena message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.Encounter.Value);
+            WriteManifest(w, message.Manifest);
+            WriteWorldPosition(w, message.Origin);
+            return w.ToArray();
+        }
+
+        public static EnterArena DeserializeEnterArena(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new EnterArena(new EncounterId(r.ReadInt32()), ReadManifest(r), ReadWorldPosition(r));
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(ArenaReady message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.Encounter.Value);
+            WriteManifest(w, message.Manifest);
+            return w.ToArray();
+        }
+
+        public static ArenaReady DeserializeArenaReady(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new ArenaReady(new EncounterId(r.ReadInt32()), ReadManifest(r));
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(ArenaLoadFailed message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.Encounter.Value);
+            w.WriteString(message.Reason);
+            return w.ToArray();
+        }
+
+        public static ArenaLoadFailed DeserializeArenaLoadFailed(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new ArenaLoadFailed(new EncounterId(r.ReadInt32()), r.ReadString());
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(EncounterAborted message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.Encounter.Value);
+            WriteInt(w, (int)message.Reason);
+            return w.ToArray();
+        }
+
+        public static EncounterAborted DeserializeEncounterAborted(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var encounter = new EncounterId(r.ReadInt32());
+            var reason = r.ReadInt32();
+            if (reason < (int)EncounterAbortReason.Unspecified || reason > (int)EncounterAbortReason.Timeout)
+            {
+                throw new InvalidDataException($"Unknown encounter-abort reason {reason}.");
+            }
+
+            var message = new EncounterAborted(encounter, (EncounterAbortReason)reason);
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(EncounterEnded message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.Encounter.Value);
+            w.WriteInt64(message.Tick.Value);
+            return w.ToArray();
+        }
+
+        public static EncounterEnded DeserializeEncounterEnded(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new EncounterEnded(new EncounterId(r.ReadInt32()), new SimulationTick(r.ReadInt64()));
+            RequireEnd(r);
+            return message;
         }
 
         // ---------------------------------------------------------------- event streams
@@ -386,6 +477,34 @@ namespace FalseGods.Protocol.Wire
         }
 
         private static int? ReadNullableInt(WireReader r) => r.ReadBool() ? r.ReadInt32() : (int?)null;
+
+        private static void WriteManifest(WireWriter w, ArenaManifest m)
+        {
+            w.WriteString(m.ArenaId);
+            WriteInt(w, m.ArenaVersion);
+            WriteInt(w, m.ContentHashSchemaVersion.Value);
+            WriteContentHash(w, m.ContentHash);
+            WriteInt(w, m.ProtocolVersion);
+            w.WriteString(m.BundleVersion);
+        }
+
+        private static ArenaManifest ReadManifest(WireReader r) => new ArenaManifest(
+            r.ReadString(),
+            r.ReadInt32(),
+            new ContentHashSchemaVersion(r.ReadInt32()),
+            ReadContentHash(r),
+            r.ReadInt32(),
+            r.ReadString());
+
+        private static void WriteWorldPosition(WireWriter w, WorldPosition p)
+        {
+            w.WriteSingle(p.X);
+            w.WriteSingle(p.Y);
+            w.WriteSingle(p.Z);
+        }
+
+        private static WorldPosition ReadWorldPosition(WireReader r) =>
+            new WorldPosition(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
 
         private static void WriteContentHash(WireWriter w, ContentHash hash)
         {
