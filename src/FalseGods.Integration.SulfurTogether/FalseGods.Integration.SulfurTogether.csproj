@@ -15,19 +15,20 @@
       - FalseGods.Protocol      IEncounterChannel carries EncodedPayload + MessageDelivery. The
                                 adapter ships bytes; it never sees a wire DTO.
       - FalseGods.Application   The seam is the RuntimeContracts capability ports, nothing wider.
-      - SULFUR Together itself  In the current ST source, ~189 types are `internal` to 38 `public`,
-                                with no [InternalsVisibleTo]. CoopConnection, ArenaLockdownManager,
-                                NetBossEncounterManager, NetLoadBarrier and RemotePlayerRegistryManager
-                                are all internal. There is nothing useful to compile against, so this
-                                adapter reaches them by guarded reflection — until ST exposes a public
-                                integration bridge, which is the preferred long-term path and an open
-                                coordination item. See Docs/MultiplayerLoadingContract.md §5.1.1.
       - 0Harmony                Harmony patches belong in Integration.Sulfur (FG-ARCH-006).
-                                Reflection is not a patch: this adapter reflects into ST internals,
-                                and ONLY into ST internals.
+                                Reflection is not a patch: if this adapter ever reflects, it reflects
+                                into ST internals, and ONLY into ST internals.
 
-    That the adapter compiles without SULFUR Together present is not an accident of the skeleton —
-    it is the shape of the design.
+    SULFUR Together IS referenced (below) — but only its public integration bridge (SULFURTogether.Api,
+    on ST main since 2026-07-13) is called, with no reflection. The still-internal ST systems
+    (seal/teleport, remote-NPC activation) are not touched yet; when a boss needs them, they arrive
+    either via a second bridge addition or by guarded reflection confined to this project
+    (Docs/MultiplayerLoadingContract.md §5.1.1, ADR-004 §3).
+
+    The reference is compile-time only (Private=false): at runtime the installed ST plugin provides the
+    assembly. This adapter must still LOAD cleanly when that ST build lacks the bridge — hence the
+    ST-type-load discipline documented in StEncounterChannel and enforced by FG-ARCH-011 (no field
+    signature in this assembly may bind to the "SULFUR Together" AssemblyRef).
   -->
 
   <PropertyGroup>
@@ -57,6 +58,34 @@
       <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- The B0 dev-key harness; the game ships the new Input System. -->
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(SulfurManagedDir)\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- The ST public bridge (SULFURTogether.Api). Compile-time only: the installed ST plugin provides it
+         at runtime, so it is never copied (same shape as the probe's P9 reference). The path points at the
+         adjacent ST repo's Release build, which must be a bridge-enabled ST main. -->
+    <Reference Include="SULFUR Together">
+      <HintPath>$(SulfurTogetherDir)\bin\Release\net472\SULFUR Together.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
+
+  <!--
+    Deploy the ADAPTER DLL ONLY, as its own plugin folder. The base plugin's DeployPlugin target already
+    deploys FalseGods.Core/RuntimeContracts (and the rest) under plugins\FalseGods; duplicating those here
+    would risk two copies of one assembly identity being loaded from different paths.
+
+    Build+deploy:  dotnet build src/FalseGods.Integration.SulfurTogether -p:DeployAdapter=true
+  -->
+  <Target Name="DeployAdapter" AfterTargets="Build" Condition="'$(DeployAdapter)' == 'true' AND '$(BepInExPluginDir)' != ''">
+    <PropertyGroup>
+      <_AdapterDeployDir>$(BepInExPluginDir)\FalseGods.SulfurTogether</_AdapterDeployDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_AdapterDeployDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(_AdapterDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Text="False Gods ST adapter deployed -&gt; $(_AdapterDeployDir)" Importance="high" />
+  </Target>
 
 </Project>

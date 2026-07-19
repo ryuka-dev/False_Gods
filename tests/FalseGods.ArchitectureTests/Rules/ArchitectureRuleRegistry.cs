@@ -90,6 +90,7 @@ public static class ArchitectureRuleRegistry
     public const string PatchAttributeScan = "patch attribute scan";
     public const string CompositionRootBehaviour = "composition root behaviour";
     public const string RegistryConsistency = "registry consistency";
+    public const string FieldSignatureScan = "field signature scan";
 
     public static IReadOnlyList<ArchitectureRule> All { get; } = new[]
     {
@@ -154,6 +155,13 @@ public static class ArchitectureRuleRegistry
 
         new ArchitectureRule("FG-ARCH-010", "Every enforced architecture test cites a valid rule id",
             new[] { new RuleCheckLayer(RegistryConsistency, CheckStatus.RequiredInCi) },
+            CompilerProtection.None),
+
+        new ArchitectureRule("FG-ARCH-011", "The ST adapter's field signatures never bind to SULFUR Together",
+            // Reads the built adapter DLL, which CI cannot build (game + BepInEx + ST). Local + L3 only,
+            // like FG-ARCH-002's metadata layer. The compiler is no help here: the fields that break are
+            // the ones IT generates (hoisted iterator/async locals, lambda caches).
+            new[] { new RuleCheckLayer(FieldSignatureScan, CheckStatus.Implemented) },
             CompilerProtection.None),
     };
 

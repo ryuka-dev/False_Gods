@@ -4,12 +4,14 @@
 added, excepted, or retired.*
 
 **Partially implemented.** The module skeleton's restricted project references give the compiler protection
-described in §5; **five rules have working automated checks** — `FG-ARCH-002`, `FG-ARCH-003`, `FG-ARCH-005`,
-`FG-ARCH-006` and `FG-ARCH-010` — run by `.\scripts\verify.ps1`; a **CI workflow**
+described in §5; **six rules have working automated checks** — `FG-ARCH-002`, `FG-ARCH-003`, `FG-ARCH-005`,
+`FG-ARCH-006`, `FG-ARCH-010` and `FG-ARCH-011` — run by `.\scripts\verify.ps1`; a **CI workflow**
 (`.github/workflows/verify.yml`) runs the game-independent subset on every push and PR; and the **local
-pre-push hook runs the full `verify.ps1` and blocks a red push**, so each of those five has at least one layer
+pre-push hook runs the full `verify.ps1` and blocks a red push**. The first five each have at least one layer
 **`Required in CI`** (the term's meaning is pinned in §4.1: run in CI *and* enforced by the pre-push hook —
-no longer a server-side merge gate, since branch protection was removed).
+no longer a server-side merge gate, since branch protection was removed); `FG-ARCH-011`'s one layer reads the
+built adapter DLL, which CI cannot build, so it is `Implemented` — local verify + pre-push only, the same
+split as FG-ARCH-002's metadata layer.
 
 **A rule is not a single check, and its status is not a single word.** Most rules are verified at more than
 one layer — the evaluated project graph, the compiled assembly metadata, a public-API scan — and the layers
@@ -139,6 +141,7 @@ so it cannot build UnityRuntime / Integration.* / Plugin.
 | **FG-ARCH-010** and all self-tests | ✅ | Pure logic / evaluation / in-memory Roslyn; no game. |
 | Probe isolation checks | ✅ | Project-graph evaluation only. |
 | **FG-ARCH-002 metadata layer** | ❌ | Reads `FalseGods.Plugin.dll`, an outer assembly CI cannot build. Stays L0 + L3. |
+| **FG-ARCH-011 field signature scan** | ❌ | Reads `FalseGods.Integration.SulfurTogether.dll`, an outer assembly CI cannot build (game + BepInEx + ST). Stays L0 + L3; its scanner self-test runs in CI against the inner `FalseGods.Application.dll`. |
 | **Metadata layer of FG-ARCH-003/005/006** | ❌ | Not written. It is what would catch a *transitive* dependency, which no evaluated project graph can see (§6). Reads outer DLLs, so it would be L0/L3 anyway. |
 | Outer-assembly compiler protection (FG-ARCH-003/006) | ❌ | CI does not build the outer assemblies, so their *compile-time* protection is a **local-only** guarantee (L0's full build). The reference-graph checks now cover the gap the compiler leaves — *adding* a forbidden reference — but not the gap only compilation closes. |
 
@@ -224,6 +227,7 @@ compared their sets of rule *ids*.
 | FG-ARCH-008 | public API signatures | Planned |
 | FG-ARCH-009 | composition root behaviour | Planned |
 | FG-ARCH-010 | registry consistency | Required in CI |
+| FG-ARCH-011 | field signature scan | Implemented |
 
 <!-- END FG-ARCH-LAYER-STATUS -->
 
@@ -482,6 +486,39 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
   … See Docs/ArchitectureEnforcement.md#fg-arch-010`
 - **Exceptions:** None.
 
+<a id="fg-arch-011"></a>
+
+### FG-ARCH-011 — The ST adapter's field signatures never bind to SULFUR Together
+
+- **Authority:** [DependencyRules.md §6](DependencyRules.md) ("a missing ST assembly … never a type-load
+  failure", RiskList R20/R29), and the measured B0 failure this rule encodes.
+- **Why a field, specifically:** the adapter may reference ST — method bodies and signatures naming ST types
+  resolve lazily at JIT, only on the guarded call paths. A **field** of an ST type is different: the CLR
+  resolves field types at type-load, so on a machine whose installed ST lacks the expected surface (the old
+  Thunderstore ST has the GUID but no `SULFURTogether.Api`), one such field makes `Assembly.GetTypes()` throw
+  `ReflectionTypeLoadException` for the whole assembly — and BepInEx ecosystems are full of scanners (XNode's
+  `NodeDataCache.BuildCache`, Knackelibang's `EasySettings` attribute scan) that call `GetTypes()` over every
+  loaded assembly, so the failure takes unrelated plugins down process-wide. This was hit **twice** on
+  2026-07-14, both times through fields the **compiler** generated: an ST-typed local hoisted into an
+  iterator's state machine, and a lambda/method-group cache — which is why this is a metadata check, not a
+  review item.
+- **Check:** one layer, `field signature scan`: decode every FieldDef signature in the built
+  `FalseGods.Integration.SulfurTogether.dll` (including nested/compiler-generated types) and assert none binds
+  to the `SULFUR Together` AssemblyRef (the real identity, **with a space** — the FG-ARCH-005 section documents
+  the namespace-vs-assembly trap). A companion self-test proves the scanner can see cross-assembly field
+  bindings at all, against the inner `FalseGods.Application.dll`, so a green adapter scan is never vacuous.
+- **Check status:** `field signature scan` = `Implemented` (§5.1). Reads an outer DLL, so it is excluded from
+  `-CiSafe` and runs in the local full verify and the pre-push hook (L0 + L3), like FG-ARCH-002's metadata
+  layer; the scanner self-test itself runs in CI.
+- **Compiler protection:** `None` — the offending fields are ones the compiler *emits*, from source that looks
+  like an innocent local or lambda.
+- **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/StAdapterFieldSignaturesChecks.cs`, over
+  `Inspection/FieldSignatureInspector.cs`.
+- **Expected failure message:** `FG-ARCH-011: these fields in FalseGods.Integration.SulfurTogether.dll bind to
+  the 'SULFUR Together' assembly … <RunHost>d__12.peers : SULFURTogether.Api.ExternalPeer …`
+- **Exceptions:** None. If a future ST capability genuinely needs an ST-typed field, the adapter splits into an
+  always-loadable shell and an ST-hard inner assembly first — that design change needs its own ADR.
+
 ## 6. Assembly dependency checks
 
 The backbone (FG-ARCH-001/002/003/005/007). **Two layers, and neither alone is sufficient** — this is the
@@ -689,13 +726,14 @@ cannot say: what each rule's *enforced* layer actually buys, and what it leaves 
 | FG-ARCH-008 | — | the whole rule | `None` — needs the Protocol types to exist |
 | FG-ARCH-009 | `project graph` of FG-ARCH-002 | the behavioural half (needs a Composition Root) | `Partial`, via FG-ARCH-002 |
 | **FG-ARCH-010** | `registry consistency` ✅ CI | whether a rule is *right* | `None` |
+| **FG-ARCH-011** | `field signature scan` (L0/L3) | nothing structural; the *runtime* graceful-degradation half stays manual (B0) | `None` — the offending fields are compiler-generated |
 
 **The pre-push hook is the blocking gate** (branch protection was removed; CI re-checks but does not block).
 Five rules have a layer that is `Required in CI` — run in CI and enforced by that hook. What CI cannot run —
 every metadata layer, and the outer assemblies' compile-time protection — remains L0 (the pre-push hook runs
 the full verify, Debug and Release) and L3.
 
-**Say it precisely: five rules have an enforced layer; zero rules are fully enforced.** FG-ARCH-005 and
+**Say it precisely: six rules have an enforced layer; zero rules are fully enforced.** FG-ARCH-005 and
 FG-ARCH-006 in particular each have a second half — broker access, and the `[HarmonyPatch]` scan — that
 nothing checks. "The reference graph is checked" is the claim these entries support. It is not the same
 sentence as "the rule holds".
