@@ -51,6 +51,8 @@ namespace FalseGods.ApplicationTests
 
         public IReadOnlyList<SessionPeerId> Members => _members;
 
+        public void Add(int member) => _members.Add(new SessionPeerId(member));
+
         public void Remove(int member) => _members.Remove(new SessionPeerId(member));
     }
 }

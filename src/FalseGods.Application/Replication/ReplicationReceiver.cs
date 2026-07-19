@@ -26,8 +26,9 @@ namespace FalseGods.Application.Replication
     /// repeats an attack. This class tracks applied state for the composition to project to presentation; it makes
     /// no authoritative decision.
     /// </remarks>
-    public sealed class ReplicationReceiver
+    public sealed class ReplicationReceiver : IDisposable
     {
+        private readonly IEncounterChannel _channel;
         private readonly HashSet<long> _appliedBossSequences = new HashSet<long>();
         private readonly HashSet<long> _appliedArenaSequences = new HashSet<long>();
         private readonly HashSet<long> _committedAttacks = new HashSet<long>();
@@ -41,13 +42,15 @@ namespace FalseGods.Application.Replication
 
         public ReplicationReceiver(IEncounterChannel channel)
         {
-            if (channel is null)
-            {
-                throw new ArgumentNullException(nameof(channel));
-            }
-
-            channel.Received += OnReceived;
+            _channel = channel ?? throw new ArgumentNullException(nameof(channel));
+            _channel.Received += OnReceived;
         }
+
+        /// <summary>
+        /// Unsubscribe from the channel. Part of encounter teardown (Docs/Architecture.md §9): after this, no
+        /// arriving payload is applied. Idempotent; the applied state stays readable for the teardown code.
+        /// </summary>
+        public void Dispose() => _channel.Received -= OnReceived;
 
         /// <summary>Boss discrete events applied, in application order, with duplicates already dropped.</summary>
         public IReadOnlyList<IBossWireEvent> AppliedBossEvents => _appliedBossEvents;
