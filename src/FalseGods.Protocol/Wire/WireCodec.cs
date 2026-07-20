@@ -195,6 +195,33 @@ namespace FalseGods.Protocol.Wire
             return message;
         }
 
+        public static byte[] Serialize(ClientHitRequest message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.Encounter.Value);
+            WriteInt(w, message.RequestSequence);
+            w.WriteSingle(message.DamageCandidate);
+            w.WriteBool(message.AttackerPosition.HasValue);
+            if (message.AttackerPosition.HasValue)
+            {
+                WriteWorldPosition(w, message.AttackerPosition.Value);
+            }
+
+            return w.ToArray();
+        }
+
+        public static ClientHitRequest DeserializeClientHitRequest(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var encounter = new EncounterId(r.ReadInt32());
+            var sequence = r.ReadInt32();
+            var damageCandidate = r.ReadSingle();
+            var attackerPosition = r.ReadBool() ? ReadWorldPosition(r) : (WorldPosition?)null;
+            var message = new ClientHitRequest(encounter, sequence, damageCandidate, attackerPosition);
+            RequireEnd(r);
+            return message;
+        }
+
         // ---------------------------------------------------------------- event streams
 
         public static byte[] Serialize(IBossWireEvent bossEvent)

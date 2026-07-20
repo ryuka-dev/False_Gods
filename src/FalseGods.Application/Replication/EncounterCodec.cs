@@ -18,6 +18,7 @@ namespace FalseGods.Application.Replication
         ArenaLoadFailed = 8,
         EncounterAborted = 9,
         EncounterEnded = 10,
+        ClientHitRequest = 11,
     }
 
     /// <summary>One decoded replication message: its <see cref="Kind"/> and the deserialized DTO as <see cref="Value"/>.</summary>
@@ -33,7 +34,7 @@ namespace FalseGods.Application.Replication
 
         /// <summary>The DTO — a <c>BossSnapshot</c>, <c>ArenaSnapshot</c>, <c>IBossWireEvent</c>, <c>IArenaWireEvent</c>,
         /// <c>EncounterBaseline</c>, or an encounter control message (<c>EnterArena</c>, <c>ArenaReady</c>,
-        /// <c>ArenaLoadFailed</c>, <c>EncounterAborted</c>, <c>EncounterEnded</c>).</summary>
+        /// <c>ArenaLoadFailed</c>, <c>EncounterAborted</c>, <c>EncounterEnded</c>, <c>ClientHitRequest</c>).</summary>
         public object Value { get; }
     }
 
@@ -70,6 +71,8 @@ namespace FalseGods.Application.Replication
 
         public static EncodedPayload Encode(EncounterEnded message) => Wrap(ReplicationKind.EncounterEnded, WireCodec.Serialize(message));
 
+        public static EncodedPayload Encode(ClientHitRequest message) => Wrap(ReplicationKind.ClientHitRequest, WireCodec.Serialize(message));
+
         /// <summary>Decode an opaque payload back into its DTO. Treats the payload as untrusted input.</summary>
         public static DecodedMessage Decode(EncodedPayload payload)
         {
@@ -105,6 +108,8 @@ namespace FalseGods.Application.Replication
                     return new DecodedMessage(kind, WireCodec.DeserializeEncounterAborted(body));
                 case ReplicationKind.EncounterEnded:
                     return new DecodedMessage(kind, WireCodec.DeserializeEncounterEnded(body));
+                case ReplicationKind.ClientHitRequest:
+                    return new DecodedMessage(kind, WireCodec.DeserializeClientHitRequest(body));
                 default:
                     throw new InvalidDataException($"Unknown replication kind tag {bytes[0]}.");
             }
