@@ -117,7 +117,7 @@ namespace FalseGods.Plugin
 
             // The floor height is a local presentation concern (the authoritative position is x/z only), derived
             // the same way the host derives its own: the local viewer's eye height.
-            var floorY = camera.transform.position.y - SinglePlayerBossController.EyeToFootDrop;
+            var floorY = camera.transform.position.y - LocalEncounterController.EyeToFootDrop;
             _presentation = new BossPresentation(_logger, new Vector3(x, floorY, z));
             _encounter = encounter;
             _presentedEvents = 0;

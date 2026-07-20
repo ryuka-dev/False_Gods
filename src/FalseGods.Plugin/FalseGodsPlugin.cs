@@ -26,7 +26,7 @@ namespace FalseGods.Plugin
     /// live session state — a session starts and ends in-game, not at plugin load:
     /// <list type="bullet">
     /// <item><b>Single-player</b> (no integration, or no active session): the local
-    /// <see cref="SinglePlayerBossController"/> stack; replication absent.</item>
+    /// <see cref="LocalEncounterController"/> stack; replication absent.</item>
     /// <item><b>Host</b>: the same controller with an <see cref="EncounterHostReplication"/> attached — the host
     /// adds replication, it does not swap boss implementations.</item>
     /// <item><b>Client</b>: a <see cref="ClientBossController"/> — presentation only, driven by the host's
@@ -48,11 +48,9 @@ namespace FalseGods.Plugin
     {
         public const string PluginGuid = "ryuka_labs.falsegods";
         public const string PluginName = "False Gods";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.4.0";
 
         private const int TestBossDefinition = 1;
-        private const string PlaceholderArenaId = "false_gods.arena.none";
-        private const int PlaceholderArenaVersion = 0;
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
@@ -60,7 +58,7 @@ namespace FalseGods.Plugin
         private ConfigEntry<bool> _lockPitch = null!;
 
         private BepInExLogger _log = null!;
-        private SinglePlayerBossController _boss = null!;
+        private LocalEncounterController _boss = null!;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
 
@@ -85,7 +83,7 @@ namespace FalseGods.Plugin
                 + "true = yaw only (upright). Ignored by the Fixed and NearestPlayer modes.");
 
             _log = new BepInExLogger(Logger);
-            _boss = new SinglePlayerBossController(_log);
+            _boss = new LocalEncounterController(_log);
 
             // Subscribe before any adapter can load (their hard BepInDependency on this GUID guarantees the order),
             // so a registration always lands in an initialized seam. Composition changes are applied in Update, in
@@ -155,22 +153,22 @@ namespace FalseGods.Plugin
                 }
                 else
                 {
-                    // Attach replication before Raise so the spawn events themselves are replicated.
+                    // A host hands the controller a replication factory: the controller invokes it after the ready
+                    // gate resolves (the manifest the driver carries exists only then) and before the boss spawns,
+                    // so the spawn events themselves are replicated.
                     _currentEncounter = new EncounterId(_nextEncounter++);
-                    if (role == CompositionRole.Host)
-                    {
-                        _boss.SetReplication(BuildHostReplication(integration!));
-                    }
-
-                    _boss.Raise();
+                    _boss.SetReplicationFactory(role == CompositionRole.Host
+                        ? manifest => BuildHostReplication(integration!, manifest)
+                        : (Func<Protocol.Arena.ArenaManifest, EncounterHostReplication>?)null);
+                    _boss.Raise(_currentEncounter);
                 }
             }
 
             // The session can start or end mid-encounter; keep the attached driver consistent with the live role.
             var wantReplication = role == CompositionRole.Host && _boss.IsUp;
-            if (wantReplication && !_boss.HasReplication)
+            if (wantReplication && !_boss.HasReplication && _boss.CurrentManifest != null)
             {
-                _boss.SetReplication(BuildHostReplication(integration!));
+                _boss.SetReplication(BuildHostReplication(integration!, _boss.CurrentManifest));
             }
             else if (!wantReplication && _boss.HasReplication)
             {
@@ -220,22 +218,15 @@ namespace FalseGods.Plugin
             _clientIntegration = null;
         }
 
-        private EncounterHostReplication BuildHostReplication(IFalseGodsIntegration integration) =>
+        private EncounterHostReplication BuildHostReplication(
+            IFalseGodsIntegration integration, Protocol.Arena.ArenaManifest manifest) =>
             new EncounterHostReplication(
                 new ReplicationSender(integration.Channel, integration.Session),
                 integration.Session,
                 integration.Roster,
                 _currentEncounter,
                 new DefinitionId(TestBossDefinition),
-                // The dev-slice placeholder identity; the arena pipeline's real manifest replaces it when the
-                // arena joins this composition.
-                new Protocol.Arena.ArenaManifest(
-                    PlaceholderArenaId,
-                    PlaceholderArenaVersion,
-                    new Protocol.Arena.ContentHashSchemaVersion(0),
-                    ContentHash: default,
-                    Protocol.Wire.ProtocolVersion.Current.Value,
-                    BundleVersion: string.Empty));
+                manifest);
 
         private void OnIntegrationChanged()
         {
