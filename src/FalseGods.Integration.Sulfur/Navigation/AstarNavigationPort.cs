@@ -76,6 +76,13 @@ namespace FalseGods.Integration.Sulfur.Navigation
                 return NavigationApplyResult.Failed("no active recast graph (no loaded level)");
             }
 
+            // The graph exists but its tiles may not be built yet (e.g. a hub/safe zone) — GetTile would then
+            // dereference a null tile array. Fail closed with a clear reason rather than throw.
+            if (!recast.isScanned)
+            {
+                return NavigationApplyResult.Failed("the level's navigation is not built here (no scanned recast tiles)");
+            }
+
             var root = _arenaRoot();
             if (root == null)
             {
@@ -97,6 +104,19 @@ namespace FalseGods.Integration.Sulfur.Navigation
                 out var graphTileRect,
                 out var snappedRotation,
                 out var yOffset);
+
+            // SnapToGraph does NOT clamp to the graph, so an arena placed near a level edge yields a tile rect
+            // that runs off the tile array — GetTile / ReplaceTiles / ClearTiles would then throw. The whole
+            // footprint must sit inside the graph, or the apply is refused fail-closed (§5.3.1: never corrupt the
+            // level's own graph). Moving toward the level centre resolves it.
+            if (graphTileRect.xmin < 0 || graphTileRect.ymin < 0
+                || graphTileRect.xmax >= recast.tileXCount || graphTileRect.ymax >= recast.tileZCount)
+            {
+                return NavigationApplyResult.Failed(
+                    $"arena navigation footprint tiles [{graphTileRect.xmin},{graphTileRect.ymin}]..[{graphTileRect.xmax},"
+                    + $"{graphTileRect.ymax}] extend past the level's navigable area ({recast.tileXCount}x{recast.tileZCount} "
+                    + "tiles); move toward the level centre and try again");
+            }
 
             byte[] baked;
             try
