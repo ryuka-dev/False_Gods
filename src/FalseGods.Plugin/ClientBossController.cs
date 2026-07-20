@@ -1,9 +1,11 @@
 using System;
 using System.IO;
 using FalseGods.Application.Arena;
+using FalseGods.Application.Combat;
 using FalseGods.Application.Presentation;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Simulation;
+using FalseGods.Integration.Sulfur.Combat;
 using FalseGods.Integration.Sulfur.Navigation;
 using FalseGods.Protocol.Wire;
 using FalseGods.RuntimeContracts.Arena;
@@ -37,8 +39,10 @@ namespace FalseGods.Plugin
         private readonly IFalseGodsIntegration _integration;
         private readonly string _contentDirectory;
         private readonly ClientEncounterFlow _controlFlow;
+        private readonly ClientHitReporter _hitReporter;
 
         private ReplicationReceiver _receiver;
+        private IDisposable? _hitBinding;
         private BossPresentation? _presentation;
         private EncounterId? _encounter;
         private int _presentedEvents;
@@ -60,6 +64,7 @@ namespace FalseGods.Plugin
             _integration = integration ?? throw new ArgumentNullException(nameof(integration));
             _contentDirectory = Path.GetDirectoryName(typeof(ClientBossController).Assembly.Location) ?? ".";
             _receiver = new ReplicationReceiver(integration.Channel, integration.Session);
+            _hitReporter = new ClientHitReporter(integration.Channel, integration.Session);
             _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
             {
                 OnEnterArena = HandleEnterArena,
@@ -138,6 +143,8 @@ namespace FalseGods.Plugin
         {
             _controlFlow.Dispose();
             _receiver.Dispose();
+            _hitBinding?.Dispose();
+            _hitBinding = null;
             _presentation?.Dispose();
             _presentation = null;
             TeardownArena();
@@ -285,7 +292,14 @@ namespace FalseGods.Plugin
             _presentedEvents = 0;
             _presentedArenaEvents = 0;
             _waitingForCameraLogged = false;
-            _logger?.Log($"Client boss puppet raised for {encounter} at ({x:0.0}, {floorY:0.0}, {z:0.0}) on the arena floor; host-driven.");
+
+            // Hit intent: the local player's real weapons strike the puppet's Hitbox capsule exactly as they strike
+            // the host's boss, but the sink reports the hit to the host instead of applying damage — the client
+            // decides nothing, the authoritative result returns as a replicated BossDamaged event (§5.6).
+            _hitBinding = BossWeaponDamage.Bind(
+                _presentation.HitCollider.gameObject, new HitReportSink(_hitReporter, encounter), _logger);
+
+            _logger?.Log($"Client boss puppet raised for {encounter} at ({x:0.0}, {floorY:0.0}, {z:0.0}) on the arena floor; host-driven. Your weapons report hits to the host.");
             return true;
         }
 
@@ -294,6 +308,8 @@ namespace FalseGods.Plugin
             _logger?.Log($"Host started {next}; discarding the previous encounter's stream and visuals.");
             _receiver.Dispose();
             _receiver = new ReplicationReceiver(_integration.Channel, _integration.Session);
+            _hitBinding?.Dispose();
+            _hitBinding = null;
             _presentation?.Dispose();
             _presentation = null;
             _encounter = null;
@@ -312,6 +328,8 @@ namespace FalseGods.Plugin
         {
             _receiver.Dispose();
             _receiver = new ReplicationReceiver(_integration.Channel, _integration.Session);
+            _hitBinding?.Dispose();
+            _hitBinding = null;
             _presentation?.Dispose();
             _presentation = null;
             _encounter = null;
@@ -329,6 +347,22 @@ namespace FalseGods.Plugin
             _loadedArena = null;
             _arenaEncounter = null;
             _arenaSnapshotReplayed = false;
+        }
+
+        /// <summary>The client's <see cref="IBossDamageSink"/>: a real weapon hit on the puppet becomes a hit
+        /// <b>report</b> to the host for a fixed encounter, never a local damage application (§5.6, invariant 2).</summary>
+        private sealed class HitReportSink : IBossDamageSink
+        {
+            private readonly ClientHitReporter _reporter;
+            private readonly EncounterId _encounter;
+
+            public HitReportSink(ClientHitReporter reporter, EncounterId encounter)
+            {
+                _reporter = reporter;
+                _encounter = encounter;
+            }
+
+            public void ApplyWeaponDamage(float amount) => _reporter.ReportHit(_encounter, amount);
         }
     }
 }

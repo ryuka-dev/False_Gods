@@ -58,6 +58,10 @@ namespace FalseGods.Plugin
         internal const string ArtifactFileName = "arena-content-PocRoom.artifact";
         internal const string ArenaPrefabName = "PocRoom";
 
+        /// <summary>Default sanity ceiling on a single client-reported hit — bounds a forged message, not a
+        /// substitute for rate limiting; set generously above any legitimate single weapon hit.</summary>
+        internal const float DefaultMaxClientHitDamage = 1000f;
+
         private const string PhaseTwoGroup = "phase_2";
         private const float GateTimeoutSeconds = 30f;
 
@@ -65,6 +69,7 @@ namespace FalseGods.Plugin
         private readonly ISimulationClock _clock;
         private readonly IEncounterParticipantQuery _participants;
         private readonly string _contentDirectory;
+        private readonly float _maxClientHitDamage;
 
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
@@ -76,6 +81,7 @@ namespace FalseGods.Plugin
         private ArenaLoadFlow? _flow;
         private EncounterHostReplication? _replication;
         private IDisposable? _damageBinding;
+        private HostHitIntake? _hitIntake;
 
         // Host-gate state, present only while raised (or raising) as a session host.
         private IFalseGodsIntegration? _hostIntegration;
@@ -86,9 +92,10 @@ namespace FalseGods.Plugin
         private EncounterId _encounter;
         private WorldPosition _originWire;
 
-        public LocalEncounterController(ILogger logger)
+        public LocalEncounterController(ILogger logger, float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
             _logger = logger;
+            _maxClientHitDamage = maxClientHitDamage;
             // The single-player Core-port bundle. Clock and roster are stateless and shared across raises; the RNG is
             // reseeded per raise so successive fights vary.
             _clock = new SulfurSimulationClock();
@@ -287,6 +294,8 @@ namespace FalseGods.Plugin
         {
             BroadcastEndedIfHosting();
             CleanupGate();
+            _hitIntake?.Dispose();
+            _hitIntake = null;
             _damageBinding?.Dispose();
             _damageBinding = null;
             _presentation?.Dispose();
@@ -347,6 +356,17 @@ namespace FalseGods.Plugin
                     new DefinitionId(1),
                     manifest,
                     _originWire));
+
+                // Accept client hit intents for this encounter: validated (member + live encounter), clamped, and
+                // routed through the same authoritative damage path a local weapon hit uses (§5.6). The result
+                // replicates back as an ordinary BossDamaged event — the client never decides damage.
+                _hitIntake = new HostHitIntake(
+                    _hostIntegration.Channel,
+                    _hostIntegration.Roster,
+                    _encounter,
+                    _maxClientHitDamage,
+                    OnWeaponDamage,
+                    message => _logger?.Log(message));
             }
 
             // Real weapon damage: the game's projectile/melee systems strike the Hitbox-layer capsule, find the

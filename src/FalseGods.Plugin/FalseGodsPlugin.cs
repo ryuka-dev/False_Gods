@@ -56,6 +56,7 @@ namespace FalseGods.Plugin
         private ConfigEntry<Key> _raiseKey = null!;
         private ConfigEntry<BossFacingMode> _facingMode = null!;
         private ConfigEntry<bool> _lockPitch = null!;
+        private ConfigEntry<float> _maxClientHitDamage = null!;
 
         private BepInExLogger _log = null!;
         private LocalEncounterController _boss = null!;
@@ -82,8 +83,15 @@ namespace FalseGods.Plugin
                 "In LocalBillboard facing, false = yaw + natural elevation pitch toward the camera (vanilla), "
                 + "true = yaw only (upright). Ignored by the Fixed and NearestPlayer modes.");
 
+            _maxClientHitDamage = Config.Bind("Multiplayer", "MaxClientHitDamage",
+                LocalEncounterController.DefaultMaxClientHitDamage,
+                "Host only: the largest single hit a multiplayer client may report against the boss. A sanity "
+                + "ceiling on a forged message, not a substitute for rate limiting - set it above any legitimate "
+                + "single weapon hit. The host clamps to this; the simulation still decides weak-point, phase, and "
+                + "death. Read once at load.");
+
             _log = new BepInExLogger(Logger);
-            _boss = new LocalEncounterController(_log);
+            _boss = new LocalEncounterController(_log, _maxClientHitDamage.Value);
 
             // Subscribe before any adapter can load (their hard BepInDependency on this GUID guarantees the order),
             // so a registration always lands in an initialized seam. Composition changes are applied in Update, in
