@@ -33,6 +33,11 @@
       <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- AssetBundle lives in its own module (BundleArenaRealization loads the arena bundle). -->
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>

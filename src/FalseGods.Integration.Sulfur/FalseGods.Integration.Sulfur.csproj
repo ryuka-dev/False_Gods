@@ -69,6 +69,16 @@
     </Reference>
 
     <!-- Navigation: A* Pathfinding Project (NOT Unity NavMesh) — see Docs/ADRs/ADR-002. -->
+    <!-- AstarPath/NavmeshPrefab derive from VersionedMonoBehaviour (PackageTools), whose own base
+         MonoBehaviourGizmos lives in Drawing. -->
+    <Reference Include="PackageTools">
+      <HintPath>$(SulfurManagedDir)\PackageTools.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Drawing">
+      <HintPath>$(SulfurManagedDir)\Drawing.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="AstarPathfindingProject">
       <HintPath>$(SulfurManagedDir)\AstarPathfindingProject.dll</HintPath>
       <Private>false</Private>

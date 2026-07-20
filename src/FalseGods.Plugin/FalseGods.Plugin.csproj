@@ -82,16 +82,25 @@
     </PropertyGroup>
     <ItemGroup>
       <_PluginDll Include="$(TargetDir)FalseGods.*.dll" />
+      <!-- Arena content: the bundle + content artifact the Unity build writes (gitignored build output).
+           Deployed beside the plugin; missing files are reported, not fatal - the arena flow then fails
+           closed at runtime with "content unavailable". -->
+      <_ArenaContent Include="$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\falsegods-poc-room.bundle" Condition="Exists('$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\falsegods-poc-room.bundle')" />
+      <_ArenaContent Include="$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\arena-content-PocRoom.artifact" Condition="Exists('$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\arena-content-PocRoom.artifact')" />
     </ItemGroup>
     <MakeDir Directories="$(_PluginDeployDir)" />
     <Copy SourceFiles="@(_PluginDll)" DestinationFolder="$(_PluginDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="@(_ArenaContent)" DestinationFolder="$(_PluginDeployDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="true" />
     <Message Text="False Gods plugin deployed -&gt; $(_PluginDeployDir): @(_PluginDll->'%(Filename)%(Extension)')" Importance="high" />
+    <Message Condition="!Exists('$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\falsegods-poc-room.bundle')" Text="Arena bundle not found under FalseGods.Unity\Build - the arena flow will fail closed. Build it in FalseGods.Unity first." Importance="high" />
+    <Message Condition="!Exists('$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build\arena-content-PocRoom.artifact')" Text="Arena content artifact not found under FalseGods.Unity\Build - the arena flow will fail closed. Build the bundle in FalseGods.Unity first." Importance="high" />
     <!-- Optional second copy: the two-instance CLIENT profile (see LocalPaths.props.example). -->
     <PropertyGroup Condition="'$(BepInExClientPluginDir)' != ''">
       <_PluginClientDeployDir>$(BepInExClientPluginDir)\FalseGods</_PluginClientDeployDir>
     </PropertyGroup>
     <MakeDir Condition="'$(BepInExClientPluginDir)' != ''" Directories="$(_PluginClientDeployDir)" />
     <Copy Condition="'$(BepInExClientPluginDir)' != ''" SourceFiles="@(_PluginDll)" DestinationFolder="$(_PluginClientDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Copy Condition="'$(BepInExClientPluginDir)' != ''" SourceFiles="@(_ArenaContent)" DestinationFolder="$(_PluginClientDeployDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="true" />
     <Message Condition="'$(BepInExClientPluginDir)' != ''" Text="False Gods plugin deployed (client) -&gt; $(_PluginClientDeployDir)" Importance="high" />
   </Target>
 
