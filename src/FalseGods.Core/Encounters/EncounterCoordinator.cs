@@ -26,7 +26,8 @@ namespace FalseGods.Core.Encounters
     /// It consumes the boss's <b>already-drained</b> events (like the presenter and replication), because on a host
     /// the same drained events fan out to all three. The arena events its commands produce are drained from the
     /// <see cref="ArenaSimulation"/> by the caller for replication/presentation. A richer per-phase rule map is
-    /// deliberately not built until a second boss needs it (Docs/DefinitionOfDone.md §3).
+    /// deliberately not built until a second boss needs it (Docs/DefinitionOfDone.md §3) — and when it does, the
+    /// rule map moves into the encounter/boss definition as data, not another <c>case</c> here.
     /// </para>
     /// </remarks>
     public sealed class EncounterCoordinator

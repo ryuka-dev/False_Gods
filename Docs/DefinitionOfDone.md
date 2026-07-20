@@ -146,3 +146,8 @@ vertical slice:
 9. extract shared abstractions **only** from demonstrated repetition.
 
 > Generalize after a second real use case reveals a stable common structure — not before.
+
+When that second case arrives, the shared structure belongs in the **boss/encounter definition as data** — a
+registry entry pairing an arena, a boss tuning, and its phase-to-arena-command rules — **not** as another `case`
+in `EncounterCoordinator.Process` or another branch in `BossSimulation.SelectAttack`. Those two are the
+load-bearing seams for a second boss; grow them into data-driven definitions, do not special-case them.
