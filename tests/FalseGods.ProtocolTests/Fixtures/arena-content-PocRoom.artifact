@@ -21,6 +21,8 @@ collider	fa15e900-0000-0000-0000-000000000015	Box	GeometryNoNavMesh	3	0.5	2	11
 nav	fa15e900-0000-0000-0000-000000000020	WalkableSurface	arena-nav-PocRoom	0	0	0	20	0.1	20
 spawn	fa15e900-0000-0000-0000-000000000030	Player	false_gods.spawn.player	-7	0	-7	0	0	0	1	1	1	1
 spawn	fa15e900-0000-0000-0000-000000000031	Enemy	false_gods.spawn.dummy	7	0	7	0	0	0	1	1	1	1
+matborrow	fa15e900-0000-0000-0000-000000000050	fa15e900-0000-0000-0000-000000000006	0	92103c239550ca740906311170fcc458	CaveFloor	VisualRoot/Floor
+matborrow	fa15e900-0000-0000-0000-000000000051	fa15e900-0000-0000-0000-000000000007	0	92103c239550ca740906311170fcc458	CaveWall	VisualRoot/Pillar
 parity	VisualRoot	VisualRoot	0	0	0	0	0	0	1	1	1	1
 parity	CollisionRoot	CollisionRoot	0	0	0	0	0	0	1	1	1	1
 parity	NavigationRoot	NavigationRoot	0	0	0	0	0	0	1	1	1	1

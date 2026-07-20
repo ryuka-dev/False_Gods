@@ -52,6 +52,25 @@ namespace FalseGods.ApplicationTests
             },
             MaterialBorrowPlacements: Array.Empty<MaterialBorrowPlacement>());
 
+        /// <summary>The base artifact plus one material borrow (targeting the root node) with its runtime target
+        /// path placement — a hash-valid artifact that exercises the borrow request-building path.</summary>
+        private static ArenaContentArtifact ArtifactWithBorrow()
+        {
+            var baseArtifact = Artifact();
+            var definition = baseArtifact.Definition with
+            {
+                MaterialBorrows = new[]
+                {
+                    new MaterialBorrowDefinition(Marker(9), Marker(1), 0, "carrier-guid", "CaveFloor"),
+                },
+            };
+            return baseArtifact with
+            {
+                Definition = definition,
+                MaterialBorrowPlacements = new[] { new MaterialBorrowPlacement(Marker(9), "VisualRoot/Floor") },
+            };
+        }
+
         // ---------------------------------------------------------------- fakes
 
         private sealed class FakeAssets : IArenaAssetProvider
@@ -360,6 +379,22 @@ namespace FalseGods.ApplicationTests
                 new[] { "assets.Load", "realize", "vanilla.Resolve", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
                 rig.Journal);
             Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
+        }
+
+        [Fact]
+        public void Material_borrow_request_carries_the_placement_target_path()
+        {
+            var rig = new Rig(ArtifactWithBorrow().Serialize());
+
+            rig.Flow.Prepare();
+            var result = rig.Flow.Realize(Origin);
+
+            Assert.True(result.Success);
+            var request = Assert.Single(rig.Vanilla.CapturedRequests!);
+            Assert.Equal("VisualRoot/Floor", request.TargetPath);   // from the non-hashed placement
+            Assert.Equal("CaveFloor", request.MaterialName);        // from the hashed definition
+            Assert.Equal("carrier-guid", request.CarrierGuid);
+            Assert.Equal(0, request.TargetSubMaterialIndex);
         }
 
         // ---------------------------------------------------------------- teardown & guards

@@ -17,7 +17,7 @@ namespace FalseGods.ProtocolTests
         // canonical hash definition must update this deliberately (a hash change is a ContentHashSchemaVersion
         // change — MultiplayerLoadingContract §5.2.1).
         private const string GoldenContentHashHex =
-            "7dc53023e646e16574c5c35cc5fecf1f7202f267775d39fe2a7bedd98c8bcac6";
+            "f67f0b67ee5d329fd645bd5398b5b60e67eca7426013cc8eeed8a47ed2f2092c";
 
         private static string FixtureText() =>
             File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arena-content-PocRoom.artifact"));
@@ -38,7 +38,8 @@ namespace FalseGods.ProtocolTests
             Assert.Single(artifact.Definition.NavDefinitions);  // the walkable floor surface
             Assert.Equal(2, artifact.Definition.Spawns.Count);  // player + dummy enemy
             Assert.Empty(artifact.Definition.Mechanisms);
-            Assert.Empty(artifact.Definition.MaterialBorrows); // the PoC room borrows no vanilla materials yet
+            Assert.Equal(2, artifact.Definition.MaterialBorrows.Count);      // Floor + Pillar wear vanilla cave mats
+            Assert.Equal(2, artifact.MaterialBorrowPlacements.Count);        // their runtime target paths
             Assert.Equal(14, artifact.Parity.Count);
         }
 

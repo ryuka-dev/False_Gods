@@ -44,6 +44,12 @@ namespace FalseGods.EditorTools
         private const int ArenaVersion = 1;
         private const string ArenaContentId = "assets/falsegods/arenas/pocroom/pocroom.prefab";
 
+        // Direction B: dress our own Floor/Pillar meshes with vanilla cave materials, borrowed by NAME from a
+        // pinned donor carrier (CaveNormal3New — one clean renderer carrying the whole cave material set, all
+        // RELIABLE per the P1a survey). The GUID names the player's own installed asset; nothing vanilla is
+        // shipped. Resolved at runtime onto sub-material 0 of the target renderer.
+        private const string CaveCarrierGuid = "92103c239550ca740906311170fcc458";
+
         private const char Sep = '\t';
         private const string Nil = "-";
 
@@ -146,6 +152,12 @@ namespace FalseGods.EditorTools
             SpawnRow(sb, root, "GameplayRoot/PlayerSpawn", Guid(30), "Player", "false_gods.spawn.player");
             SpawnRow(sb, root, "GameplayRoot/EnemySpawn", Guid(31), "Enemy", "false_gods.spawn.dummy");
 
+            // ── Material borrows (input 10): our own Floor/Pillar wear vanilla CaveFloor/CaveWall (direction B).
+            //    Target the Floor (Guid 6) and Pillar (Guid 7) nodes; the trailing runtime path is a locator, not
+            //    hashed. Carrier + material name + sub-material index are the hashed donor identity.
+            MaterialBorrowRow(sb, Guid(50), Guid(6), 0, CaveCarrierGuid, "CaveFloor", "VisualRoot/Floor");
+            MaterialBorrowRow(sb, Guid(51), Guid(7), 0, CaveCarrierGuid, "CaveWall", "VisualRoot/Pillar");
+
             // ── Parity map (R14): every identity node/collider/spawn the runtime should find, by path, with the
             //    authored local transform to compare against. Never fed to the hash.
             foreach (var (path, kind) in ParityTargets())
@@ -196,6 +208,12 @@ namespace FalseGods.EditorTools
         {
             var t = Find(root, path);
             Row(sb, Prepend("spawn", marker, kind, definitionId, Transform(t)));
+        }
+
+        private static void MaterialBorrowRow(StringBuilder sb, string marker, string targetMarker,
+            int subMaterialIndex, string carrierGuid, string materialName, string targetPath)
+        {
+            Row(sb, "matborrow", marker, targetMarker, Int(subMaterialIndex), carrierGuid, materialName, targetPath);
         }
 
         private static void ParityRow(StringBuilder sb, Transform root, string path, string kind)
