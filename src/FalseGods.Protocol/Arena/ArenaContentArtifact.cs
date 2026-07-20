@@ -32,7 +32,8 @@ namespace FalseGods.Protocol.Arena
         ContentHashSchemaVersion SchemaVersion,
         int ProtocolVersion,
         string BundleVersion,
-        IReadOnlyList<ArenaParityNode> Parity)
+        IReadOnlyList<ArenaParityNode> Parity,
+        IReadOnlyList<MaterialBorrowPlacement> MaterialBorrowPlacements)
     {
         /// <summary>Bumped only when the artifact's on-disk shape changes — independent of
         /// <see cref="ContentHashSchemaVersion"/>, which versions the hash inputs. A reader rejects an unknown
@@ -79,12 +80,26 @@ namespace FalseGods.Protocol.Arena
                 Row(sb, Fields("mechanism", m.MarkerId.ToCanonicalString(), m.MechanismDefinitionId, m.MechanismGroupId, Transform(m.LocalTransform)));
             foreach (var b in Definition.MaterialBorrows)
                 Row(sb, Fields("matborrow", b.MarkerId.ToCanonicalString(), b.TargetMarkerId.ToCanonicalString(),
-                    Int(b.TargetSubMaterialIndex), b.CarrierGuid, b.MaterialName));
+                    Int(b.TargetSubMaterialIndex), b.CarrierGuid, b.MaterialName, TargetPathFor(b.MarkerId)));
 
             foreach (var parity in Parity)
                 Row(sb, Fields("parity", parity.Path, parity.Kind, Transform(parity.LocalTransform)));
 
             return sb.ToString();
+        }
+
+        // The runtime path at which a borrow paints its target renderer — non-hashed locator data (like a parity
+        // path), carried in the matborrow row so the runtime can find the target without a marker→path bridge.
+        private string TargetPathFor(StableMarkerId borrowMarkerId)
+        {
+            foreach (var placement in MaterialBorrowPlacements)
+            {
+                if (placement.BorrowMarkerId == borrowMarkerId)
+                    return placement.TargetPath;
+            }
+
+            throw new ArenaContentExportException(
+                $"Material borrow {borrowMarkerId} has no target-path placement to serialize.");
         }
 
         // Each argument is either a single field (string) or an already-expanded group of fields (string[]);
@@ -178,6 +193,7 @@ namespace FalseGods.Protocol.Arena
             var spawns = new List<SpawnDefinition>();
             var mechanisms = new List<MechanismDefinition>();
             var matborrows = new List<MaterialBorrowDefinition>();
+            var placements = new List<MaterialBorrowPlacement>();
             var parity = new List<ArenaParityNode>();
 
             for (; cursor < rows.Count; cursor++)
@@ -214,10 +230,12 @@ namespace FalseGods.Protocol.Arena
                             ReadTransform(row, 4, "mechanism")));
                         break;
                     case "matborrow":
-                        Require(row, 6, "matborrow");
-                        matborrows.Add(new MaterialBorrowDefinition(Marker(row[1], "matborrow"),
+                        Require(row, 7, "matborrow");
+                        var borrowMarker = Marker(row[1], "matborrow");
+                        matborrows.Add(new MaterialBorrowDefinition(borrowMarker,
                             Marker(row[2], "matborrow target"), ParseInt(row[3], "matborrow subMaterialIndex"),
                             row[4], row[5]));
+                        placements.Add(new MaterialBorrowPlacement(borrowMarker, row[6]));
                         break;
                     case "parity":
                         Require(row, 13, "parity");
@@ -231,7 +249,7 @@ namespace FalseGods.Protocol.Arena
             var definition = new ArenaContentDefinition(arenaId, arenaVersion, arenaContentId,
                 nodes, proxies, colliders, navs, spawns, mechanisms, matborrows);
             return new ArenaContentArtifact(definition, new ContentHashSchemaVersion(schemaVersion),
-                protocolVersion, bundleVersion, parity);
+                protocolVersion, bundleVersion, parity, placements);
         }
 
         private static void Require(string[] row, int minFields, string tag)
@@ -296,4 +314,13 @@ namespace FalseGods.Protocol.Arena
     /// hash (which orders by <see cref="StableMarkerId"/>, never by path).
     /// </summary>
     public sealed record ArenaParityNode(string Path, string Kind, AuthoredTransform LocalTransform);
+
+    /// <summary>
+    /// The runtime hierarchy <see cref="TargetPath"/> at which a <see cref="MaterialBorrowDefinition"/>
+    /// (identified by <see cref="BorrowMarkerId"/>) paints its target renderer. This is a runtime <em>locator</em>,
+    /// never a content-hash input — exactly like <see cref="ArenaParityNode.Path"/> — so the runtime can find the
+    /// target without a marker→path bridge, while the hashed definition keeps only the stable
+    /// <c>TargetMarkerId</c>. The path locates our own authored prefab node; it is not a vanilla hierarchy path.
+    /// </summary>
+    public sealed record MaterialBorrowPlacement(StableMarkerId BorrowMarkerId, string TargetPath);
 }

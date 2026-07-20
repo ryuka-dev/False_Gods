@@ -5,6 +5,7 @@ using FalseGods.Application.Combat;
 using FalseGods.Application.Presentation;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Simulation;
+using FalseGods.Integration.Sulfur.Arena;
 using FalseGods.Integration.Sulfur.Combat;
 using FalseGods.Integration.Sulfur.Navigation;
 using FalseGods.Integration.Sulfur.Simulation;
@@ -188,7 +189,8 @@ namespace FalseGods.Plugin
             var flow = new ArenaLoadFlow(
                 realization,
                 realization,
-                new AstarNavigationPort(() => realization.CurrentRoot, _logger));
+                new AstarNavigationPort(() => realization.CurrentRoot, _logger),
+                new SulfurVanillaAssetProvider(() => realization.CurrentRoot, _logger));
 
             var prepared = flow.Prepare();
             if (!prepared.Success)

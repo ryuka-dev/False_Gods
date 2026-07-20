@@ -49,7 +49,8 @@ namespace FalseGods.ApplicationTests
                 new ArenaParityNode("GameplayRoot", "GameplayRoot", Authored(0f, 1f, 0f)),
                 new ArenaParityNode("GameplayRoot/PlayerSpawn", "Player", Authored(-7f, 0f, -7f)),
                 new ArenaParityNode("GameplayRoot/EnemySpawn", "Enemy", Authored(7f, 0f, 7f)),
-            });
+            },
+            MaterialBorrowPlacements: Array.Empty<MaterialBorrowPlacement>());
 
         // ---------------------------------------------------------------- fakes
 
@@ -151,6 +152,28 @@ namespace FalseGods.ApplicationTests
             public void Remove() => _journal.Add("nav.Remove");
         }
 
+        private sealed class FakeVanillaAssets : IVanillaAssetProvider
+        {
+            private readonly List<string> _journal;
+
+            public FakeVanillaAssets(List<string> journal) => _journal = journal;
+
+            public bool FailResolve { get; set; }
+
+            public IReadOnlyList<MaterialBorrowRequest>? CapturedRequests { get; private set; }
+
+            public MaterialBorrowResult Resolve(IReadOnlyList<MaterialBorrowRequest> requests)
+            {
+                _journal.Add("vanilla.Resolve");
+                CapturedRequests = requests;
+                return FailResolve
+                    ? MaterialBorrowResult.Failed("carrier did not load")
+                    : MaterialBorrowResult.Resolved(requests.Count);
+            }
+
+            public void Release() => _journal.Add("vanilla.Release");
+        }
+
         private sealed class Rig
         {
             public readonly List<string> Journal = new List<string>();
@@ -158,6 +181,7 @@ namespace FalseGods.ApplicationTests
             public readonly FakeAssets Assets;
             public readonly FakeRealization Realization;
             public readonly FakeNavigation Navigation;
+            public readonly FakeVanillaAssets Vanilla;
             public readonly ArenaLoadFlow Flow;
 
             public Rig(string? artifactText = "unset")
@@ -165,7 +189,8 @@ namespace FalseGods.ApplicationTests
                 Assets = new FakeAssets(Journal, artifactText == "unset" ? Authored.Serialize() : artifactText);
                 Realization = new FakeRealization(Journal, Authored);
                 Navigation = new FakeNavigation(Journal);
-                Flow = new ArenaLoadFlow(Assets, Realization, Navigation);
+                Vanilla = new FakeVanillaAssets(Journal);
+                Flow = new ArenaLoadFlow(Assets, Realization, Navigation, Vanilla);
             }
         }
 
@@ -181,7 +206,7 @@ namespace FalseGods.ApplicationTests
             Assert.True(rig.Flow.Prepare().Success);
             Assert.True(rig.Flow.Realize(Origin).Success);
 
-            Assert.Equal(new[] { "assets.Load", "realize", "nav.Apply" }, rig.Journal);
+            Assert.Equal(new[] { "assets.Load", "realize", "vanilla.Resolve", "nav.Apply" }, rig.Journal);
             Assert.Equal(ArenaLoadStage.Realized, rig.Flow.Stage);
             Assert.Equal(Origin, rig.Realization.CapturedOrigin);
         }
@@ -256,7 +281,7 @@ namespace FalseGods.ApplicationTests
             Assert.False(result.Success);
             Assert.Contains("realization failed", result.FailureReason);
             Assert.Equal(
-                new[] { "assets.Load", "realize", "nav.Remove", "realize.Teardown", "assets.Release" },
+                new[] { "assets.Load", "realize", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
                 rig.Journal);
             Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
         }
@@ -314,7 +339,25 @@ namespace FalseGods.ApplicationTests
             Assert.False(result.Success);
             Assert.Contains("navigation failed", result.FailureReason);
             Assert.Equal(
-                new[] { "assets.Load", "realize", "nav.Apply", "nav.Remove", "realize.Teardown", "assets.Release" },
+                new[] { "assets.Load", "realize", "vanilla.Resolve", "nav.Apply", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
+                rig.Journal);
+            Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
+        }
+
+        [Fact]
+        public void Material_borrow_failure_tears_down_everything()
+        {
+            var rig = new Rig();
+            rig.Vanilla.FailResolve = true;
+            rig.Flow.Prepare();
+
+            var result = rig.Flow.Realize(Origin);
+
+            Assert.False(result.Success);
+            Assert.Contains("material borrow failed", result.FailureReason);
+            // Borrow is resolved after realization and before navigation, so nav.Apply never runs.
+            Assert.Equal(
+                new[] { "assets.Load", "realize", "vanilla.Resolve", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
                 rig.Journal);
             Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
         }
@@ -331,7 +374,7 @@ namespace FalseGods.ApplicationTests
 
             rig.Flow.Teardown();
 
-            Assert.Equal(new[] { "nav.Remove", "realize.Teardown", "assets.Release" }, rig.Journal);
+            Assert.Equal(new[] { "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" }, rig.Journal);
             Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
             Assert.Null(rig.Flow.Manifest);
             Assert.Null(rig.Flow.Arena);

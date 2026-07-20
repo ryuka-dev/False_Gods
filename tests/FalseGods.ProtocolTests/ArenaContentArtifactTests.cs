@@ -22,6 +22,12 @@ namespace FalseGods.ProtocolTests
             {
                 new ArenaParityNode("VisualRoot/Floor", "Floor", ProtocolTests.Sample.Transform(0f, -0.25f, 0f)),
                 new ArenaParityNode("GameplayRoot/PlayerSpawn", "Player", ProtocolTests.Sample.Transform(-7f, 0f, -7f)),
+            },
+            // Runtime target paths for FullArena's two material borrows (markers 60/61, targeting nodes 1/2).
+            MaterialBorrowPlacements: new List<MaterialBorrowPlacement>
+            {
+                new MaterialBorrowPlacement(ProtocolTests.Sample.Marker(60), "VisualRoot/Floor"),
+                new MaterialBorrowPlacement(ProtocolTests.Sample.Marker(61), "VisualRoot/Pillar"),
             });
 
         [Fact]
@@ -58,7 +64,9 @@ namespace FalseGods.ProtocolTests
             Assert.Equal(original.Definition.NavDefinitions.Count, parsed.Definition.NavDefinitions.Count);
             Assert.Equal(original.Definition.Spawns.Count, parsed.Definition.Spawns.Count);
             Assert.Equal(original.Definition.Mechanisms.Count, parsed.Definition.Mechanisms.Count);
+            Assert.Equal(original.Definition.MaterialBorrows.Count, parsed.Definition.MaterialBorrows.Count);
             Assert.Equal(original.Parity, parsed.Parity);
+            Assert.Equal(original.MaterialBorrowPlacements, parsed.MaterialBorrowPlacements);
         }
 
         [Fact]

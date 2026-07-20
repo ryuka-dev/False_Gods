@@ -80,14 +80,20 @@ namespace FalseGods.Application.Arena
         private readonly IArenaAssetProvider _assets;
         private readonly IArenaRealization _realization;
         private readonly INavigationPort _navigation;
+        private readonly IVanillaAssetProvider _vanillaAssets;
 
         private ContentHash _contentHash;
 
-        public ArenaLoadFlow(IArenaAssetProvider assets, IArenaRealization realization, INavigationPort navigation)
+        public ArenaLoadFlow(
+            IArenaAssetProvider assets,
+            IArenaRealization realization,
+            INavigationPort navigation,
+            IVanillaAssetProvider vanillaAssets)
         {
             _assets = assets ?? throw new ArgumentNullException(nameof(assets));
             _realization = realization ?? throw new ArgumentNullException(nameof(realization));
             _navigation = navigation ?? throw new ArgumentNullException(nameof(navigation));
+            _vanillaAssets = vanillaAssets ?? throw new ArgumentNullException(nameof(vanillaAssets));
         }
 
         public ArenaLoadStage Stage { get; private set; }
@@ -183,6 +189,18 @@ namespace FalseGods.Application.Arena
                 return Fail($"realized arena is missing marker '{(player is null ? playerPath : bossPath)}'");
             }
 
+            var borrowRequests = BuildMaterialBorrowRequests(artifact, out var borrowError);
+            if (borrowError != null)
+            {
+                return Fail(borrowError);
+            }
+
+            var borrow = _vanillaAssets.Resolve(borrowRequests);
+            if (!borrow.Success)
+            {
+                return Fail($"arena material borrow failed: {borrow.Error ?? "unknown"}");
+            }
+
             var nav = _navigation.Apply();
             if (!nav.Success)
             {
@@ -209,7 +227,11 @@ namespace FalseGods.Application.Arena
         public void Teardown()
         {
             _navigation.Remove();
+            // Release the borrowed vanilla materials AFTER the realized hierarchy is destroyed, so no live renderer
+            // still references a material whose carrier handle we are about to release; both happen before the
+            // bundle unload, which strips our own meshes.
             _realization.Teardown();
+            _vanillaAssets.Release();
             _assets.Release();
             Artifact = null;
             Manifest = null;
@@ -224,6 +246,35 @@ namespace FalseGods.Application.Arena
         {
             Teardown();
             return ArenaRealizeResult.Failed(reason);
+        }
+
+        /// <summary>Pair each hashed material borrow (carrier + material name + sub-material index) with its
+        /// non-hashed runtime target path (the placement), producing the requests the resolver acts on. A borrow
+        /// with no matching placement is a fail-closed error rather than a silently-skipped paint.</summary>
+        private static IReadOnlyList<MaterialBorrowRequest> BuildMaterialBorrowRequests(
+            ArenaContentArtifact artifact, out string? error)
+        {
+            var pathByBorrow = new Dictionary<StableMarkerId, string>();
+            foreach (var placement in artifact.MaterialBorrowPlacements)
+            {
+                pathByBorrow[placement.BorrowMarkerId] = placement.TargetPath;
+            }
+
+            var requests = new List<MaterialBorrowRequest>(artifact.Definition.MaterialBorrows.Count);
+            foreach (var borrow in artifact.Definition.MaterialBorrows)
+            {
+                if (!pathByBorrow.TryGetValue(borrow.MarkerId, out var targetPath))
+                {
+                    error = $"material borrow {borrow.MarkerId} has no target-path placement in the artifact";
+                    return Array.Empty<MaterialBorrowRequest>();
+                }
+
+                requests.Add(new MaterialBorrowRequest(
+                    targetPath, borrow.TargetSubMaterialIndex, borrow.CarrierGuid, borrow.MaterialName));
+            }
+
+            error = null;
+            return requests;
         }
 
         private static string? FindMarkerPath(ArenaContentArtifact artifact, string kind)

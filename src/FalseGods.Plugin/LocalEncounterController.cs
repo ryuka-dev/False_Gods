@@ -11,6 +11,7 @@ using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Combat;
 using FalseGods.Core.Encounters;
 using FalseGods.Core.Simulation;
+using FalseGods.Integration.Sulfur.Arena;
 using FalseGods.Integration.Sulfur.Combat;
 using FalseGods.Integration.Sulfur.Navigation;
 using FalseGods.Integration.Sulfur.Simulation;
@@ -181,7 +182,8 @@ namespace FalseGods.Plugin
             _flow = new ArenaLoadFlow(
                 _realization,
                 _realization,
-                new AstarNavigationPort(() => realizationForNav.CurrentRoot, _logger));
+                new AstarNavigationPort(() => realizationForNav.CurrentRoot, _logger),
+                new SulfurVanillaAssetProvider(() => realizationForNav.CurrentRoot, _logger));
 
             var prepared = _flow.Prepare();
             if (!prepared.Success || prepared.Artifact is null)
