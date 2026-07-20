@@ -51,6 +51,9 @@ namespace FalseGods.Application.Arena
         /// <summary>The encounter is over — discard everything local to it.</summary>
         public Action<EncounterEnded>? OnEnded { get; set; }
 
+        /// <summary>The boss's attack hit this client's player — apply the host-decided damage to the local player.</summary>
+        public Action<BossHitPlayer>? OnBossHitPlayer { get; set; }
+
         public void Dispose() => _channel.Received -= OnReceived;
 
         private void OnReceived(SessionPeerId sender, EncodedPayload payload)
@@ -81,6 +84,9 @@ namespace FalseGods.Application.Arena
                     break;
                 case EncounterEnded ended:
                     OnEnded?.Invoke(ended);
+                    break;
+                case BossHitPlayer hit:
+                    OnBossHitPlayer?.Invoke(hit);
                     break;
             }
         }

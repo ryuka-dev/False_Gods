@@ -15,7 +15,7 @@ namespace FalseGods.Protocol.Wire
     public readonly struct ProtocolVersion : IEquatable<ProtocolVersion>
     {
         /// <summary>The wire contract this build of <c>FalseGods.Protocol</c> produces and understands.</summary>
-        public static readonly ProtocolVersion Current = new ProtocolVersion(4);
+        public static readonly ProtocolVersion Current = new ProtocolVersion(5);
 
         public ProtocolVersion(int value)
         {

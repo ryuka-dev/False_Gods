@@ -58,6 +58,11 @@ namespace FalseGods.Application.Replication
         public void BroadcastEnded(EncounterEnded message) =>
             Send(EncounterCodec.Encode(message), MessageDelivery.ReliableOrdered, MessageTarget.AllClients);
 
+        /// <summary>Tell one peer the boss's attack hit its player; the peer applies it to its own local player
+        /// (§5.6). Reliable — a lost hit would silently under-damage that player.</summary>
+        public void SendBossHitPlayer(BossHitPlayer message, SessionPeerId peer) =>
+            Send(EncounterCodec.Encode(message), MessageDelivery.ReliableOrdered, MessageTarget.ToPeer(peer));
+
         private void Send(EncodedPayload payload, MessageDelivery delivery, MessageTarget target)
         {
             if (_session.Role != SessionRole.Host)

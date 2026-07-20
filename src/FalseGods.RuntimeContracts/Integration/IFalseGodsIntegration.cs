@@ -29,5 +29,9 @@ namespace FalseGods.RuntimeContracts.Integration
 
         /// <summary>The current session membership.</summary>
         IPlayerRoster Roster { get; }
+
+        /// <summary>Maps a boss participant (game player index) to its owning session peer, so the host can address
+        /// a per-player decision to the right client.</summary>
+        IParticipantPeerMap Players { get; }
     }
 }

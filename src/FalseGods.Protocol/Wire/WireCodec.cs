@@ -222,6 +222,22 @@ namespace FalseGods.Protocol.Wire
             return message;
         }
 
+        public static byte[] Serialize(BossHitPlayer message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.Encounter.Value);
+            WriteInt(w, message.Amount);
+            return w.ToArray();
+        }
+
+        public static BossHitPlayer DeserializeBossHitPlayer(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new BossHitPlayer(new EncounterId(r.ReadInt32()), r.ReadInt32());
+            RequireEnd(r);
+            return message;
+        }
+
         // ---------------------------------------------------------------- event streams
 
         public static byte[] Serialize(IBossWireEvent bossEvent)

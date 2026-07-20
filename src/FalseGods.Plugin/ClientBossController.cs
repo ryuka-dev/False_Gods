@@ -7,6 +7,7 @@ using FalseGods.Application.Replication;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Combat;
 using FalseGods.Integration.Sulfur.Navigation;
+using FalseGods.Integration.Sulfur.Simulation;
 using FalseGods.Protocol.Wire;
 using FalseGods.RuntimeContracts.Arena;
 using FalseGods.RuntimeContracts.Integration;
@@ -40,6 +41,8 @@ namespace FalseGods.Plugin
         private readonly string _contentDirectory;
         private readonly ClientEncounterFlow _controlFlow;
         private readonly ClientHitReporter _hitReporter;
+        private readonly IDamagePort _damagePort;
+        private readonly SulfurLocalPlayer _localPlayer;
 
         private ReplicationReceiver _receiver;
         private IDisposable? _hitBinding;
@@ -65,6 +68,8 @@ namespace FalseGods.Plugin
             _contentDirectory = Path.GetDirectoryName(typeof(ClientBossController).Assembly.Location) ?? ".";
             _receiver = new ReplicationReceiver(integration.Channel, integration.Session);
             _hitReporter = new ClientHitReporter(integration.Channel, integration.Session);
+            _damagePort = new SulfurDamagePort(logger);
+            _localPlayer = new SulfurLocalPlayer();
             _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
             {
                 OnEnterArena = HandleEnterArena,
@@ -78,6 +83,7 @@ namespace FalseGods.Plugin
                     _logger?.Log($"Host ended {ended.Encounter}; discarding the encounter.");
                     DiscardEncounter();
                 },
+                OnBossHitPlayer = HandleBossHitPlayer,
             };
             _logger?.Log("Client encounter composition ready: listening for the host's announcements and streams.");
         }
@@ -336,6 +342,23 @@ namespace FalseGods.Plugin
             _presentedEvents = 0;
             _presentedArenaEvents = 0;
             TeardownArena();
+        }
+
+        /// <summary>The host resolved that the boss hit this client's player; apply the host-decided damage to the
+        /// local player (§5.6). The client owns its own health — it applies the amount, it never recomputes it. Only
+        /// the current encounter's hits count; a stale or non-positive one is ignored.</summary>
+        private void HandleBossHitPlayer(BossHitPlayer hit)
+        {
+            if (hit.Amount <= 0 || _encounter == null || hit.Encounter != _encounter.Value)
+            {
+                return;
+            }
+
+            if (_localPlayer.TryGetLocalParticipantIndex(out var localIndex))
+            {
+                _damagePort.ApplyDamage(new ParticipantId(localIndex), hit.Amount);
+                _logger?.Log($"Boss hit you for {hit.Amount} (host-authoritative); applied to your local player.");
+            }
         }
 
         private void TeardownArena()

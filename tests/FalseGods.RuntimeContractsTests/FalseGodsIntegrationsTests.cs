@@ -168,6 +168,8 @@ namespace FalseGods.RuntimeContractsTests
             public IEncounterChannel Channel { get; } = new FakeChannel();
 
             public IPlayerRoster Roster { get; } = new FakeRoster();
+
+            public IParticipantPeerMap Players { get; } = new FakeParticipantPeerMap();
         }
 
         private sealed class FakeSession : IMultiplayerSession
@@ -197,6 +199,15 @@ namespace FalseGods.RuntimeContractsTests
         private sealed class FakeRoster : IPlayerRoster
         {
             public IReadOnlyList<SessionPeerId> Members { get; } = Array.Empty<SessionPeerId>();
+        }
+
+        private sealed class FakeParticipantPeerMap : IParticipantPeerMap
+        {
+            public bool TryGetRemotePeer(int participantIndex, out SessionPeerId peer)
+            {
+                peer = default;
+                return false;
+            }
         }
     }
 }

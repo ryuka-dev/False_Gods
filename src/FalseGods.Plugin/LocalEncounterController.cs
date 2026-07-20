@@ -70,6 +70,7 @@ namespace FalseGods.Plugin
         private readonly ISimulationClock _clock;
         private readonly IEncounterParticipantQuery _participants;
         private readonly IDamagePort _damagePort;
+        private readonly SulfurLocalPlayer _localPlayer;
         private readonly string _contentDirectory;
         private readonly float _maxClientHitDamage;
 
@@ -103,6 +104,7 @@ namespace FalseGods.Plugin
             _clock = new SulfurSimulationClock();
             _participants = new SulfurParticipantQuery();
             _damagePort = new SulfurDamagePort(logger);
+            _localPlayer = new SulfurLocalPlayer();
             _contentDirectory = Path.GetDirectoryName(typeof(LocalEncounterController).Assembly.Location) ?? ".";
         }
 
@@ -459,23 +461,40 @@ namespace FalseGods.Plugin
 
         /// <summary>
         /// Apply the boss's resolved player hits. In single-player the local player is the only participant, so each
-        /// request goes straight to the game's damage model through the <see cref="IDamagePort"/>. As a host, a
-        /// resolved hit on a remote client's player must instead be sent to that client to apply on its own player
-        /// (§5.6, ST's per-player health ownership) — that routing is the next slice, so here it is drained and
-        /// noted rather than mis-applied to the host's local puppet of a remote player.
+        /// request goes straight to the game's damage model through the <see cref="IDamagePort"/>. As a host, a hit
+        /// on the host's own player applies locally the same way, while a hit on a remote client's player is sent to
+        /// that client to apply on its own player (§5.6, ST's per-player health ownership) — the host never damages
+        /// its local puppet of a remote player. An index that maps to neither is dropped.
         /// </summary>
         private void ApplyOrDeferPlayerDamage(IReadOnlyList<DamageRequest> requests)
         {
-            if (_hostIntegration != null)
+            if (_hostIntegration == null)
             {
-                _logger?.Log($"[boss-damage] {requests.Count} player hit(s) resolved; multiplayer player-damage "
-                    + "routing is not wired yet (deferred to the client-damage slice).");
+                for (var i = 0; i < requests.Count; i++)
+                {
+                    _damagePort.ApplyDamage(requests[i].Target, requests[i].Amount);
+                }
+
                 return;
             }
 
+            _localPlayer.TryGetLocalParticipantIndex(out var localIndex);
             for (var i = 0; i < requests.Count; i++)
             {
-                _damagePort.ApplyDamage(requests[i].Target, requests[i].Amount);
+                var request = requests[i];
+                if (_hostIntegration.Players.TryGetRemotePeer(request.Target.Value, out var peer))
+                {
+                    _hostSender?.SendBossHitPlayer(new BossHitPlayer(_encounter, request.Amount), peer);
+                }
+                else if (request.Target.Value == localIndex)
+                {
+                    _damagePort.ApplyDamage(request.Target, request.Amount);
+                }
+                else
+                {
+                    _logger?.Log($"[boss-damage] hit on participant {request.Target.Value} maps to no session peer "
+                        + "or the local player; dropped.");
+                }
             }
         }
 
