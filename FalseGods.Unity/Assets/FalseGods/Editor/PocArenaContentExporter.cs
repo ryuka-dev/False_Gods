@@ -35,8 +35,8 @@ namespace FalseGods.EditorTools
         // artifact disagree on which hash definition is in force. ProtocolVersion/BundleVersion are constants for
         // the PoC (a constant BundleVersion is deliberate: two peers who shipped the same bundle must stamp the
         // same value, so a build date would be wrong here).
-        private const int ArtifactFormatVersion = 1;
-        private const int SchemaVersion = 1;
+        private const int ArtifactFormatVersion = 2;
+        private const int SchemaVersion = 2;
         private const int ProtocolVersion = 1;
         private const string BundleVersion = "false_gods.poc.1";
 

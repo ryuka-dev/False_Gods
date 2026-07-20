@@ -102,6 +102,16 @@ namespace FalseGods.Protocol.Arena
                 encoder.WriteTransform(mechanism.LocalTransform, context);
             }
 
+            // 10. material borrows (vanilla material asset identity onto our renderer — never the loaded object)
+            foreach (var borrow in OrderByMarker(content.MaterialBorrows, b => b.MarkerId))
+            {
+                encoder.WriteMarker(borrow.MarkerId);
+                encoder.WriteMarker(borrow.TargetMarkerId);
+                encoder.WriteInt32(borrow.TargetSubMaterialIndex);
+                encoder.WriteString(borrow.CarrierGuid);
+                encoder.WriteString(borrow.MaterialName);
+            }
+
             using var sha256 = SHA256.Create();
             return new ContentHash(sha256.ComputeHash(encoder.ToArray()));
         }
@@ -137,10 +147,12 @@ namespace FalseGods.Protocol.Arena
             RequireNoNullElements(content.NavDefinitions, "nav");
             RequireNoNullElements(content.Spawns, "spawn");
             RequireNoNullElements(content.Mechanisms, "mechanism");
+            RequireNoNullElements(content.MaterialBorrows, "material borrow");
 
             RequireUniqueAssignedMarkers(content);
             ValidateElementFields(content);
             ValidateParentReferences(content.Nodes);
+            ValidateMaterialBorrowTargets(content);
         }
 
         private static void ValidateElementFields(ArenaContentDefinition content)
@@ -194,6 +206,44 @@ namespace FalseGods.Protocol.Arena
                 RequireToken(mechanism.MechanismDefinitionId, where, nameof(mechanism.MechanismDefinitionId));
                 RequireToken(mechanism.MechanismGroupId, where, nameof(mechanism.MechanismGroupId));
                 RequireTransform(mechanism.LocalTransform, where);
+            }
+
+            foreach (var borrow in content.MaterialBorrows)
+            {
+                var where = $"material borrow {borrow.MarkerId}";
+                RequireToken(borrow.CarrierGuid, where, nameof(borrow.CarrierGuid));
+                RequireToken(borrow.MaterialName, where, nameof(borrow.MaterialName));
+                if (borrow.TargetSubMaterialIndex < 0)
+                {
+                    throw new ArenaContentExportException(
+                        $"Negative TargetSubMaterialIndex on {where}: a sub-material slot index is zero or positive.");
+                }
+            }
+        }
+
+        private static void ValidateMaterialBorrowTargets(ArenaContentDefinition content)
+        {
+            // A borrow paints one of our authored nodes' renderers; its TargetMarkerId must resolve to an
+            // authored node, or the runtime has nothing to paint (fail closed, like a dangling parent reference).
+            var nodeMarkers = new HashSet<StableMarkerId>();
+            foreach (var node in content.Nodes)
+                nodeMarkers.Add(node.MarkerId);
+
+            foreach (var borrow in content.MaterialBorrows)
+            {
+                var where = $"material borrow {borrow.MarkerId}";
+                if (borrow.TargetMarkerId.IsUnassigned)
+                {
+                    throw new ArenaContentExportException(
+                        $"Unassigned TargetMarkerId on {where}: a material borrow must target an assigned node marker.");
+                }
+
+                if (!nodeMarkers.Contains(borrow.TargetMarkerId))
+                {
+                    throw new ArenaContentExportException(
+                        $"Dangling TargetMarkerId {borrow.TargetMarkerId} on {where}: it matches no authored node, " +
+                        "so there is no renderer to paint.");
+                }
             }
         }
 
@@ -287,6 +337,7 @@ namespace FalseGods.Protocol.Arena
             RequireNotNull(content.NavDefinitions, nameof(content.NavDefinitions));
             RequireNotNull(content.Spawns, nameof(content.Spawns));
             RequireNotNull(content.Mechanisms, nameof(content.Mechanisms));
+            RequireNotNull(content.MaterialBorrows, nameof(content.MaterialBorrows));
 
             static void RequireNotNull(object? list, string name)
             {
@@ -342,6 +393,9 @@ namespace FalseGods.Protocol.Arena
 
             foreach (var mechanism in content.Mechanisms)
                 yield return (mechanism.MarkerId, $"mechanism ('{mechanism.MechanismDefinitionId}')");
+
+            foreach (var borrow in content.MaterialBorrows)
+                yield return (borrow.MarkerId, $"material borrow ('{borrow.MaterialName}')");
         }
     }
 }

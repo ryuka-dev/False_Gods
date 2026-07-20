@@ -57,7 +57,7 @@ namespace FalseGods.Probe
         // Pinned by tests/FalseGods.ProtocolTests/ArenaContentArtifactFixtureTests.cs. The in-game recompute must
         // reproduce this exact digest — a change here is a ContentHashSchemaVersion change, never a quiet edit.
         private const string GoldenContentHashHex =
-            "dbed0d2a644fb8a2701518f95088087fe33982c19619677cc22524f5221c5acf";
+            "7dc53023e646e16574c5c35cc5fecf1f7202f267775d39fe2a7bedd98c8bcac6";
 
         // R14 tolerances: the same prefab is serialized into the bundle and read back, so local transforms should
         // match to well within these. Tight enough to catch a real hierarchy/transform divergence, loose enough to
@@ -131,7 +131,8 @@ namespace FalseGods.Probe
                     def.Colliders.Reverse().ToList(),
                     def.NavDefinitions.Reverse().ToList(),
                     def.Spawns.Reverse().ToList(),
-                    def.Mechanisms.Reverse().ToList());
+                    def.Mechanisms.Reverse().ToList(),
+                    def.MaterialBorrows.Reverse().ToList());
                 var reversedHash = ContentHashComputer.Compute(reversed, artifact.SchemaVersion);
 
                 hashMatchesGolden = string.Equals(canonicalHex, GoldenContentHashHex, StringComparison.Ordinal);

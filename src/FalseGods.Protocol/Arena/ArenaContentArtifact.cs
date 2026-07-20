@@ -36,8 +36,8 @@ namespace FalseGods.Protocol.Arena
     {
         /// <summary>Bumped only when the artifact's on-disk shape changes — independent of
         /// <see cref="ContentHashSchemaVersion"/>, which versions the hash inputs. A reader rejects an unknown
-        /// artifact-format version rather than mis-parsing it.</summary>
-        public const int ArtifactFormatVersion = 1;
+        /// artifact-format version rather than mis-parsing it. Version 2 added the <c>matborrow</c> row.</summary>
+        public const int ArtifactFormatVersion = 2;
 
         private const string Magic = "FGARENA";
         private const char Sep = '\t';
@@ -77,6 +77,9 @@ namespace FalseGods.Protocol.Arena
                 Row(sb, Fields("spawn", s.MarkerId.ToCanonicalString(), s.SpawnKind, s.DefinitionId, Transform(s.LocalTransform)));
             foreach (var m in Definition.Mechanisms)
                 Row(sb, Fields("mechanism", m.MarkerId.ToCanonicalString(), m.MechanismDefinitionId, m.MechanismGroupId, Transform(m.LocalTransform)));
+            foreach (var b in Definition.MaterialBorrows)
+                Row(sb, Fields("matborrow", b.MarkerId.ToCanonicalString(), b.TargetMarkerId.ToCanonicalString(),
+                    Int(b.TargetSubMaterialIndex), b.CarrierGuid, b.MaterialName));
 
             foreach (var parity in Parity)
                 Row(sb, Fields("parity", parity.Path, parity.Kind, Transform(parity.LocalTransform)));
@@ -174,6 +177,7 @@ namespace FalseGods.Protocol.Arena
             var navs = new List<NavDefinition>();
             var spawns = new List<SpawnDefinition>();
             var mechanisms = new List<MechanismDefinition>();
+            var matborrows = new List<MaterialBorrowDefinition>();
             var parity = new List<ArenaParityNode>();
 
             for (; cursor < rows.Count; cursor++)
@@ -209,6 +213,12 @@ namespace FalseGods.Protocol.Arena
                         mechanisms.Add(new MechanismDefinition(Marker(row[1], "mechanism"), row[2], row[3],
                             ReadTransform(row, 4, "mechanism")));
                         break;
+                    case "matborrow":
+                        Require(row, 6, "matborrow");
+                        matborrows.Add(new MaterialBorrowDefinition(Marker(row[1], "matborrow"),
+                            Marker(row[2], "matborrow target"), ParseInt(row[3], "matborrow subMaterialIndex"),
+                            row[4], row[5]));
+                        break;
                     case "parity":
                         Require(row, 13, "parity");
                         parity.Add(new ArenaParityNode(row[1], row[2], ReadTransform(row, 3, "parity")));
@@ -219,7 +229,7 @@ namespace FalseGods.Protocol.Arena
             }
 
             var definition = new ArenaContentDefinition(arenaId, arenaVersion, arenaContentId,
-                nodes, proxies, colliders, navs, spawns, mechanisms);
+                nodes, proxies, colliders, navs, spawns, mechanisms, matborrows);
             return new ArenaContentArtifact(definition, new ContentHashSchemaVersion(schemaVersion),
                 protocolVersion, bundleVersion, parity);
         }

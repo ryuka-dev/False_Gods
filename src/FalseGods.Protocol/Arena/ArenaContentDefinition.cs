@@ -24,7 +24,8 @@ namespace FalseGods.Protocol.Arena
         IReadOnlyList<ColliderDefinition> Colliders,
         IReadOnlyList<NavDefinition> NavDefinitions,
         IReadOnlyList<SpawnDefinition> Spawns,
-        IReadOnlyList<MechanismDefinition> Mechanisms)
+        IReadOnlyList<MechanismDefinition> Mechanisms,
+        IReadOnlyList<MaterialBorrowDefinition> MaterialBorrows)
     {
         /// <summary>
         /// A convenience factory for an arena that has no content of some kinds yet (e.g. the PoC test room,
@@ -40,7 +41,8 @@ namespace FalseGods.Protocol.Arena
             IReadOnlyList<ColliderDefinition>? colliders = null,
             IReadOnlyList<NavDefinition>? navDefinitions = null,
             IReadOnlyList<SpawnDefinition>? spawns = null,
-            IReadOnlyList<MechanismDefinition>? mechanisms = null) =>
+            IReadOnlyList<MechanismDefinition>? mechanisms = null,
+            IReadOnlyList<MaterialBorrowDefinition>? materialBorrows = null) =>
             new ArenaContentDefinition(
                 arenaId,
                 arenaVersion,
@@ -50,6 +52,7 @@ namespace FalseGods.Protocol.Arena
                 colliders ?? Array.Empty<ColliderDefinition>(),
                 navDefinitions ?? Array.Empty<NavDefinition>(),
                 spawns ?? Array.Empty<SpawnDefinition>(),
-                mechanisms ?? Array.Empty<MechanismDefinition>());
+                mechanisms ?? Array.Empty<MechanismDefinition>(),
+                materialBorrows ?? Array.Empty<MaterialBorrowDefinition>());
     }
 }

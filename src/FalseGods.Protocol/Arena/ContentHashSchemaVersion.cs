@@ -18,12 +18,15 @@ namespace FalseGods.Protocol.Arena
         /// The schema this build of <c>FalseGods.Protocol</c> produces and understands.
         /// </summary>
         /// <remarks>
-        /// Version 1 hashes, in the fixed order of §5.2.1: schema version; arena id + version; arena content
+        /// Version 1 hashed, in the fixed order of §5.2.1: schema version; arena id + version; arena content
         /// id; then authored nodes, vanilla proxies, colliders, navigation, spawns, and mechanisms — each list
-        /// ordered by <see cref="StableMarkerId"/> and float-quantised. Add, remove, or reorder any of that and
-        /// this constant must change.
+        /// ordered by <see cref="StableMarkerId"/> and float-quantised.
+        /// <para>Version 2 appends input 10, the material borrows (vanilla materials reused onto our own
+        /// renderers), each ordered by <see cref="StableMarkerId"/> and encoding carrier GUID + material name +
+        /// target renderer/sub-material — the stable asset identity, never the loaded material.</para>
+        /// Add, remove, or reorder any of that and this constant must change.
         /// </remarks>
-        public static readonly ContentHashSchemaVersion Current = new ContentHashSchemaVersion(1);
+        public static readonly ContentHashSchemaVersion Current = new ContentHashSchemaVersion(2);
 
         public ContentHashSchemaVersion(int value)
         {

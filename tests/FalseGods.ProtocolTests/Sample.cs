@@ -66,6 +66,13 @@ namespace FalseGods.ProtocolTests
                 new MechanismDefinition(Marker(51), "false_gods.mech.hazard", "phase_2", Transform(4f, 0f, 4f)),
             };
 
+            var materialBorrows = new List<MaterialBorrowDefinition>
+            {
+                // Target the authored nodes above (Marker 1/2); carrier GUID + material name are the donor identity.
+                new MaterialBorrowDefinition(Marker(60), Marker(1), 0, "92103c239550ca740906311170fcc458", "CaveFloor"),
+                new MaterialBorrowDefinition(Marker(61), Marker(2), 1, "92103c239550ca740906311170fcc458", "CaveWall"),
+            };
+
             if (reversed)
             {
                 nodes.Reverse();
@@ -74,6 +81,7 @@ namespace FalseGods.ProtocolTests
                 nav.Reverse();
                 spawns.Reverse();
                 mechanisms.Reverse();
+                materialBorrows.Reverse();
             }
 
             return new ArenaContentDefinition(
@@ -85,7 +93,8 @@ namespace FalseGods.ProtocolTests
                 colliders,
                 nav,
                 spawns,
-                mechanisms);
+                mechanisms,
+                materialBorrows);
         }
 
         /// <summary>Returns a copy of <paramref name="content"/> with its node list replaced.</summary>

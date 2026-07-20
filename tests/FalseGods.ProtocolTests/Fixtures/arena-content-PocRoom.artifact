@@ -1,8 +1,8 @@
-FGARENA	1
+FGARENA	2
 arenaId	false_gods.arena.poc_room
 arenaVersion	1
 arenaContentId	assets/falsegods/arenas/pocroom/pocroom.prefab
-schemaVersion	1
+schemaVersion	2
 protocolVersion	1
 bundleVersion	false_gods.poc.1
 node	fa15e900-0000-0000-0000-000000000001	ArenaRoot	-	0	0	0	0	0	0	1	1	1	1

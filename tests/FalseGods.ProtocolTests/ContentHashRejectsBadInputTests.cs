@@ -72,7 +72,8 @@ namespace FalseGods.ProtocolTests
                 Colliders: Array.Empty<ColliderDefinition>(),
                 NavDefinitions: null!,
                 Spawns: Array.Empty<SpawnDefinition>(),
-                Mechanisms: Array.Empty<MechanismDefinition>());
+                Mechanisms: Array.Empty<MechanismDefinition>(),
+                MaterialBorrows: Array.Empty<MaterialBorrowDefinition>());
 
             Assert.Throws<ArenaContentExportException>(() => ContentHashComputer.Compute(content));
         }

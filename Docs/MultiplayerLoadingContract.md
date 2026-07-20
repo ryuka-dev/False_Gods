@@ -139,6 +139,13 @@ little-endian:
 8. **Spawn definitions:** `(StableMarkerId, SpawnKind, DefinitionId, quantized local transform)`
 9. **Mechanism definitions:** `(StableMarkerId, MechanismDefinitionId, MechanismGroupId, quantized local
    transform)`
+10. **Material borrows** *(schema 2+)*: for each borrowed vanilla material, `(StableMarkerId, TargetStableMarkerId,
+    TargetSubMaterialIndex, CarrierGuid, MaterialName)` — the *resolved stable asset identity* (the donor carrier
+    prefab GUID plus the authored material name, which is stabler than a hierarchy path across the duplicate
+    sibling-mesh names vanilla cave rooms carry), never the loaded `Material`. `TargetStableMarkerId` references
+    the authored node whose renderer receives it.
+
+`ContentHashSchemaVersion` is currently **2** — version 2 appended input 10; version 1 stopped at input 9.
 
 `StableMarkerId` is a GUID assigned in the editor and serialized into the prefab. It is not a name, not a
 hierarchy path, and not `GetInstanceID()` ([DependencyRules.md §4](DependencyRules.md)).

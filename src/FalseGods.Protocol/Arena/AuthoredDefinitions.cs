@@ -26,6 +26,27 @@ namespace FalseGods.Protocol.Arena
         AuthoredTransform LocalTransform);
 
     /// <summary>
+    /// Input 10 — a vanilla MATERIAL borrowed onto one of our own authored renderers (direction B: our own
+    /// large-cave meshes wearing vanilla cave materials). Vanilla materials are not individually addressable, so
+    /// the donor is named by a <em>carrier</em> Room prefab GUID plus the material's authored NAME (semantic and
+    /// unique within a carrier — far stabler than a hierarchy path; a name path breaks on the duplicate-sibling
+    /// mesh names vanilla cave rooms carry). The hash encodes that stable asset identity — carrier GUID +
+    /// material name + which of our renderers receives it — never the loaded <c>Material</c>.
+    /// </summary>
+    /// <param name="MarkerId">This borrow's own authored identity (ordering + uniqueness in the hash).</param>
+    /// <param name="TargetMarkerId">The authored node whose renderer receives the borrowed material.</param>
+    /// <param name="TargetSubMaterialIndex">Which sub-material slot on the target renderer to overwrite (0 for a
+    /// single-material mesh).</param>
+    /// <param name="CarrierGuid">The vanilla Room prefab GUID to load as the material donor.</param>
+    /// <param name="MaterialName">The <c>Material.name</c> to resolve within the carrier's renderers.</param>
+    public sealed record MaterialBorrowDefinition(
+        StableMarkerId MarkerId,
+        StableMarkerId TargetMarkerId,
+        int TargetSubMaterialIndex,
+        string CarrierGuid,
+        string MaterialName);
+
+    /// <summary>
     /// Input 6 — an authored collider. <see cref="GeometryParameters"/> are the kind-specific dimensions
     /// (e.g. box half-extents, sphere radius) in a fixed authored order; they are quantised as lengths.
     /// <see cref="LayerName"/> is the physics/nav layer <em>name</em>, never a layer index (indices are not

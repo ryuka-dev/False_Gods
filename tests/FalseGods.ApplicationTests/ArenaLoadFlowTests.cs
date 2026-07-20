@@ -39,7 +39,8 @@ namespace FalseGods.ApplicationTests
                     new SpawnDefinition(Marker(2), "Player", "false_gods.spawn.player", Authored(-7f, 0f, -7f)),
                     new SpawnDefinition(Marker(3), "Enemy", "false_gods.spawn.dummy", Authored(7f, 0f, 7f)),
                 },
-                Mechanisms: Array.Empty<MechanismDefinition>()),
+                Mechanisms: Array.Empty<MechanismDefinition>(),
+                MaterialBorrows: Array.Empty<MaterialBorrowDefinition>()),
             new ContentHashSchemaVersion(1),
             ProtocolVersion: 1, // deliberately stale: the reported manifest must stamp the runtime's version
             BundleVersion: "test.bundle.1",
