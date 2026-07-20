@@ -89,6 +89,10 @@ namespace FalseGods.Application.Replication
         /// <summary>Whether the one-time baseline has been applied.</summary>
         public bool HasBaseline { get; private set; }
 
+        /// <summary>The applied baseline (null before it arrives) — a late joiner reads the arena identity,
+        /// content hash, and host-chosen origin from it to realize the arena it never saw announced.</summary>
+        public EncounterBaseline? Baseline { get; private set; }
+
         /// <summary>Decode and apply one payload from a trusted source (a test, or composition-internal
         /// delivery). A malformed payload throws here; the live channel path catches instead.</summary>
         public void Apply(EncodedPayload payload) => ApplyDecoded(EncounterCodec.Decode(payload));
@@ -227,6 +231,7 @@ namespace FalseGods.Application.Replication
             }
 
             HasBaseline = true;
+            Baseline = baseline;
             _bossFloor = baseline.LastProcessedBossEventSequence.Value;
             _arenaFloor = baseline.LastProcessedArenaEventSequence.Value;
             LatestBossSnapshot = baseline.Boss;

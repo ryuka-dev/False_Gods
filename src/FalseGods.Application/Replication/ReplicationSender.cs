@@ -43,6 +43,21 @@ namespace FalseGods.Application.Replication
         public void SendBaseline(EncounterBaseline baseline, SessionPeerId peer) =>
             Send(EncounterCodec.Encode(baseline), MessageDelivery.ReliableOrdered, MessageTarget.ToPeer(peer));
 
+        // Encounter control messages (Docs/MultiplayerLoadingContract.md §5.3/§5.11) — host-originated, and so
+        // sent through the same only-the-host-sends assertion as the replication streams.
+
+        /// <summary>Announce the arena to every client: the loading sequence's step 1.</summary>
+        public void BroadcastEnterArena(EnterArena message) =>
+            Send(EncounterCodec.Encode(message), MessageDelivery.ReliableOrdered, MessageTarget.AllClients);
+
+        /// <summary>The gate failed closed — every peer tears its arena down (§5.3.1).</summary>
+        public void BroadcastAborted(EncounterAborted message) =>
+            Send(EncounterCodec.Encode(message), MessageDelivery.ReliableOrdered, MessageTarget.AllClients);
+
+        /// <summary>The encounter is over — every peer discards its replicated state and presentation (§5.11).</summary>
+        public void BroadcastEnded(EncounterEnded message) =>
+            Send(EncounterCodec.Encode(message), MessageDelivery.ReliableOrdered, MessageTarget.AllClients);
+
         private void Send(EncodedPayload payload, MessageDelivery delivery, MessageTarget target)
         {
             if (_session.Role != SessionRole.Host)

@@ -39,8 +39,8 @@ namespace FalseGods.Plugin
     /// <para>
     /// <see cref="PluginGuid"/> is stable because the ST adapter declares a <c>[BepInDependency]</c> on it. The
     /// raise key is a development affordance, not shipping gameplay; damage is the real weapon path (the game's
-    /// projectile/melee systems hitting the boss's collision body). The encounter/arena identity below is the
-    /// dev-slice placeholder — the real arena pipeline supplies these when it joins the composition.
+    /// projectile/melee systems hitting the boss's collision body). The arena identity, hash, and origin all come
+    /// from the real load flow — a raise without valid arena content fails closed.
     /// </para>
     /// </remarks>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
@@ -115,7 +115,7 @@ namespace FalseGods.Plugin
             FalseGodsIntegrations.Changed -= OnIntegrationChanged;
 
             // Never leave a boss behind if the plugin unloads while one is up.
-            if (_boss != null && _boss.IsUp)
+            if (_boss != null && _boss.IsActiveEncounter)
             {
                 _boss.Drop();
             }
@@ -147,20 +147,17 @@ namespace FalseGods.Plugin
         {
             if (KeyPressed(_raiseKey.Value))
             {
-                if (_boss.IsUp)
+                if (_boss.IsActiveEncounter)
                 {
                     _boss.Drop();
                 }
                 else
                 {
-                    // A host hands the controller a replication factory: the controller invokes it after the ready
-                    // gate resolves (the manifest the driver carries exists only then) and before the boss spawns,
-                    // so the spawn events themselves are replicated.
+                    // A host raise hands the controller the integration: the controller realizes locally, then
+                    // gates the whole roster over the channel and starts (with replication attached) only when
+                    // the gate resolves. A single-player raise gates the one local peer and starts immediately.
                     _currentEncounter = new EncounterId(_nextEncounter++);
-                    _boss.SetReplicationFactory(role == CompositionRole.Host
-                        ? manifest => BuildHostReplication(integration!, manifest)
-                        : (Func<Protocol.Arena.ArenaManifest, EncounterHostReplication>?)null);
-                    _boss.Raise(_currentEncounter);
+                    _boss.Raise(_currentEncounter, role == CompositionRole.Host ? integration : null);
                 }
             }
 
@@ -168,25 +165,22 @@ namespace FalseGods.Plugin
             var wantReplication = role == CompositionRole.Host && _boss.IsUp;
             if (wantReplication && !_boss.HasReplication && _boss.CurrentManifest != null)
             {
-                _boss.SetReplication(BuildHostReplication(integration!, _boss.CurrentManifest));
+                _boss.SetReplication(BuildHostReplication(integration!, _boss.CurrentManifest, _boss.CurrentOrigin));
             }
             else if (!wantReplication && _boss.HasReplication)
             {
                 _boss.SetReplication(null);
             }
 
-            if (_boss.IsUp)
-            {
-                _boss.SetFacing(_facingMode.Value, _lockPitch.Value);
-                _boss.Tick(UnityEngine.Time.deltaTime);
-            }
+            _boss.SetFacing(_facingMode.Value, _lockPitch.Value);
+            _boss.Tick(UnityEngine.Time.deltaTime); // also drives a waiting host gate; a no-op when idle
         }
 
         private void RunClientComposition(IFalseGodsIntegration integration)
         {
             // A boss raised locally (as single-player or host) cannot survive a switch to the client role: the
             // host's stream is now the only authority.
-            if (_boss.IsUp)
+            if (_boss.IsActiveEncounter)
             {
                 _boss.Drop();
             }
@@ -219,14 +213,17 @@ namespace FalseGods.Plugin
         }
 
         private EncounterHostReplication BuildHostReplication(
-            IFalseGodsIntegration integration, Protocol.Arena.ArenaManifest manifest) =>
+            IFalseGodsIntegration integration,
+            Protocol.Arena.ArenaManifest manifest,
+            Protocol.Wire.WorldPosition arenaOrigin) =>
             new EncounterHostReplication(
                 new ReplicationSender(integration.Channel, integration.Session),
                 integration.Session,
                 integration.Roster,
                 _currentEncounter,
                 new DefinitionId(TestBossDefinition),
-                manifest);
+                manifest,
+                arenaOrigin);
 
         private void OnIntegrationChanged()
         {

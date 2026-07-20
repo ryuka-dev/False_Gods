@@ -1,8 +1,14 @@
 using System;
+using System.IO;
+using FalseGods.Application.Arena;
 using FalseGods.Application.Presentation;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Simulation;
+using FalseGods.Integration.Sulfur.Navigation;
+using FalseGods.Protocol.Wire;
+using FalseGods.RuntimeContracts.Arena;
 using FalseGods.RuntimeContracts.Integration;
+using FalseGods.UnityRuntime.Arena;
 using FalseGods.UnityRuntime.Presentation;
 using UnityEngine;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
@@ -10,41 +16,65 @@ using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 namespace FalseGods.Plugin
 {
     /// <summary>
-    /// The multiplayer-client boss composition: presentation only, driven by the host's replication stream — a
-    /// <see cref="ReplicationReceiver"/> applies the wire messages idempotently and
-    /// <see cref="WirePresentationMapping"/> turns them into the same presentation contracts the host's own
-    /// presenter produces, feeding the identical <see cref="BossPresentation"/> entry point (Architecture §4.3/§7).
+    /// The multiplayer-client encounter composition: presentation only, driven by the host. The
+    /// <see cref="ClientEncounterFlow"/> answers the host's <c>EnterArena</c> by running the same local
+    /// <see cref="ArenaLoadFlow"/> the host ran (realize at the host's origin, verify parity, apply navigation)
+    /// and reports <c>ArenaReady</c> with the locally recomputed manifest; the <see cref="ReplicationReceiver"/>
+    /// applies the host's streams idempotently and <see cref="WirePresentationMapping"/> feeds the identical
+    /// presentation entry points the host uses (Architecture §4.3/§7).
     /// </summary>
     /// <remarks>
-    /// There is no <c>BossSimulation</c> here and no authoritative decision: the boss appears when the host's
-    /// baseline or first snapshot arrives, is placed on this machine's local floor (presentation-owned, like the
-    /// billboard facing), and every phase/weak-point/death change is an applied host result. A snapshot carrying a
-    /// new <c>EncounterId</c> means the host started a new encounter — the old receiver and visuals are discarded
-    /// and rebuilt, so a host re-raise during development does not leave a stale puppet behind.
-    ///
-    /// <para>
-    /// Known limitation (dev slice): if the host tears the boss down mid-fight, no wire message says so yet — the
-    /// last-known state keeps rendering until the session ends, this controller is disposed, or a new encounter
-    /// starts. The discrete encounter-teardown event is part of the arena/teardown slice (PoC B9/B10).
-    /// </para>
+    /// No <c>BossSimulation</c>, no authoritative decision. The boss puppet stands on the <b>arena's</b> floor —
+    /// the authored enemy-spawn height of the locally realized arena at the host's origin — replacing the old
+    /// local-camera-height guess. A late joiner that never saw <c>EnterArena</c> realizes the arena from the
+    /// baseline's origin and verifies its own content hash against the baseline's before showing anything
+    /// (fail-visible: mismatched content logs and shows no arena). <c>EncounterAborted</c> tears the arena down;
+    /// <c>EncounterEnded</c> discards the whole encounter — puppet, arena, and stream state.
     /// </remarks>
     internal sealed class ClientBossController : IDisposable
     {
         private readonly ILogger? _logger;
         private readonly IFalseGodsIntegration _integration;
+        private readonly string _contentDirectory;
+        private readonly ClientEncounterFlow _controlFlow;
 
         private ReplicationReceiver _receiver;
         private BossPresentation? _presentation;
         private EncounterId? _encounter;
         private int _presentedEvents;
+        private int _presentedArenaEvents;
         private bool _waitingForCameraLogged;
+
+        // The locally realized arena for the announced/joined encounter.
+        private BundleArenaRealization? _realization;
+        private ArenaLoadFlow? _arenaFlow;
+        private LoadedArena? _loadedArena;
+        private ArenaPresentation? _arenaPresentation;
+        private EncounterId? _arenaEncounter;
+        private bool _lateJoinArenaFailed;
+        private bool _arenaSnapshotReplayed;
 
         public ClientBossController(ILogger logger, IFalseGodsIntegration integration)
         {
             _logger = logger;
             _integration = integration ?? throw new ArgumentNullException(nameof(integration));
+            _contentDirectory = Path.GetDirectoryName(typeof(ClientBossController).Assembly.Location) ?? ".";
             _receiver = new ReplicationReceiver(integration.Channel, integration.Session);
-            _logger?.Log("Client boss composition ready: listening for the host's encounter stream.");
+            _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
+            {
+                OnEnterArena = HandleEnterArena,
+                OnAborted = aborted =>
+                {
+                    _logger?.Log($"Host aborted {aborted.Encounter} at the gate ({aborted.Reason}); tearing the local arena down.");
+                    TeardownArena();
+                },
+                OnEnded = ended =>
+                {
+                    _logger?.Log($"Host ended {ended.Encounter}; discarding the encounter.");
+                    DiscardEncounter();
+                },
+            };
+            _logger?.Log("Client encounter composition ready: listening for the host's announcements and streams.");
         }
 
         public bool IsUp => _presentation != null;
@@ -60,11 +90,14 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>
-        /// Advance one frame: raise the puppet when the host's state first arrives, replay newly-applied wire
-        /// events as presentation cues, apply the latest snapshot state, and render.
+        /// Advance one frame: realize the arena from the baseline when this is a late join, raise the puppet on
+        /// the arena floor when the host's state first arrives, replay newly-applied wire events as presentation
+        /// cues, apply the latest snapshot state, and render.
         /// </summary>
         public void Tick(float deltaSeconds)
         {
+            TryRealizeFromBaseline();
+
             var snapshot = _receiver.LatestBossSnapshot;
             if (snapshot is null)
             {
@@ -82,47 +115,177 @@ namespace FalseGods.Plugin
                 return;
             }
 
+            ReplayArenaSnapshotOnce();
+
             var events = _receiver.AppliedBossEvents;
             for (; _presentedEvents < events.Count; _presentedEvents++)
             {
                 _presentation!.Handle(WirePresentationMapping.ToEvent(snapshot.Boss, events[_presentedEvents]));
             }
 
+            var arenaEvents = _receiver.AppliedArenaEvents;
+            for (; _presentedArenaEvents < arenaEvents.Count; _presentedArenaEvents++)
+            {
+                _arenaPresentation?.Handle(WirePresentationMapping.ToEvent(arenaEvents[_presentedArenaEvents]));
+            }
+
             _presentation!.Apply(WirePresentationMapping.ToState(snapshot));
             _presentation.Render(deltaSeconds);
         }
 
-        /// <summary>Tear the puppet and the receiver down; nothing from the encounter remains in the level.</summary>
+        /// <summary>Tear everything down; nothing from the encounter remains in the level.</summary>
         public void Dispose()
         {
+            _controlFlow.Dispose();
             _receiver.Dispose();
             _presentation?.Dispose();
             _presentation = null;
-            _logger?.Log("Client boss composition torn down; nothing remains.");
+            TeardownArena();
+            _logger?.Log("Client encounter composition torn down; nothing remains.");
+        }
+
+        /// <summary>The host announced an arena: run the identical local load at the host's origin and hand back
+        /// the locally recomputed manifest (or the failure to report). A previous arena is replaced.</summary>
+        private ClientLoadOutcome HandleEnterArena(EnterArena enter)
+        {
+            TeardownArena();
+            _lateJoinArenaFailed = false;
+
+            var outcome = RealizeArenaAt(enter.Origin, enter.Encounter);
+            if (outcome.Manifest is null)
+            {
+                _logger?.LogWarning($"Arena load for {enter.Encounter} failed: {outcome.FailureReason}. Reporting ArenaLoadFailed.");
+            }
+            else
+            {
+                _logger?.Log($"Arena for {enter.Encounter} realized at ({enter.Origin.X:0.0}, {enter.Origin.Y:0.0}, "
+                    + $"{enter.Origin.Z:0.0}); reporting ArenaReady.");
+            }
+
+            return outcome;
+        }
+
+        private ClientLoadOutcome RealizeArenaAt(WorldPosition origin, EncounterId encounter)
+        {
+            var realization = new BundleArenaRealization(
+                Path.Combine(_contentDirectory, LocalEncounterController.BundleFileName),
+                Path.Combine(_contentDirectory, LocalEncounterController.ArtifactFileName),
+                LocalEncounterController.ArenaPrefabName,
+                _logger);
+            var flow = new ArenaLoadFlow(
+                realization,
+                realization,
+                new AstarNavigationPort(() => realization.CurrentRoot, _logger));
+
+            var prepared = flow.Prepare();
+            if (!prepared.Success)
+            {
+                flow.Teardown();
+                return ClientLoadOutcome.Failed(prepared.FailureReason ?? "prepare failed");
+            }
+
+            var realized = flow.Realize(new ArenaWorldPoint(origin.X, origin.Y, origin.Z));
+            if (!realized.Success || realized.Manifest is null || realized.Arena is null)
+            {
+                return ClientLoadOutcome.Failed(realized.FailureReason ?? "realize failed");
+            }
+
+            _realization = realization;
+            _arenaFlow = flow;
+            _loadedArena = realized.Arena;
+            _arenaPresentation = new ArenaPresentation(realization, _logger);
+            _arenaEncounter = encounter;
+            _arenaSnapshotReplayed = false;
+            return ClientLoadOutcome.Ready(realized.Manifest);
+        }
+
+        /// <summary>A late joiner never saw EnterArena: realize from the baseline's origin, then verify the
+        /// locally recomputed content hash against the baseline's — mismatched content shows nothing rather than
+        /// a wrong arena (fail-visible, logged once).</summary>
+        private void TryRealizeFromBaseline()
+        {
+            var baseline = _receiver.Baseline;
+            if (baseline is null || _lateJoinArenaFailed)
+            {
+                return;
+            }
+
+            if (_arenaFlow != null && _arenaEncounter == baseline.Encounter)
+            {
+                return; // already realized for this encounter (the EnterArena path)
+            }
+
+            var outcome = RealizeArenaAt(baseline.ArenaOrigin, baseline.Encounter);
+            if (outcome.Manifest is null)
+            {
+                _lateJoinArenaFailed = true;
+                _logger?.LogWarning($"Late-join arena load failed: {outcome.FailureReason}. The boss puppet will "
+                    + "not be shown for this encounter.");
+                return;
+            }
+
+            if (!string.Equals(outcome.Manifest.ArenaId, baseline.ArenaId, StringComparison.Ordinal)
+                || outcome.Manifest.ArenaVersion != baseline.ArenaVersion
+                || outcome.Manifest.ContentHash != baseline.ContentHash)
+            {
+                _lateJoinArenaFailed = true;
+                _logger?.LogWarning("Late-join arena content does not match the host's baseline "
+                    + $"({outcome.Manifest.ArenaId} v{outcome.Manifest.ArenaVersion} vs {baseline.ArenaId} "
+                    + $"v{baseline.ArenaVersion}); tearing it down and showing nothing.");
+                TeardownArena();
+                return;
+            }
+
+            _logger?.Log($"Late join: arena for {baseline.Encounter} realized from the baseline's origin and "
+                + "content-verified against it.");
+        }
+
+        /// <summary>Replay the baseline/latest arena snapshot as idempotent cues once the arena and puppet are
+        /// up, so a late joiner shows mechanisms and an opened exit it never saw the events for.</summary>
+        private void ReplayArenaSnapshotOnce()
+        {
+            if (_arenaSnapshotReplayed || _arenaPresentation is null)
+            {
+                return;
+            }
+
+            var arenaSnapshot = _receiver.LatestArenaSnapshot;
+            if (arenaSnapshot is null)
+            {
+                return;
+            }
+
+            _arenaSnapshotReplayed = true;
+            var cues = WirePresentationMapping.ToEvents(arenaSnapshot);
+            for (var i = 0; i < cues.Count; i++)
+            {
+                _arenaPresentation.Handle(cues[i]);
+            }
         }
 
         private bool TryRaisePresentation(float x, float z, EncounterId encounter)
         {
-            var camera = Camera.main;
-            if (camera == null)
+            // The authoritative floor: the locally realized arena's authored boss-spawn height at the host's
+            // origin. Without an arena (load failed / not yet announced) there is nothing correct to stand the
+            // puppet on — show nothing rather than guess.
+            if (_loadedArena is null || _arenaEncounter != encounter)
             {
                 if (!_waitingForCameraLogged)
                 {
                     _waitingForCameraLogged = true;
-                    _logger?.LogWarning("Host boss state arrived but there is no local camera yet; waiting for a level.");
+                    _logger?.Log($"Host boss state for {encounter} arrived before a matching local arena; waiting.");
                 }
 
                 return false;
             }
 
-            // The floor height is a local presentation concern (the authoritative position is x/z only), derived
-            // the same way the host derives its own: the local viewer's eye height.
-            var floorY = camera.transform.position.y - LocalEncounterController.EyeToFootDrop;
+            var floorY = _loadedArena.BossSpawn.Y;
             _presentation = new BossPresentation(_logger, new Vector3(x, floorY, z));
             _encounter = encounter;
             _presentedEvents = 0;
+            _presentedArenaEvents = 0;
             _waitingForCameraLogged = false;
-            _logger?.Log($"Client boss puppet raised for {encounter} at ({x:0.0}, {floorY:0.0}, {z:0.0}); host-driven.");
+            _logger?.Log($"Client boss puppet raised for {encounter} at ({x:0.0}, {floorY:0.0}, {z:0.0}) on the arena floor; host-driven.");
             return true;
         }
 
@@ -135,6 +298,37 @@ namespace FalseGods.Plugin
             _presentation = null;
             _encounter = null;
             _presentedEvents = 0;
+            _presentedArenaEvents = 0;
+            // The arena for the new encounter arrives via EnterArena (or the new baseline); a stale one is
+            // replaced there. If the announcement already came, keep it.
+            if (_arenaEncounter != null && _arenaEncounter != next)
+            {
+                TeardownArena();
+            }
+        }
+
+        /// <summary>Discard everything encounter-local: puppet, arena, and stream state (EncounterEnded).</summary>
+        private void DiscardEncounter()
+        {
+            _receiver.Dispose();
+            _receiver = new ReplicationReceiver(_integration.Channel, _integration.Session);
+            _presentation?.Dispose();
+            _presentation = null;
+            _encounter = null;
+            _presentedEvents = 0;
+            _presentedArenaEvents = 0;
+            TeardownArena();
+        }
+
+        private void TeardownArena()
+        {
+            _arenaPresentation = null;
+            _arenaFlow?.Teardown();
+            _arenaFlow = null;
+            _realization = null;
+            _loadedArena = null;
+            _arenaEncounter = null;
+            _arenaSnapshotReplayed = false;
         }
     }
 }

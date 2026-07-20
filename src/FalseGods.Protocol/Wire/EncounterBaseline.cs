@@ -14,6 +14,10 @@ namespace FalseGods.Protocol.Wire
     /// (invariant 6). It is the <b>only</b> type permitted to hold both a <see cref="BossSnapshot"/> and an
     /// <see cref="ArenaSnapshot"/> (FG-ARCH-008); whenever either half gains state, the baseline must gain it too,
     /// or late join silently loses it.
+    /// <para>
+    /// <see cref="ArenaOrigin"/> is the host-chosen world origin from <c>EnterArena</c>, repeated here because a
+    /// late joiner never saw that message and cannot realize the arena without it.
+    /// </para>
     /// </remarks>
     public sealed record EncounterBaseline(
         EncounterId Encounter,
@@ -21,6 +25,7 @@ namespace FalseGods.Protocol.Wire
         string ArenaId,
         int ArenaVersion,
         ContentHash ContentHash,
+        WorldPosition ArenaOrigin,
         SimulationTick Tick,
         int EncounterPhaseId,
         BossSnapshot Boss,

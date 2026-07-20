@@ -98,6 +98,7 @@ namespace FalseGods.ProtocolTests
                 "false_gods.arena.poc",
                 1,
                 SampleHash(),
+                new WorldPosition(102.5f, -3f, 88.25f),
                 new SimulationTick(100),
                 EncounterPhaseId: 1,
                 Boss: SampleBoss(),

@@ -166,7 +166,7 @@ namespace FalseGods.ApplicationTests
         }
 
         private static EncounterBaseline Baseline(long bossFloor = 3) => new EncounterBaseline(
-            Enc, ProtocolVersion.Current, "a", 1, default, new SimulationTick(4), EncounterPhaseId: 1,
+            Enc, ProtocolVersion.Current, "a", 1, default, new WorldPosition(1f, 2f, 3f), new SimulationTick(4), EncounterPhaseId: 1,
             Boss: BossSnap(4), Arena: ArenaSnap(4),
             LastProcessedBossEventSequence: new Sequence(bossFloor),
             LastProcessedArenaEventSequence: new Sequence(0));

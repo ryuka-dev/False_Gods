@@ -75,6 +75,7 @@ namespace FalseGods.Protocol.Wire
             w.WriteString(baseline.ArenaId);
             WriteInt(w, baseline.ArenaVersion);
             WriteContentHash(w, baseline.ContentHash);
+            WriteWorldPosition(w, baseline.ArenaOrigin);
             w.WriteInt64(baseline.Tick.Value);
             WriteInt(w, baseline.EncounterPhaseId);
             WriteBossSnapshot(w, baseline.Boss);
@@ -93,6 +94,7 @@ namespace FalseGods.Protocol.Wire
                 r.ReadString(),
                 r.ReadInt32(),
                 ReadContentHash(r),
+                ReadWorldPosition(r),
                 new SimulationTick(r.ReadInt64()),
                 r.ReadInt32(),
                 ReadBossSnapshot(r),

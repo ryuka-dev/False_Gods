@@ -53,6 +53,7 @@ namespace FalseGods.Application.Replication
         private readonly EncounterId _encounter;
         private readonly DefinitionId _definition;
         private readonly ArenaManifest _manifest;
+        private readonly WorldPosition _arenaOrigin;
         private readonly HashSet<SessionPeerId> _baselinedPeers = new HashSet<SessionPeerId>();
 
         private Sequence _lastBossSequence = NoEvents;
@@ -64,7 +65,8 @@ namespace FalseGods.Application.Replication
             IPlayerRoster roster,
             EncounterId encounter,
             DefinitionId definition,
-            ArenaManifest manifest)
+            ArenaManifest manifest,
+            WorldPosition arenaOrigin = default)
         {
             _sender = sender ?? throw new ArgumentNullException(nameof(sender));
             _session = session ?? throw new ArgumentNullException(nameof(session));
@@ -72,6 +74,7 @@ namespace FalseGods.Application.Replication
             _encounter = encounter;
             _definition = definition;
             _manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
+            _arenaOrigin = arenaOrigin;
         }
 
         /// <summary>The last boss-stream sequence stamped so far (<c>seq:-1</c> before the first event).</summary>
@@ -194,6 +197,7 @@ namespace FalseGods.Application.Replication
                 _manifest.ArenaId,
                 _manifest.ArenaVersion,
                 _manifest.ContentHash,
+                _arenaOrigin,
                 tick,
                 (int)effectivePhase,
                 BossWireMapping.ToSnapshot(boss, _encounter, _definition, tick, _lastBossSequence),

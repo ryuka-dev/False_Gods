@@ -16,6 +16,7 @@ using FalseGods.Integration.Sulfur.Simulation;
 using FalseGods.Protocol.Arena;
 using FalseGods.Protocol.Wire;
 using FalseGods.RuntimeContracts.Arena;
+using FalseGods.RuntimeContracts.Integration;
 using FalseGods.RuntimeContracts.Multiplayer;
 using FalseGods.RuntimeContracts.Transport;
 using FalseGods.UnityRuntime.Arena;
@@ -33,29 +34,32 @@ namespace FalseGods.Plugin
     /// (Docs/MultiplayerLoadingContract.md §5.3, Docs/ArenaLoadingProposal.md §2.4).
     /// </summary>
     /// <remarks>
-    /// Single-player is the degenerate case of the same sequence: the required set is the one local peer, so the
-    /// real <see cref="EncounterReadyGate"/> resolves the instant the local report validates — there is no second
-    /// code path. The arena is placed so its authored player-spawn marker lands at the player's feet (the
-    /// measured P4 pattern; the game's own seal/teleport is not yet bridged), the walls seal the space, and the
-    /// boss spawns at the authored enemy-spawn marker on the arena floor — no more camera-derived floor height.
+    /// One sequence, two required sets. Single-player's required set is the one local peer, so the real
+    /// <see cref="EncounterReadyGate"/> resolves the instant the local report validates and the boss starts in
+    /// the same frame. A multiplayer host realizes locally the same way, then opens a
+    /// <see cref="HostEncounterGate"/> — <c>EnterArena</c> broadcast, every roster peer's <c>ArenaReady</c>
+    /// collected, silent peers timed out — and the boss starts only when that gate resolves; an abort tears the
+    /// local arena down and the clients get one <c>EncounterAborted</c>. Players are never placed before the
+    /// gate passes (§5.3): the arena walls seal the space the players are already standing in.
     ///
     /// <para>
-    /// This same controller <b>is</b> the multiplayer-host composition: the host adds replication rather than
-    /// swapping implementations (Architecture §4.3). The Composition Root supplies a replication factory; the
-    /// controller invokes it once the gate has resolved (the manifest the driver needs exists only then) and
-    /// before the boss spawns, so the boss's own spawn events are already replicated. Each tick drains each
-    /// simulation exactly once and fans the same lists to presentation, to the <see cref="EncounterCoordinator"/>,
-    /// and to replication.
+    /// The arena is placed so its authored player-spawn marker lands at the host player's feet (the measured P4
+    /// pattern; the game's own seal/teleport is not yet bridged), and the boss spawns at the authored
+    /// enemy-spawn marker on the arena floor. On drop, a hosting controller broadcasts <c>EncounterEnded</c> so
+    /// clients discard their puppet and arena (§5.11). Each tick drains each simulation exactly once and fans
+    /// the same lists to presentation, to the <see cref="EncounterCoordinator"/>, and to replication.
     /// </para>
     /// </remarks>
     internal sealed class LocalEncounterController
     {
         internal const float EyeToFootDrop = 1.6f;
 
-        private const string BundleFileName = "falsegods-poc-room.bundle";
-        private const string ArtifactFileName = "arena-content-PocRoom.artifact";
-        private const string ArenaPrefabName = "PocRoom";
+        internal const string BundleFileName = "falsegods-poc-room.bundle";
+        internal const string ArtifactFileName = "arena-content-PocRoom.artifact";
+        internal const string ArenaPrefabName = "PocRoom";
+
         private const string PhaseTwoGroup = "phase_2";
+        private const float GateTimeoutSeconds = 30f;
 
         private readonly ILogger _logger;
         private readonly ISimulationClock _clock;
@@ -71,8 +75,16 @@ namespace FalseGods.Plugin
         private BundleArenaRealization? _realization;
         private ArenaLoadFlow? _flow;
         private EncounterHostReplication? _replication;
-        private Func<ArenaManifest, EncounterHostReplication>? _replicationFactory;
         private IDisposable? _damageBinding;
+
+        // Host-gate state, present only while raised (or raising) as a session host.
+        private IFalseGodsIntegration? _hostIntegration;
+        private ReplicationSender? _hostSender;
+        private HostEncounterGate? _hostGate;
+        private ArenaRealizeResult? _pendingStart;
+
+        private EncounterId _encounter;
+        private WorldPosition _originWire;
 
         public LocalEncounterController(ILogger logger)
         {
@@ -86,19 +98,17 @@ namespace FalseGods.Plugin
 
         public bool IsUp => _presentation != null;
 
+        /// <summary>Whether the controller owns a live encounter attempt — fighting, or still gating.</summary>
+        public bool IsActiveEncounter => IsUp || _hostGate != null;
+
         /// <summary>Whether a host replication driver is currently attached.</summary>
         public bool HasReplication => _replication != null;
 
         /// <summary>This encounter's validated manifest (for a mid-fight host attach), or null before the gate.</summary>
         public ArenaManifest? CurrentManifest => _flow?.Manifest;
 
-        /// <summary>
-        /// Provide (or clear) the host replication factory for the <b>next</b> raise. The controller invokes it
-        /// after the ready gate resolves — the manifest the driver carries exists only then — and before the boss
-        /// spawns, so the spawn events themselves are replicated.
-        /// </summary>
-        public void SetReplicationFactory(Func<ArenaManifest, EncounterHostReplication>? factory) =>
-            _replicationFactory = factory;
+        /// <summary>The realized arena's host-chosen origin, for a mid-fight replication attach.</summary>
+        public WorldPosition CurrentOrigin => _originWire;
 
         /// <summary>
         /// Attach (or, with <c>null</c>, detach) the host replication driver mid-encounter — the session can start
@@ -127,14 +137,15 @@ namespace FalseGods.Plugin
 
         /// <summary>
         /// Run the canonical raise: prepare content → place the arena around the player → realize + navigation →
-        /// ready gate → start the boss on the arena floor. Fails closed at every step — on failure nothing of the
-        /// encounter remains and the log reports why.
+        /// ready gate → start the boss on the arena floor. With <paramref name="hostIntegration"/> the gate spans
+        /// the whole roster and the boss starts from <see cref="Tick"/> when every peer proves matching content;
+        /// without it the local gate resolves immediately. Fails closed at every step.
         /// </summary>
-        public bool Raise(EncounterId encounter)
+        public bool Raise(EncounterId encounter, IFalseGodsIntegration? hostIntegration)
         {
-            if (IsUp)
+            if (IsActiveEncounter)
             {
-                _logger?.LogWarning("An encounter is already up; drop it first.");
+                _logger?.LogWarning("An encounter is already up or gating; drop it first.");
                 return false;
             }
 
@@ -144,6 +155,9 @@ namespace FalseGods.Plugin
                 _logger?.LogWarning("Cannot start the encounter: no main camera. Load a level and stand in it first.");
                 return false;
             }
+
+            _encounter = encounter;
+            _hostIntegration = hostIntegration;
 
             // ── LOAD (local): shipped bundle + artifact, parsed and hash-recomputed.
             _realization = new BundleArenaRealization(
@@ -186,7 +200,30 @@ namespace FalseGods.Plugin
                 return false;
             }
 
-            // ── READY GATE: the real gate over the one-member local roster (§5.3 — no second code path).
+            _originWire = new WorldPosition(origin.X, origin.Y, origin.Z);
+
+            if (hostIntegration != null)
+            {
+                // ── MULTIPLAYER GATE: EnterArena to every client; the boss starts from Tick when the whole
+                // roster has proven matching content (§5.3 steps 1/4/5), or the attempt aborts (§5.3.1).
+                _hostSender = new ReplicationSender(hostIntegration.Channel, hostIntegration.Session);
+                _hostGate = new HostEncounterGate(
+                    hostIntegration.Channel,
+                    hostIntegration.Session,
+                    hostIntegration.Roster,
+                    _hostSender,
+                    encounter,
+                    realized.Manifest,
+                    _originWire,
+                    GateTimeoutSeconds);
+                _pendingStart = realized;
+                _hostGate.Open();
+                _logger?.Log($"Encounter {encounter}: arena realized and EnterArena broadcast; waiting for every "
+                    + $"session peer's ArenaReady (timeout {GateTimeoutSeconds:0}s).");
+                return true;
+            }
+
+            // ── SINGLE-PLAYER GATE: the real gate over the one-member local roster — no second code path.
             var gate = new EncounterReadyGate(realized.Manifest, LocalRoster.Instance);
             var status = gate.SubmitReady(LocalRoster.LocalPeer, realized.Manifest);
             if (status != GateStatus.Resolved)
@@ -195,9 +232,88 @@ namespace FalseGods.Plugin
                 return false;
             }
 
-            // ── START: encounter domain + boss on the arena's authoritative floor.
+            StartBoss(realized);
+            return true;
+        }
+
+        /// <summary>
+        /// Advance one frame. While gating: drive the gate (timeout clock, abort broadcast) and start the boss
+        /// the moment it resolves. While fighting: advance the boss on host simulation time, drain both
+        /// simulations once through presentation/coordinator/replication, and render. Otherwise a no-op.
+        /// </summary>
+        public void Tick(float deltaSeconds)
+        {
+            if (_hostGate != null && _pendingStart != null)
+            {
+                _hostGate.Tick(deltaSeconds);
+                switch (_hostGate.Status)
+                {
+                    case GateStatus.Resolved:
+                        var pending = _pendingStart;
+                        _pendingStart = null;
+                        _hostGate.Dispose(); // stops listening; the sender stays for replication + Ended
+                        _hostGate = null;
+                        _logger?.Log("Ready gate resolved for every session peer; starting the encounter.");
+                        StartBoss(pending);
+                        break;
+                    case GateStatus.Aborted:
+                        _logger?.LogWarning($"Encounter {_encounter} aborted at the gate: {_hostGate.AbortReason} "
+                            + $"(outstanding: [{_hostGate.DescribeOutstanding()}]). Clients were told; tearing the "
+                            + "local arena down.");
+                        CleanupGate();
+                        _flow?.Teardown();
+                        _flow = null;
+                        _realization = null;
+                        break;
+                }
+
+                return;
+            }
+
+            if (_boss is null || _presenter is null || _presentation is null)
+            {
+                return;
+            }
+
+            _boss.Advance();
+            Present();
+            _presentation.Render(deltaSeconds);
+        }
+
+        /// <summary>Tear the encounter down in reverse: tell the clients (when hosting), then boss visuals and
+        /// damage seam, then the arena — navigation restored to the level's baseline, hierarchy destroyed,
+        /// bundle released.</summary>
+        public void Drop()
+        {
+            BroadcastEndedIfHosting();
+            CleanupGate();
+            _damageBinding?.Dispose();
+            _damageBinding = null;
+            _presentation?.Dispose();
+            _presentation = null;
+            _presenter = null;
+            _boss = null;
+            _arenaPresentation = null;
+            _coordinator?.BeginExit();
+            _coordinator = null;
+            _arena = null;
+            _flow?.Teardown();
+            _flow = null;
+            _realization = null;
+            _replication = null; // the driver is per-encounter; the next raise gets a fresh one
+            _hostIntegration = null;
+            _logger?.Log("Encounter torn down; arena navigation restored and nothing remains.");
+        }
+
+        /// <summary>Everything after the gate: encounter domain, boss on the arena's authoritative floor, and —
+        /// when hosting — the replication driver, attached before the boss spawns so the spawn events replicate.</summary>
+        private void StartBoss(ArenaRealizeResult realized)
+        {
+            var manifest = realized.Manifest!;
+            var arena = realized.Arena!;
+
             _arena = new ArenaSimulation();
-            _coordinator = new EncounterCoordinator(encounter, _arena, new MechanismGroupId(PhaseTwoGroup));
+            _coordinator = new EncounterCoordinator(_encounter, _arena, new MechanismGroupId(PhaseTwoGroup));
 
             var definition = new BossDefinition(
                 maxHealth: 100,
@@ -216,16 +332,21 @@ namespace FalseGods.Plugin
                 new SeededAuthoritativeRandom(Environment.TickCount),
                 _participants);
 
-            var bossSpawn = realized.Arena.BossSpawn;
+            var bossSpawn = arena.BossSpawn;
             _presentation = new BossPresentation(_logger, new Vector3(bossSpawn.X, bossSpawn.Y, bossSpawn.Z));
             _presenter = new BossPresenter(_presentation);
-            _arenaPresentation = new ArenaPresentation(_realization, _logger);
+            _arenaPresentation = new ArenaPresentation(_realization!, _logger);
 
-            // The host driver attaches before the boss spawns so the spawn events themselves replicate; the
-            // baseline it sends carries the real manifest hash.
-            if (_replicationFactory != null)
+            if (_hostIntegration != null && _hostSender != null)
             {
-                SetReplication(_replicationFactory(realized.Manifest));
+                SetReplication(new EncounterHostReplication(
+                    _hostSender,
+                    _hostIntegration.Session,
+                    _hostIntegration.Roster,
+                    _encounter,
+                    new DefinitionId(1),
+                    manifest,
+                    _originWire));
             }
 
             // Real weapon damage: the game's projectile/melee systems strike the Hitbox-layer capsule, find the
@@ -239,48 +360,10 @@ namespace FalseGods.Plugin
             Present();
             _presentation.Render(0f);
 
-            _logger?.Log($"Encounter {encounter} started: arena '{realized.Manifest.ArenaId}' at "
-                + $"({origin.X:0.0}, {origin.Y:0.0}, {origin.Z:0.0}), {realized.Arena.NavWalkableNodes} walkable "
-                + $"nav node(s), boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on the arena "
-                + "floor. Gate resolved for the local peer. Shoot or melee it; weak-window hits are amplified.");
-            return true;
-        }
-
-        /// <summary>
-        /// Advance one frame: advance the boss on host simulation time, drain both simulations once through
-        /// presentation/coordinator/replication, and render. A no-op when not raised.
-        /// </summary>
-        public void Tick(float deltaSeconds)
-        {
-            if (_boss is null || _presenter is null || _presentation is null)
-            {
-                return;
-            }
-
-            _boss.Advance();
-            Present();
-            _presentation.Render(deltaSeconds);
-        }
-
-        /// <summary>Tear the encounter down in reverse: boss visuals and damage seam first, then the arena —
-        /// navigation restored to the level's baseline, hierarchy destroyed, bundle released.</summary>
-        public void Drop()
-        {
-            _damageBinding?.Dispose();
-            _damageBinding = null;
-            _presentation?.Dispose();
-            _presentation = null;
-            _presenter = null;
-            _boss = null;
-            _arenaPresentation = null;
-            _coordinator?.BeginExit();
-            _coordinator = null;
-            _arena = null;
-            _flow?.Teardown();
-            _flow = null;
-            _realization = null;
-            _replication = null; // the driver is per-encounter; the next raise gets a fresh one
-            _logger?.Log("Encounter torn down; arena navigation restored and nothing remains.");
+            _logger?.Log($"Encounter {_encounter} started: arena '{manifest.ArenaId}' at "
+                + $"({_originWire.X:0.0}, {_originWire.Y:0.0}, {_originWire.Z:0.0}), {arena.NavWalkableNodes} "
+                + $"walkable nav node(s), boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on "
+                + "the arena floor. Shoot or melee it; weak-window hits are amplified.");
         }
 
         /// <summary>
@@ -347,11 +430,45 @@ namespace FalseGods.Plugin
         {
             _logger?.LogWarning($"Encounter not started ({reason}). Nothing was placed; the fail-closed path "
                 + "tore down whatever had been acquired.");
+            CleanupGate();
             _flow?.Teardown();
             _flow = null;
             _realization = null;
             _arena = null;
             _coordinator = null;
+            _hostIntegration = null;
+        }
+
+        /// <summary>Tell the clients the encounter is over (§5.11) — covers both a fight in progress and a
+        /// gate still waiting (clients may hold a realized arena either way). Best-effort: a dead session
+        /// cannot and need not be told.</summary>
+        private void BroadcastEndedIfHosting()
+        {
+            if (_hostSender is null || _hostIntegration is null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (_hostIntegration.Session.IsActive && _hostIntegration.Session.Role == SessionRole.Host)
+                {
+                    _hostSender.BroadcastEnded(new EncounterEnded(_encounter, new SimulationTick(_clock.Tick)));
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"EncounterEnded broadcast failed ({exception.Message}); clients will fall "
+                    + "back to session-end cleanup.");
+            }
+        }
+
+        private void CleanupGate()
+        {
+            _hostGate?.Dispose();
+            _hostGate = null;
+            _hostSender = null;
+            _pendingStart = null;
         }
 
         /// <summary>The single-player required set: exactly the one local peer (§5.3's degenerate case), run
