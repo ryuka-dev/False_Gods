@@ -8,6 +8,7 @@ using FalseGods.Application.ReadyGate;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Arena;
 using FalseGods.Core.Bosses;
+using FalseGods.Core.Bosses.Combat;
 using FalseGods.Core.Encounters;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Combat;
@@ -68,6 +69,7 @@ namespace FalseGods.Plugin
         private readonly ILogger _logger;
         private readonly ISimulationClock _clock;
         private readonly IEncounterParticipantQuery _participants;
+        private readonly IDamagePort _damagePort;
         private readonly string _contentDirectory;
         private readonly float _maxClientHitDamage;
 
@@ -100,6 +102,7 @@ namespace FalseGods.Plugin
             // reseeded per raise so successive fights vary.
             _clock = new SulfurSimulationClock();
             _participants = new SulfurParticipantQuery();
+            _damagePort = new SulfurDamagePort(logger);
             _contentDirectory = Path.GetDirectoryName(typeof(LocalEncounterController).Assembly.Location) ?? ".";
         }
 
@@ -438,6 +441,12 @@ namespace FalseGods.Plugin
             _presenter.Present(_boss, bossEvents);
             _coordinator.Process(bossEvents);
 
+            var damageRequests = _boss.DrainDamageRequests();
+            if (damageRequests.Count > 0)
+            {
+                ApplyOrDeferPlayerDamage(damageRequests);
+            }
+
             var arenaEvents = _arena.DrainEvents();
             for (var i = 0; i < arenaEvents.Count; i++)
             {
@@ -446,6 +455,28 @@ namespace FalseGods.Plugin
 
             _replication?.Publish(
                 _boss, bossEvents, _arena, arenaEvents, _coordinator.Phase, new SimulationTick(_clock.Tick));
+        }
+
+        /// <summary>
+        /// Apply the boss's resolved player hits. In single-player the local player is the only participant, so each
+        /// request goes straight to the game's damage model through the <see cref="IDamagePort"/>. As a host, a
+        /// resolved hit on a remote client's player must instead be sent to that client to apply on its own player
+        /// (§5.6, ST's per-player health ownership) — that routing is the next slice, so here it is drained and
+        /// noted rather than mis-applied to the host's local puppet of a remote player.
+        /// </summary>
+        private void ApplyOrDeferPlayerDamage(IReadOnlyList<DamageRequest> requests)
+        {
+            if (_hostIntegration != null)
+            {
+                _logger?.Log($"[boss-damage] {requests.Count} player hit(s) resolved; multiplayer player-damage "
+                    + "routing is not wired yet (deferred to the client-damage slice).");
+                return;
+            }
+
+            for (var i = 0; i < requests.Count; i++)
+            {
+                _damagePort.ApplyDamage(requests[i].Target, requests[i].Amount);
+            }
         }
 
         /// <summary>A failed raise leaves nothing behind: the flow's teardown is idempotent at any stage.</summary>
