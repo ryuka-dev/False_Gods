@@ -332,7 +332,10 @@ namespace FalseGods.Plugin
                 telegraphSeconds: 1.5f,
                 commitSeconds: 0.4f,
                 recoverSeconds: 2.0f,
-                weakPointDamageMultiplier: 3);
+                weakPointDamageMultiplier: 3,
+                attackDamage: 20,
+                aimedHitRadius: 2.0f,
+                areaHitRadius: 5.0f);
 
             _boss = new BossSimulation(
                 new BossInstanceId(1),

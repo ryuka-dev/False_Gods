@@ -98,7 +98,10 @@ namespace FalseGods.Probe.Boss
                 telegraphSeconds: 1.5f,
                 commitSeconds: 0.4f,
                 recoverSeconds: 2.0f,
-                weakPointDamageMultiplier: 3);
+                weakPointDamageMultiplier: 3,
+                attackDamage: 10,
+                aimedHitRadius: 2f,
+                areaHitRadius: 5f);
 
             _boss = new BossSimulation(
                 new BossInstanceId(1),

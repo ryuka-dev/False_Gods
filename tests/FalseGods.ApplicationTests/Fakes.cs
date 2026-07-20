@@ -93,7 +93,10 @@ namespace FalseGods.ApplicationTests
             telegraphSeconds: 1f,
             commitSeconds: 1f,
             recoverSeconds: 1f,
-            weakPointDamageMultiplier: 3);
+            weakPointDamageMultiplier: 3,
+            attackDamage: 10,
+            aimedHitRadius: 2f,
+            areaHitRadius: 5f);
 
         public FakeClock Clock { get; } = new FakeClock();
 

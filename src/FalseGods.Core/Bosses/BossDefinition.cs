@@ -21,7 +21,10 @@ namespace FalseGods.Core.Bosses
             float telegraphSeconds,
             float commitSeconds,
             float recoverSeconds,
-            int weakPointDamageMultiplier)
+            int weakPointDamageMultiplier,
+            int attackDamage,
+            float aimedHitRadius,
+            float areaHitRadius)
         {
             if (maxHealth <= 0)
             {
@@ -54,6 +57,14 @@ namespace FalseGods.Core.Bosses
                     "Weak-point damage multiplier must be at least 1.");
             }
 
+            if (attackDamage <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(attackDamage), attackDamage, "Attack damage must be positive.");
+            }
+
+            RequirePositive(aimedHitRadius, nameof(aimedHitRadius));
+            RequirePositive(areaHitRadius, nameof(areaHitRadius));
+
             MaxHealth = maxHealth;
             PhaseTwoHealthFraction = phaseTwoHealthFraction;
             MoveSpeed = moveSpeed;
@@ -62,6 +73,9 @@ namespace FalseGods.Core.Bosses
             CommitSeconds = commitSeconds;
             RecoverSeconds = recoverSeconds;
             WeakPointDamageMultiplier = weakPointDamageMultiplier;
+            AttackDamage = attackDamage;
+            AimedHitRadius = aimedHitRadius;
+            AreaHitRadius = areaHitRadius;
         }
 
         /// <summary>Starting health, in phase one, at full.</summary>
@@ -87,6 +101,15 @@ namespace FalseGods.Core.Bosses
 
         /// <summary>Damage multiplier applied to a hit that lands while the weak point is exposed.</summary>
         public int WeakPointDamageMultiplier { get; }
+
+        /// <summary>Damage dealt to each participant caught by an attack when it commits.</summary>
+        public int AttackDamage { get; }
+
+        /// <summary>Hit radius, in metres, around the aim point of an aimed-projectile attack — tight, a near-direct hit.</summary>
+        public float AimedHitRadius { get; }
+
+        /// <summary>Hit radius, in metres, around the aim point of an area-telegraph attack — wide, the danger zone to leave.</summary>
+        public float AreaHitRadius { get; }
 
         /// <summary>The health value at which phase two begins (rounded down from the fraction).</summary>
         public int PhaseTwoHealthThreshold => (int)Math.Floor(MaxHealth * PhaseTwoHealthFraction);

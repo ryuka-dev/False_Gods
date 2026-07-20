@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using FalseGods.Core.Bosses.Combat;
 using FalseGods.Core.Bosses.Events;
 using FalseGods.Core.Simulation;
 
@@ -35,6 +36,7 @@ namespace FalseGods.Core.Bosses
         private readonly IAuthoritativeRandom _random;
         private readonly IEncounterParticipantQuery _participants;
         private readonly List<IBossDomainEvent> _events = new List<IBossDomainEvent>();
+        private readonly List<DamageRequest> _damageRequests = new List<DamageRequest>();
 
         private bool _spawned;
         private float _activityEnteredTime;
@@ -242,6 +244,23 @@ namespace FalseGods.Core.Bosses
             return drained;
         }
 
+        /// <summary>
+        /// Take the outbound damage requests accumulated since the last drain, clearing the buffer. Kept separate
+        /// from <see cref="DrainEvents"/> because these are commands to damage players, not boss-state facts to
+        /// render or replicate (see <see cref="DamageRequest"/>). The caller owns the returned list.
+        /// </summary>
+        public IReadOnlyList<DamageRequest> DrainDamageRequests()
+        {
+            if (_damageRequests.Count == 0)
+            {
+                return Array.Empty<DamageRequest>();
+            }
+
+            var drained = _damageRequests.ToArray();
+            _damageRequests.Clear();
+            return drained;
+        }
+
         private void SelectAttack(float now, SimVector2 targetPosition)
         {
             var kind = _random.NextInt(0, 2) == 0 ? BossAttackKind.AimedProjectile : BossAttackKind.AreaTelegraph;
@@ -260,6 +279,35 @@ namespace FalseGods.Core.Bosses
             Activity = BossActivity.Committing;
             _activityEnteredTime = now;
             _events.Add(new AttackCommitted(Id, _lastAttackId, CurrentAttackKind, CurrentAttackAimPoint));
+            ResolveAttackHits();
+        }
+
+        /// <summary>
+        /// The landing decision: at commit, everyone currently within the attack's hit radius of its (telegraph-time)
+        /// aim point takes damage — so a participant who left the danger zone during the telegraph is missed. Aimed
+        /// attacks use a tight radius (a near-direct hit on where the target was); area attacks use a wide one. Each
+        /// caught participant produces one <see cref="DamageRequest"/>; the outer layers apply it to the real player.
+        /// </summary>
+        private void ResolveAttackHits()
+        {
+            var radius = CurrentAttackKind == BossAttackKind.AimedProjectile
+                ? _definition.AimedHitRadius
+                : _definition.AreaHitRadius;
+
+            var roster = _participants.Participants;
+            for (var i = 0; i < roster.Count; i++)
+            {
+                var participant = roster[i];
+                if (!_participants.TryGetPosition(participant, out var position))
+                {
+                    continue;
+                }
+
+                if (CurrentAttackAimPoint.DistanceTo(position) <= radius)
+                {
+                    _damageRequests.Add(new DamageRequest(participant, _definition.AttackDamage, _lastAttackId));
+                }
+            }
         }
 
         private void BeginRecovery(float now)
