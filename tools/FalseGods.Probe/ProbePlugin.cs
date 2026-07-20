@@ -31,7 +31,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.27.0";
+        public const string PluginVersion = "0.28.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -44,6 +44,7 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _navEnemyHotkey;
         private ConfigEntry<Key> _navTeardownHotkey;
         private ConfigEntry<Key> _arenaContentHotkey;
+        private ConfigEntry<Key> _matSelectorHotkey;
         private ConfigEntry<Key> _p9Hotkey;
         private ConfigEntry<P9ClientMode> _p9ClientMode;
         private ConfigEntry<float> _p9TimeoutSeconds;
@@ -168,6 +169,16 @@ namespace FalseGods.Probe
                 + "exactly as P6/P7 do; run in a throwaway level on solid level nav. Bound to '-' (number row); F1-F3 "
                 + "are the game's debug keys. Rebind here if '-' conflicts.");
 
+            _matSelectorHotkey = Config.Bind("Probe", "MatSelectorHotkey", Key.Semicolon,
+                "P1a vanilla material-borrow selector check (READ-ONLY): stand in the CAVE level whose look you "
+                + "want to reuse and press ';'. It enumerates the loaded vanilla Room prefabs, loads each without "
+                + "instantiating, scopes to Room.Structure (wall/floor geometry), and for each distinct material "
+                + "prints a (GUID, path, sub-material index) selector with shader/isSupported and a RELIABLE/"
+                + "AMBIGUOUS/UNRESOLVED verdict — proving the carrier selector the production material-borrow will "
+                + "use resolves and is stable (vanilla materials are not individually addressable). Touches no nav "
+                + "graph and no game state; releases every Addressables handle. Bound to ';' (F4-F12, '-', '=', "
+                + "'[', ']', '\\' are taken).");
+
             _p9Hotkey = Config.Bind("Probe", "P9Hotkey", Key.LeftBracket,
                 "P9 host+client arena parity over the SULFUR Together public bridge (NetExternalChannel / "
                 + "NetSessionInfo — no reflection). Needs the bridge-enabled ST on BOTH instances, one hosting and "
@@ -239,6 +250,7 @@ namespace FalseGods.Probe
                               $"P7 teardown hotkey: {_navTeardownHotkey.Value}. " +
                               $"P8 arena-content hotkey: {_arenaContentHotkey.Value} " +
                               $"(fight+leave: {_p8RunFightAndLeave.Value}). " +
+                              $"P1a material-selector hotkey: {_matSelectorHotkey.Value}. " +
                               $"P9 host+client hotkey: {_p9Hotkey.Value} " +
                               $"(client mode: {_p9ClientMode.Value}, timeout: {_p9TimeoutSeconds.Value}s). " +
                               $"B0 boss hotkey: {_bossHotkey.Value} (damage: {_bossDamageHotkey.Value}, " +
@@ -338,6 +350,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_arenaContentHotkey.Value))
             {
                 StartCoroutine(RunArenaContent());
+                return;
+            }
+
+            if (HotkeyPressed(_matSelectorHotkey.Value))
+            {
+                StartCoroutine(RunVanillaMaterial());
                 return;
             }
 
@@ -740,6 +758,36 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P9 report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// P1a: survey the loaded vanilla cave Room prefabs for material-borrow donor selectors (roadmap P1,
+        /// direction B). Read-only — loads prefabs, reads their structural materials, releases the Addressables
+        /// handles; touches no nav graph and no game state. A fresh <see cref="VanillaMaterialProbe"/> per run.
+        /// Shares the _running guard so it never overlaps another probe.
+        /// </summary>
+        private IEnumerator RunVanillaMaterial()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — PoC probe P1a (vanilla material-borrow selector)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new VanillaMaterialProbe().Run(report);
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"P1a material-selector survey done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write P1a report: {exception}");
             }
 
             _running = false;
