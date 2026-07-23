@@ -19,6 +19,21 @@ namespace FalseGods.Application.Arena
         string CarrierGuid,
         string MaterialName);
 
+    /// <summary>
+    /// A convention-based paint for hand-authored decoration that carries no artifact rows: paint every renderer
+    /// directly under <see cref="ParentPath"/> whose GameObject name starts with <see cref="ChildNamePrefix"/>
+    /// (sub-material <see cref="SubMaterialIndex"/>) with the vanilla material <see cref="MaterialName"/> from
+    /// carrier <see cref="CarrierGuid"/>. Used for the decoration rocks — excluded from the content hash, so their
+    /// count and placement are free to change without a rehash — via the same borrow machinery, targeted by naming
+    /// convention rather than a hashed per-node row.
+    /// </summary>
+    public sealed record MaterialConventionPaint(
+        string ParentPath,
+        string ChildNamePrefix,
+        int SubMaterialIndex,
+        string CarrierGuid,
+        string MaterialName);
+
     /// <summary>The outcome of resolving the material borrows: how many were applied, or the fail-closed reason.
     /// Failure is an outcome, not an exception — the load flow tears down on it.</summary>
     public sealed record MaterialBorrowResult(bool Success, string? Error, int Applied)
@@ -52,6 +67,13 @@ namespace FalseGods.Application.Arena
     public interface IVanillaAssetProvider
     {
         MaterialBorrowResult Resolve(IReadOnlyList<MaterialBorrowRequest> requests);
+
+        /// <summary>Paint hand-authored decoration renderers matched by naming convention (see
+        /// <see cref="MaterialConventionPaint"/>). Zero matches is a success with zero applied, not a failure — the
+        /// decoration is optional. Shares the carrier cache and <see cref="Release"/> lifetime with
+        /// <see cref="Resolve"/>. A carrier that will not load or a material name that resolves to zero or more than
+        /// one distinct material is fail-closed, exactly as in <see cref="Resolve"/>.</summary>
+        MaterialBorrowResult PaintByConvention(MaterialConventionPaint paint);
 
         void Release();
     }

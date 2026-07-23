@@ -94,6 +94,53 @@ namespace FalseGods.Integration.Sulfur.Arena
             return MaterialBorrowResult.Resolved(applied);
         }
 
+        public MaterialBorrowResult PaintByConvention(MaterialConventionPaint paint)
+        {
+            if (paint == null)
+                return MaterialBorrowResult.Resolved(0);
+
+            var root = _realizedRoot();
+            if (root == null)
+                return MaterialBorrowResult.Failed("no realized arena root to paint decoration");
+
+            var carrier = LoadCarrier(paint.CarrierGuid, out var carrierError);
+            if (carrier == null)
+                return MaterialBorrowResult.Failed($"decoration carrier '{paint.CarrierGuid}' did not load: {carrierError}");
+
+            var material = FindMaterial(carrier, paint.MaterialName, out var materialError);
+            if (material == null)
+            {
+                return MaterialBorrowResult.Failed(
+                    $"decoration material '{paint.MaterialName}' in carrier '{paint.CarrierGuid}': {materialError}");
+            }
+
+            var parent = string.IsNullOrEmpty(paint.ParentPath) ? root.transform : root.transform.Find(paint.ParentPath);
+            if (parent == null)
+                return MaterialBorrowResult.Failed($"decoration parent path '{paint.ParentPath}' not found in the realized arena");
+
+            var applied = 0;
+            foreach (Transform child in parent)
+            {
+                if (!child.name.StartsWith(paint.ChildNamePrefix, StringComparison.Ordinal))
+                    continue;
+
+                var renderer = child.GetComponent<Renderer>();
+                if (renderer == null)
+                    continue;
+
+                var materials = renderer.sharedMaterials;
+                if (paint.SubMaterialIndex < 0 || paint.SubMaterialIndex >= materials.Length)
+                    continue; // a decoration renderer without that slot is skipped, not fatal
+
+                materials[paint.SubMaterialIndex] = material;
+                renderer.sharedMaterials = materials; // reassign: the array getter returns a copy
+                applied++;
+            }
+
+            _logger?.Log($"[vanilla-material] {applied} decoration paint(s) of '{paint.MaterialName}' on '{paint.ChildNamePrefix}*'");
+            return MaterialBorrowResult.Resolved(applied);
+        }
+
         public void Release()
         {
             if (_carriers.Count == 0)

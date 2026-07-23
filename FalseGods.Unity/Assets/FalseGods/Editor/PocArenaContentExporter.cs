@@ -25,11 +25,15 @@ namespace FalseGods.EditorTools
     /// geometry are read from the actual generated prefab, so the artifact reflects exactly what ships; a missing
     /// authored node is a hard export failure, mirroring the "fail the build" rule (§8.3).
     ///
-    /// Direction B: our own Floor/Walls/Ceiling/Rocks wear vanilla cave materials borrowed BY NAME at runtime
+    /// Direction B: our own Floor/Walls/Ceiling wear vanilla cave materials borrowed BY NAME at runtime
     /// from a pinned donor carrier (CaveNormal3New — one clean prefab whose renderers carry the whole cave
     /// material set, each name resolving to a single distinct material, verified against the carrier). The GUID
     /// names the player's own installed asset; nothing vanilla ships. Each borrow targets sub-material 0 of the
     /// target renderer.
+    ///
+    /// Decoration rocks are deliberately NOT in this artifact: they are hand-authored, pure-visual Rock_* children
+    /// (like the LightingRoot) that carry their own baked material, so they are excluded from the content hash and
+    /// the parity map — tuning a rock never rehashes the arena. They still ride the bundle and render at runtime.
     /// </summary>
     public static class PocArenaContentExporter
     {
@@ -59,9 +63,6 @@ namespace FalseGods.EditorTools
         private const string MatFloor = "CaveFloor";
         private const string MatWall = "CaveWall";
         private const string MatCeiling = "CaveCeilingOther";
-        private const string MatRock = "Rocks_Caves";
-
-        private const int RockCount = 10; // must match PocRoomGenerator.Rocks.Length
 
         private const char Sep = '\t';
         private const string Nil = "-";
@@ -125,14 +126,13 @@ namespace FalseGods.EditorTools
 
         // ── Deterministic GUID number allocation (stable across regenerations) ──────────────────────────────
         //   1..5   roots            6        Floor
-        //   40..43 walls N/E/S/W    44       Ceiling             70..79  Rock_1..10
+        //   40..43 walls N/E/S/W    44       Ceiling
         //   10     FloorCollider    12..15   boundary walls
         //   20     nav              30/31    player/enemy spawn
-        //   50     Floor borrow     52..55   wall borrows        56      Ceiling borrow   80..89 Rock borrows
+        //   50     Floor borrow     52..55   wall borrows        56      Ceiling borrow
+        //   (decoration rocks are hand-authored presentation and carry no artifact rows — see the class summary)
         private static int WallNode(int i) => 40 + i;      // i = 0..3
-        private static int RockNode(int i) => 70 + i;      // i = 0..RockCount-1
         private static int WallBorrow(int i) => 52 + i;
-        private static int RockBorrow(int i) => 80 + i;
 
         private static string BuildArtifact(Transform root)
         {
@@ -164,8 +164,6 @@ namespace FalseGods.EditorTools
             for (var i = 0; i < WallSuffixes.Length; i++)
                 NodeRow(sb, root, WallPath(i), Guid(WallNode(i)), WallName(i), visualRoot);
             NodeRow(sb, root, "VisualRoot/Ceiling", Guid(44), "Ceiling", visualRoot);
-            for (var i = 0; i < RockCount; i++)
-                NodeRow(sb, root, RockPath(i), Guid(RockNode(i)), RockName(i), visualRoot);
 
             // ── Colliders (kind + half-extents geometry + layer NAME; position is not hashed, per §5.2.1 input 6).
             ColliderRow(sb, root, "CollisionRoot/FloorCollider", Guid(10));
@@ -190,8 +188,6 @@ namespace FalseGods.EditorTools
             for (var i = 0; i < WallSuffixes.Length; i++)
                 MaterialBorrowRow(sb, Guid(WallBorrow(i)), Guid(WallNode(i)), 0, CaveCarrierGuid, MatWall, WallPath(i));
             MaterialBorrowRow(sb, Guid(56), Guid(44), 0, CaveCarrierGuid, MatCeiling, "VisualRoot/Ceiling");
-            for (var i = 0; i < RockCount; i++)
-                MaterialBorrowRow(sb, Guid(RockBorrow(i)), Guid(RockNode(i)), 0, CaveCarrierGuid, MatRock, RockPath(i));
 
             // ── Parity map (R14): every identity node/collider/spawn the runtime should find, by path, with the
             //    authored local transform to compare against. Never fed to the hash.
@@ -203,8 +199,6 @@ namespace FalseGods.EditorTools
 
         private static string WallName(int i) => "Wall_" + WallSuffixes[i];
         private static string WallPath(int i) => "VisualRoot/" + WallName(i);
-        private static string RockName(int i) => "Rock_" + (i + 1).ToString(CultureInfo.InvariantCulture);
-        private static string RockPath(int i) => "VisualRoot/" + RockName(i);
 
         private static IEnumerable<(string Path, string Kind)> ParityTargets()
         {
@@ -217,8 +211,6 @@ namespace FalseGods.EditorTools
             for (var i = 0; i < WallSuffixes.Length; i++)
                 yield return (WallPath(i), "Wall");
             yield return ("VisualRoot/Ceiling", "Ceiling");
-            for (var i = 0; i < RockCount; i++)
-                yield return (RockPath(i), "Rock");
 
             yield return ("CollisionRoot/FloorCollider", "Box");
             foreach (var name in BoundaryColliderNames)

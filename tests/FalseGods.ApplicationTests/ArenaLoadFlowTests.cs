@@ -181,6 +181,8 @@ namespace FalseGods.ApplicationTests
 
             public IReadOnlyList<MaterialBorrowRequest>? CapturedRequests { get; private set; }
 
+            public MaterialConventionPaint? CapturedPaint { get; private set; }
+
             public MaterialBorrowResult Resolve(IReadOnlyList<MaterialBorrowRequest> requests)
             {
                 _journal.Add("vanilla.Resolve");
@@ -188,6 +190,12 @@ namespace FalseGods.ApplicationTests
                 return FailResolve
                     ? MaterialBorrowResult.Failed("carrier did not load")
                     : MaterialBorrowResult.Resolved(requests.Count);
+            }
+
+            public MaterialBorrowResult PaintByConvention(MaterialConventionPaint paint)
+            {
+                CapturedPaint = paint;
+                return MaterialBorrowResult.Resolved(0);
             }
 
             public void Release() => _journal.Add("vanilla.Release");

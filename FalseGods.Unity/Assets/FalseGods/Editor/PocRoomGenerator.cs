@@ -61,10 +61,22 @@ namespace FalseGods.EditorTools
 
         public const string PrefabPath = ArenaFolder + "/PocRoom.prefab";
 
-        // Decorative rocks stuck to the walls and ceiling (like vanilla caves). Pure visual, borrow Rocks_Caves.
-        // Fixed transforms so the prefab — and therefore the content hash — is deterministic. Positions sit just
-        // inside the wall inner faces (±(RoomSize/2)) or just under the ceiling, at varied scale/rotation.
-        private static readonly (Vector3 pos, Vector3 euler, Vector3 scale)[] Rocks = new[]
+        // ── Decoration rocks ─────────────────────────────────────────────────────────────────────────────────
+        // Rocks are HAND-AUTHORED décor, not code-owned structure: they live as Rock_* children under VisualRoot,
+        // placed/rotated/scaled by hand in the editor. Generate() rebuilds the structure but PRESERVES them (see
+        // PreserveExistingRocks), and the exporter deliberately EXCLUDES them from the content artifact/hash (pure
+        // presentation, like the lighting) — so tuning a rock never moves the content hash. They wear the real
+        // vanilla rock look: the six vanilla cave rock MESHES + our own URP/Lit material over the vanilla 4x4
+        // Rocks_Color texture (matching vanilla `RocksColor`), baked into the bundle. These vendor assets are
+        // local-only (Assets/FalseGods/VendorAssets, git-ignored; see that folder's README).
+        private const string VendorRocksFolder = "Assets/FalseGods/VendorAssets/Rocks";
+        private const string RockTexturePath = VendorRocksFolder + "/Rocks_Color.png";
+        private const string RockMaterialPath = MaterialsFolder + "/FG_Rock.mat";
+        private const int RockMeshCount = 6;
+
+        // One-time starting layout for SeedRocks: the initial Rock_* instances the author then drags to taste.
+        // The mesh index cycles the six rock meshes. Not read by Generate — rocks are hand-owned once seeded.
+        private static readonly (Vector3 pos, Vector3 euler, Vector3 scale)[] RockSeeds = new[]
         {
             // On the four walls (inner face at ±30), high up.
             (new Vector3(-14f, 20f,  29f), new Vector3(20f,  10f, 0f),   new Vector3(4f, 4f, 3f)),
@@ -95,8 +107,6 @@ namespace FalseGods.EditorTools
                 ArenaFolder + "/FG_PocWallX.asset"); // runs along X (north/south walls)
             var wallZMesh = SaveMesh(BuildBoxMesh(new Vector3(WallThickness, WallHeight, RoomSize)),
                 ArenaFolder + "/FG_PocWallZ.asset"); // runs along Z (east/west walls)
-            var rockMesh = SaveMesh(BuildBoxMesh(Vector3.one),
-                ArenaFolder + "/FG_PocRock.asset"); // unit cube, scaled per instance
 
             var groundMaterial = SaveUrpLitMaterial(MaterialsFolder + "/PocRoom_Ground.mat",
                 new Color(0.42f, 0.40f, 0.38f));
@@ -104,16 +114,18 @@ namespace FalseGods.EditorTools
                 new Color(0.35f, 0.34f, 0.33f));
             var ceilingMaterial = SaveUrpLitMaterial(MaterialsFolder + "/PocRoom_Ceiling.mat",
                 new Color(0.25f, 0.24f, 0.24f));
-            var rockMaterial = SaveUrpLitMaterial(MaterialsFolder + "/PocRoom_Rock.mat",
-                new Color(0.45f, 0.43f, 0.40f));
 
-            var meshes = new CaveMeshes(floorMesh, ceilingMesh, wallXMesh, wallZMesh, rockMesh);
-            var materials = new CaveMaterials(groundMaterial, wallMaterial, ceilingMaterial, rockMaterial);
+            var meshes = new CaveMeshes(floorMesh, ceilingMesh, wallXMesh, wallZMesh);
+            var materials = new CaveMaterials(groundMaterial, wallMaterial, ceilingMaterial);
 
             var root = new GameObject("PocRoom");
             try
             {
                 BuildHierarchy(root, meshes, materials);
+
+                // Rocks are hand-owned décor: carry any the author has placed over into the rebuilt structure so
+                // regenerating never discards them (they are excluded from the content hash, so no rehash either).
+                PreserveExistingRocks(root);
 
                 var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabPath, out var success);
                 if (!success || prefab == null)
@@ -128,18 +140,149 @@ namespace FalseGods.EditorTools
             Debug.Log($"[FalseGods] Cave arena prefab written to {PrefabPath}.");
         }
 
+        /// <summary>
+        /// One-time seed of the decoration rocks so the author has real rock instances to drag. Ensures the
+        /// prefab + structure exist, then — only if no Rock_* décor is present yet — adds the starting layout
+        /// using the six vanilla rock meshes and the shared rock material. Idempotent: re-running never
+        /// duplicates or moves rocks the author has since tuned.
+        /// </summary>
+        [MenuItem("False Gods/Seed Decoration Rocks (one-time)")]
+        public static void SeedRocks()
+        {
+            Generate(); // ensure the prefab + structure exist and preserve any rocks already placed
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+            if (prefab == null)
+                throw new InvalidOperationException($"PoC room prefab not found at {PrefabPath} after Generate.");
+
+            var instance = (GameObject)UnityEngine.Object.Instantiate(prefab);
+            try
+            {
+                var visualRoot = instance.transform.Find("VisualRoot");
+                if (visualRoot == null)
+                    throw new InvalidOperationException("PoC room prefab has no VisualRoot.");
+
+                if (HasRockChild(visualRoot))
+                {
+                    Debug.Log("[FalseGods] Decoration rocks already present; SeedRocks left them untouched.");
+                    return;
+                }
+
+                var material = LoadOrCreateRockMaterial();
+                var meshes = LoadRockMeshes();
+                for (var i = 0; i < RockSeeds.Length; i++)
+                {
+                    var (pos, euler, scale) = RockSeeds[i];
+                    AddDecorMeshChild(visualRoot.gameObject, $"Rock_{i + 1}", meshes[i % RockMeshCount], material,
+                        DefaultLayer, pos, Quaternion.Euler(euler), scale);
+                }
+
+                PrefabUtility.SaveAsPrefabAsset(instance, PrefabPath);
+                AssetDatabase.SaveAssets();
+                Debug.Log($"[FalseGods] Seeded {RockSeeds.Length} decoration rocks into {PrefabPath}.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(instance);
+            }
+        }
+
+        /// <summary>Moves any hand-authored Rock_* décor from the current prefab into the freshly built root so a
+        /// structure regeneration never discards it (rocks are hand-owned; structure is code-owned).</summary>
+        private static void PreserveExistingRocks(GameObject newRoot)
+        {
+            var existing = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+            if (existing == null)
+                return; // first generation — nothing to preserve
+
+            var newVisualRoot = newRoot.transform.Find("VisualRoot");
+            if (newVisualRoot == null)
+                throw new InvalidOperationException("Freshly built root has no VisualRoot to hold preserved rocks.");
+
+            var clone = (GameObject)UnityEngine.Object.Instantiate(existing);
+            try
+            {
+                var oldVisualRoot = clone.transform.Find("VisualRoot");
+                if (oldVisualRoot == null)
+                    return;
+
+                var rocks = new System.Collections.Generic.List<Transform>();
+                foreach (Transform child in oldVisualRoot)
+                    if (IsRockName(child.name))
+                        rocks.Add(child);
+
+                // Reparent out of the clone (worldPositionStays:false keeps each rock's authored local transform),
+                // then destroy the clone — the moved rocks survive as children of the new root.
+                foreach (var rock in rocks)
+                    rock.SetParent(newVisualRoot, worldPositionStays: false);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(clone);
+            }
+        }
+
+        private static bool HasRockChild(Transform visualRoot)
+        {
+            foreach (Transform child in visualRoot)
+                if (IsRockName(child.name))
+                    return true;
+            return false;
+        }
+
+        private static bool IsRockName(string name) => name.StartsWith("Rock_", StringComparison.Ordinal);
+
+        /// <summary>Our own URP/Lit rock material over the vanilla 4x4 Rocks_Color texture (matching vanilla
+        /// `RocksColor`). Created once; if it already exists it is returned untouched so author tuning persists.</summary>
+        private static Material LoadOrCreateRockMaterial()
+        {
+            var existing = AssetDatabase.LoadAssetAtPath<Material>(RockMaterialPath);
+            if (existing != null)
+                return existing; // seed-once: keep any tuning the author applied
+
+            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null)
+                throw new InvalidOperationException(
+                    "Shader 'Universal Render Pipeline/Lit' not found — is the URP package installed?");
+
+            var material = new Material(shader) { name = "FG_Rock" };
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(RockTexturePath);
+            if (texture != null)
+                material.SetTexture("_BaseMap", texture);
+            else
+                Debug.LogWarning($"[FalseGods] Rock texture not found at {RockTexturePath}; FG_Rock will be " +
+                    "untextured. Restore the local VendorAssets (see that folder's README).");
+
+            AssetDatabase.CreateAsset(material, RockMaterialPath);
+            return material;
+        }
+
+        /// <summary>The six vanilla cave rock meshes (local-only VendorAssets). Fails loudly if missing.</summary>
+        private static Mesh[] LoadRockMeshes()
+        {
+            var meshes = new Mesh[RockMeshCount];
+            for (var i = 0; i < RockMeshCount; i++)
+            {
+                var path = $"{VendorRocksFolder}/Rock.0{i + 1}.asset";
+                meshes[i] = AssetDatabase.LoadAssetAtPath<Mesh>(path)
+                    ?? throw new InvalidOperationException(
+                        $"Rock mesh not found at {path}. Restore the local VendorAssets (see that folder's README).");
+            }
+            return meshes;
+        }
+
         private readonly struct CaveMeshes
         {
-            public readonly Mesh Floor, Ceiling, WallX, WallZ, Rock;
-            public CaveMeshes(Mesh floor, Mesh ceiling, Mesh wallX, Mesh wallZ, Mesh rock)
-            { Floor = floor; Ceiling = ceiling; WallX = wallX; WallZ = wallZ; Rock = rock; }
+            public readonly Mesh Floor, Ceiling, WallX, WallZ;
+            public CaveMeshes(Mesh floor, Mesh ceiling, Mesh wallX, Mesh wallZ)
+            { Floor = floor; Ceiling = ceiling; WallX = wallX; WallZ = wallZ; }
         }
 
         private readonly struct CaveMaterials
         {
-            public readonly Material Ground, Wall, Ceiling, Rock;
-            public CaveMaterials(Material ground, Material wall, Material ceiling, Material rock)
-            { Ground = ground; Wall = wall; Ceiling = ceiling; Rock = rock; }
+            public readonly Material Ground, Wall, Ceiling;
+            public CaveMaterials(Material ground, Material wall, Material ceiling)
+            { Ground = ground; Wall = wall; Ceiling = ceiling; }
         }
 
         /// <summary>
@@ -191,13 +334,8 @@ namespace FalseGods.EditorTools
             AddMeshChild(visualRoot, "Ceiling", meshes.Ceiling, materials.Ceiling, DefaultLayer,
                 new Vector3(0f, WallHeight + CeilingThickness / 2f, 0f));
 
-            // Decorative rocks on the walls/ceiling (pure visual).
-            for (var i = 0; i < Rocks.Length; i++)
-            {
-                var (pos, euler, scale) = Rocks[i];
-                AddDecorMeshChild(visualRoot, $"Rock_{i + 1}", meshes.Rock, materials.Rock, DefaultLayer,
-                    pos, Quaternion.Euler(euler), scale);
-            }
+            // Decoration rocks are NOT built here — they are hand-authored Rock_* children under VisualRoot,
+            // seeded once by SeedRocks and preserved across regen by PreserveExistingRocks.
 
             // ── Physics ────────────────────────────────────────────────────────────────────────────────────
             // Floor collider on Geometry(3) makes the ground solid.

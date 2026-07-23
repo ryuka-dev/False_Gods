@@ -15,6 +15,18 @@ namespace FalseGods.Application.Arena
         public const string Boss = "Enemy";
     }
 
+    /// <summary>The hand-authored decoration rocks are excluded from the content hash (like the lighting), so they
+    /// carry no artifact rows and their count/placement change freely without a rehash. At load they are painted by
+    /// naming convention with the cave rock material, reusing the same donor carrier the surfaces borrow from.
+    /// PoC-arena content constants, grouped here like <see cref="ArenaMarkerKinds"/>.</summary>
+    public static class RockDecoration
+    {
+        public const string ParentPath = "VisualRoot";
+        public const string ChildNamePrefix = "Rock_";
+        public const string MaterialName = "Rocks_Caves";
+        public const int SubMaterialIndex = 0;
+    }
+
     /// <summary>Where the local arena load stands. Failure at any step returns the flow to
     /// <see cref="NotLoaded"/> with everything it had acquired released.</summary>
     public enum ArenaLoadStage
@@ -201,6 +213,12 @@ namespace FalseGods.Application.Arena
                 return Fail($"arena material borrow failed: {borrow.Error ?? "unknown"}");
             }
 
+            var rockPaint = PaintDecorationRocks(borrowRequests);
+            if (!rockPaint.Success)
+            {
+                return Fail($"arena decoration paint failed: {rockPaint.Error ?? "unknown"}");
+            }
+
             var nav = _navigation.Apply();
             if (!nav.Success)
             {
@@ -251,6 +269,25 @@ namespace FalseGods.Application.Arena
         /// <summary>Pair each hashed material borrow (carrier + material name + sub-material index) with its
         /// non-hashed runtime target path (the placement), producing the requests the resolver acts on. A borrow
         /// with no matching placement is a fail-closed error rather than a silently-skipped paint.</summary>
+        /// <summary>Paint the hand-authored decoration rocks (excluded from the artifact, so no per-rock rows) with
+        /// the cave rock material, reusing the same donor carrier the surfaces borrow from. Skipped when the arena
+        /// borrows nothing (no carrier to reuse); zero rocks placed is a success with zero applied.</summary>
+        private MaterialBorrowResult PaintDecorationRocks(IReadOnlyList<MaterialBorrowRequest> borrowRequests)
+        {
+            if (borrowRequests.Count == 0)
+            {
+                return MaterialBorrowResult.Resolved(0);
+            }
+
+            var carrierGuid = borrowRequests[0].CarrierGuid;
+            return _vanillaAssets.PaintByConvention(new MaterialConventionPaint(
+                RockDecoration.ParentPath,
+                RockDecoration.ChildNamePrefix,
+                RockDecoration.SubMaterialIndex,
+                carrierGuid,
+                RockDecoration.MaterialName));
+        }
+
         private static IReadOnlyList<MaterialBorrowRequest> BuildMaterialBorrowRequests(
             ArenaContentArtifact artifact, out string? error)
         {

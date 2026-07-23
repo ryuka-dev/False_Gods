@@ -11,3 +11,10 @@
 /*.sln
 /*.slnx
 /.vsconfig
+
+# Vanilla game assets copied locally for authoring (meshes/textures/materials extracted from the
+# player's own installed SULFUR). Never committed — the player's own content, not redistributed here.
+# The built bundle in /Build/ (also ignored) carries the baked copies; provenance is in the README.
+/Assets/FalseGods/VendorAssets/*
+!/Assets/FalseGods/VendorAssets/README.md
+!/Assets/FalseGods/VendorAssets/README.md.meta
