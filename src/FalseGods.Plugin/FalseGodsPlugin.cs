@@ -75,8 +75,8 @@ namespace FalseGods.Plugin
         // around where the player will be. Bring-up numbers - readable rise, a spread that surrounds without being
         // unfair.
         private const int VolleyCount = 6;
-        private const float VolleySpreadMin = 2f;
-        private const float VolleySpreadMax = 6f;
+        private const float VolleySpreadMin = 1.4f;
+        private const float VolleySpreadMax = 4.2f;
         private const float VolleyLiftHeight = 5f;
         private const float VolleyLiftSeconds = 0.5f;
 
@@ -105,6 +105,14 @@ namespace FalseGods.Plugin
         // The window the player's velocity is averaged over before it feeds the lead, so a stand-still jitter reads
         // as roughly no movement instead of a full-speed feint. Larger damps harder but trusts a real turn slower.
         private const float VolleyLeadSmoothingSeconds = 0.4f;
+
+        // Crate impact: a crate landing splashes a circle centred on its landing point. The damage matches the
+        // vanilla cave boss's thrown mud ball (10); the radius and knockback are common-sense values. All destined
+        // for authored boss/attack content, not shipping consts.
+        private const int CrateHitDamage = 10;
+        private const float CrateHitRadius = 2.5f;
+        private const float CrateKnockbackSpeed = 12f;
+        private const float CrateKnockbackLift = 4f;
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
@@ -218,7 +226,8 @@ namespace FalseGods.Plugin
                 + "loot; the ones that land drop nothing. Build a pile with the drop key first.");
 
             _log = new BepInExLogger(Logger);
-            _crates = new SulfurThrownCratePort(_log);
+            _crates = new SulfurThrownCratePort(
+                _log, new SulfurCrateImpact(CrateHitDamage, CrateHitRadius, CrateKnockbackSpeed, CrateKnockbackLift, _log));
             _playerMotion = new SulfurPlayerMotionPort();
             _playerVelocity = new TargetMotionTracker(VolleyLeadSmoothingSeconds);
 

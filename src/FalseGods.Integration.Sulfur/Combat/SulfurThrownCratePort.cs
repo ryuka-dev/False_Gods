@@ -73,6 +73,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         private const string BreakableLayerName = "Breakable";
 
         private readonly ILogger _logger;
+        private readonly IThrownCrateImpact _impact;
 
         // Every crate this port owns, in whatever phase of its life. One crate has a single authority here: it is
         // resting (the game's physics owns its position), lifting off the pile, or flying an arc we drive — and it
@@ -91,9 +92,10 @@ namespace FalseGods.Integration.Sulfur.Combat
         private FieldInfo _preventDroppingLoot;
         private bool _warnedAboutLootFlag;
 
-        public SulfurThrownCratePort(ILogger logger = null)
+        public SulfurThrownCratePort(ILogger logger = null, IThrownCrateImpact impact = null)
         {
             _logger = logger;
+            _impact = impact;
         }
 
         public int InFlight => CountWhere(phase => phase != Phase.Resting);
@@ -382,6 +384,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                     case Phase.Flying:
                         if (!AdvanceFlight(crate, deltaSeconds))
                         {
+                            // Reached its landing spot: splash there, then break it, no loot.
                             _crates.RemoveAt(index);
                             Land(crate);
                         }
@@ -718,13 +721,21 @@ namespace FalseGods.Integration.Sulfur.Combat
             return null;
         }
 
-        /// <summary>The barrel arrived: break it the game's way, but with the loot switched off.</summary>
+        /// <summary>The barrel arrived at its target: settle it there, splash the players around the landing point,
+        /// then break it the game's way with the loot switched off.</summary>
         private void Land(ManagedCrate crate)
+        {
+            crate.Unit.transform.position = crate.Target;
+            _impact?.Splash(ToPoint(crate.Target));
+            BreakNoLoot(crate);
+        }
+
+        /// <summary>Break a crate where it is — its real break, sound and debris — but without paying out loot.
+        /// This is what both a quiet landing and a hit on a player do: only shooting a crate out of the air pays.</summary>
+        private void BreakNoLoot(ManagedCrate crate)
         {
             try
             {
-                crate.Unit.transform.position = crate.Target;
-
                 if (crate.Breakable != null && _preventDroppingLoot != null)
                 {
                     _preventDroppingLoot.SetValue(crate.Breakable, true);
@@ -736,13 +747,16 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
             catch (Exception exception)
             {
-                _logger?.LogWarning($"[crate] a landing crate could not be broken cleanly: {exception}");
+                _logger?.LogWarning($"[crate] a crate could not be broken cleanly: {exception}");
                 if (crate.Unit != null)
                 {
                     UnityEngine.Object.Destroy(crate.Unit.gameObject);
                 }
             }
         }
+
+        private static ArenaWorldPoint ToPoint(Vector3 position) =>
+            new ArenaWorldPoint(position.x, position.y, position.z);
 
         private int ResolveBreakableLayer()
         {
