@@ -3,12 +3,16 @@ using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using FalseGods.Application.Arena;
+using FalseGods.Application.Combat;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Arena;
+using FalseGods.Integration.Sulfur.Combat;
 using FalseGods.Plugin.Diagnostics;
+using FalseGods.RuntimeContracts.Arena;
 using FalseGods.RuntimeContracts.Integration;
 using FalseGods.UnityRuntime.Presentation;
+using UnityEngine;
 using UnityEngine.InputSystem;
 
 namespace FalseGods.Plugin
@@ -55,6 +59,12 @@ namespace FalseGods.Plugin
 
         private const int TestBossDefinition = 1;
 
+        // Bring-up throw shape: far enough ahead to read as incoming, high enough and slow enough to be shot.
+        private const float ThrowDistance = 14f;
+        private const float ThrowHeight = 1.5f;
+        private const float ThrowSeconds = 1.6f;
+        private const float ThrowApex = 3f;
+
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
         private ConfigEntry<BossFacingMode> _facingMode = null!;
@@ -64,6 +74,9 @@ namespace FalseGods.Plugin
         private ConfigEntry<Key> _hijackKey = null!;
         private ConfigEntry<float> _fogStartDistance = null!;
         private ConfigEntry<float> _fogEndDistance = null!;
+        private ConfigEntry<Key> _throwCrateKey = null!;
+
+        private IThrownCratePort _crates = null!;
 
         private float _appliedFogStart;
         private float _appliedFogEnd;
@@ -133,7 +146,15 @@ namespace FalseGods.Plugin
                 + "The arena is 60 units across, so a far corner sits about 60 units from the player's spawn. "
                 + "Changeable live while standing in the arena.");
 
+            // TEMPORARY bring-up affordance for the thrown-destructible mechanic: throw one crate at the player,
+            // with no boss involved, so the flight, the shoot-it-down, and the landing can be judged on their own.
+            _throwCrateKey = Config.Bind("Boss", "ThrowCrateKey", Key.N,
+                "[DEV/TEMPORARY - removed before release] Throw one of the game's crates at you, arcing, from a "
+                + "few metres away. Shoot it down and it drops loot like any barrel; let it land and it breaks "
+                + "with nothing.");
+
             _log = new BepInExLogger(Logger);
+            _crates = new SulfurThrownCratePort(_log);
 
             // The Strategy A generation hooks patch the base game, so they are installed once, here, rather than
             // as a side effect of constructing a port. They stay inert until a hijacked load arms them, and pull
@@ -174,6 +195,14 @@ namespace FalseGods.Plugin
 
             ApplyFogChanges();
 
+            if (KeyPressed(_throwCrateKey.Value))
+            {
+                ThrowOneCrateAtThePlayer();
+            }
+
+            // Crates fly on their own clock, not the encounter's: they outlive a boss and exist without one.
+            _crates.Advance(Time.deltaTime);
+
             var integration = FalseGodsIntegrations.Current;
             var role = EvaluateRole(integration);
 
@@ -185,6 +214,37 @@ namespace FalseGods.Plugin
 
             TearDownClientComposition();
             RunLocalComposition(integration, role);
+        }
+
+        /// <summary>
+        /// Bring-up throw: one crate, from a few metres in front of the player, landing at their feet. Enough to
+        /// judge the arc, the shoot-it-down, and the landing before any of it is wired to a boss.
+        /// </summary>
+        private void ThrowOneCrateAtThePlayer()
+        {
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                _log.LogWarning("[crate] no main camera; stand in a level first.");
+                return;
+            }
+
+            var eye = camera.transform.position;
+            var foot = new ArenaWorldPoint(eye.x, eye.y - LocalEncounterController.EyeToFootDrop, eye.z);
+
+            // Thrown from ahead of the player at roughly chest height, so the arc is visible rather than dropped
+            // on their head.
+            var forward = camera.transform.forward;
+            var from = new ArenaWorldPoint(
+                eye.x + forward.x * ThrowDistance,
+                foot.Y + ThrowHeight,
+                eye.z + forward.z * ThrowDistance);
+
+            if (_crates.Throw(from, foot, ThrowSeconds, ThrowApex))
+            {
+                _log.Log($"[crate] crate thrown from ({from.X:0.0}, {from.Y:0.0}, {from.Z:0.0}); "
+                    + $"{_crates.InFlight} in the air. Shoot it for loot, or let it land for none.");
+            }
         }
 
         /// <summary>
