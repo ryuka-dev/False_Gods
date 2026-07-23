@@ -450,9 +450,16 @@ namespace FalseGods.Plugin
             Present();
             _presentation.Render(0f);
 
+            // The node count is this encounter's own contribution to navigation, which is zero — and says nothing
+            // about the graph — when the level built the navigation itself. Reporting it as such keeps a healthy
+            // Strategy A raise from reading like an arena with no navigation at all.
+            var navigation = _ownsArena
+                ? $"{arena.NavWalkableNodes} walkable nav node(s) applied"
+                : "navigation built by the level itself";
+
             _logger?.Log($"Encounter {_encounter} started: arena '{manifest.ArenaId}' at "
-                + $"({_originWire.X:0.0}, {_originWire.Y:0.0}, {_originWire.Z:0.0}), {arena.NavWalkableNodes} "
-                + $"walkable nav node(s), boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on "
+                + $"({_originWire.X:0.0}, {_originWire.Y:0.0}, {_originWire.Z:0.0}), {navigation}, "
+                + $"boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on "
                 + "the arena floor. Shoot or melee it; weak-window hits are amplified.");
         }
 
