@@ -96,6 +96,13 @@
       <Private>false</Private>
     </Reference>
 
+    <!-- The player's movement controller (Player.movement : ExtendedAdvancedWalkerController) derives from
+         CMF.AdvancedWalkerController here; reading the player's velocity to lead a throw calls its GetVelocity. -->
+    <Reference Include="CharacterMovementFundamentals">
+      <HintPath>$(SulfurManagedDir)\CharacterMovementFundamentals.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
     <!-- Addressables: how vanilla content is resolved from the player's own install. -->
     <Reference Include="Unity.Addressables">
       <HintPath>$(SulfurManagedDir)\Unity.Addressables.dll</HintPath>
