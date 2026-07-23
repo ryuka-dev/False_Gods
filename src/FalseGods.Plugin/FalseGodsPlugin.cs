@@ -65,6 +65,11 @@ namespace FalseGods.Plugin
         private const float ThrowSeconds = 1.6f;
         private const float ThrowApex = 3f;
 
+        // Drop shape: a short reach ahead of the player and a few metres up, so a dropped crate visibly falls and
+        // piles at a consistent spot when the key is tapped repeatedly.
+        private const float DropDistance = 6f;
+        private const float DropHeight = 4f;
+
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
         private ConfigEntry<BossFacingMode> _facingMode = null!;
@@ -75,6 +80,7 @@ namespace FalseGods.Plugin
         private ConfigEntry<float> _fogStartDistance = null!;
         private ConfigEntry<float> _fogEndDistance = null!;
         private ConfigEntry<Key> _throwCrateKey = null!;
+        private ConfigEntry<Key> _dropCrateKey = null!;
 
         private IThrownCratePort _crates = null!;
 
@@ -153,6 +159,14 @@ namespace FalseGods.Plugin
                 + "few metres away. Shoot it down and it drops loot like any barrel; let it land and it breaks "
                 + "with nothing.");
 
+            // TEMPORARY bring-up affordance for the resting half of the destructible supply chain: drop a crate
+            // in front of you under real gravity so it falls and piles. Tap it repeatedly to build a stack. This
+            // is the foundation the later "boss lifts crates off a pile and fires them" step draws from.
+            _dropCrateKey = Config.Bind("Boss", "DropCrateKey", Key.M,
+                "[DEV/TEMPORARY - removed before release] Drop one of the game's crates a few metres in front of "
+                + "you under real gravity; it falls, rests, and stacks with others. Tap repeatedly to build a "
+                + "pile. Resting crates stay shootable.");
+
             _log = new BepInExLogger(Logger);
             _crates = new SulfurThrownCratePort(_log);
 
@@ -200,6 +214,11 @@ namespace FalseGods.Plugin
                 ThrowOneCrateAtThePlayer();
             }
 
+            if (KeyPressed(_dropCrateKey.Value))
+            {
+                DropOneCrateNearThePlayer();
+            }
+
             // Crates fly on their own clock, not the encounter's: they outlive a boss and exist without one.
             _crates.Advance(Time.deltaTime);
 
@@ -244,6 +263,39 @@ namespace FalseGods.Plugin
             {
                 _log.Log($"[crate] crate thrown from ({from.X:0.0}, {from.Y:0.0}, {from.Z:0.0}); "
                     + $"{_crates.InFlight} in the air. Shoot it for loot, or let it land for none.");
+            }
+        }
+
+        /// <summary>
+        /// Bring-up drop: one crate a short reach in front of the player and a few metres up, left to real gravity
+        /// so it falls and rests. Tapping the key repeatedly stacks a pile — the resting foundation the supply
+        /// chain (produce, pile, carry, lift, fire) is built on.
+        /// </summary>
+        private void DropOneCrateNearThePlayer()
+        {
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                _log.LogWarning("[crate] no main camera; stand in a level first.");
+                return;
+            }
+
+            var eye = camera.transform.position;
+            var footY = eye.y - LocalEncounterController.EyeToFootDrop;
+
+            // A little ahead of the player (flattened to the ground plane) and a few metres up, so it drops onto the
+            // floor in view rather than onto their head.
+            var forward = camera.transform.forward;
+            var flat = new Vector3(forward.x, 0f, forward.z).normalized;
+            var at = new ArenaWorldPoint(
+                eye.x + flat.x * DropDistance,
+                footY + DropHeight,
+                eye.z + flat.z * DropDistance);
+
+            if (_crates.Drop(at))
+            {
+                _log.Log($"[crate] crate dropped at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
+                    + $"{_crates.Resting} resting. Tap again to stack a pile.");
             }
         }
 

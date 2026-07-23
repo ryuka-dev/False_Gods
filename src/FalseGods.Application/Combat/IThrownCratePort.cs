@@ -37,11 +37,23 @@ namespace FalseGods.Application.Combat
         /// </summary>
         bool Throw(ArenaWorldPoint from, ArenaWorldPoint to, float flightSeconds, float apexHeight);
 
+        /// <summary>
+        /// Drop one crate at <paramref name="at"/> under real gravity and let the game's own physics own it: it
+        /// falls, comes to rest, and stacks with others already on the ground. This is the resting half of a
+        /// destructible's life — produced, piled, carried, set back down — as opposed to <see cref="Throw"/>'s
+        /// simulation-driven flight; nothing here drives the crate's position. It stays shootable while it rests.
+        /// Returns false when the crate could not be created.
+        /// </summary>
+        bool Drop(ArenaWorldPoint at);
+
         /// <summary>Move every crate still in the air, and resolve the ones that have arrived or been broken.</summary>
         void Advance(float deltaSeconds);
 
         /// <summary>How many crates are in the air right now. Diagnostic.</summary>
         int InFlight { get; }
+
+        /// <summary>How many crates are resting on the ground right now. Diagnostic.</summary>
+        int Resting { get; }
 
         /// <summary>Drop everything: crates still in the air are removed without dropping loot, and any held
         /// content is released. Idempotent.</summary>

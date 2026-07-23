@@ -75,6 +75,11 @@ namespace FalseGods.Integration.Sulfur.Combat
         private readonly ILogger _logger;
         private readonly List<Flight> _flights = new List<Flight>();
 
+        // Crates that have been dropped and are resting/piling on the ground. Unlike a flight, the game's own
+        // physics owns their position — we hold them only so a teardown can remove them and a later lift can pull
+        // one back out. A resting crate becomes null here once a player shoots it (the game breaks and destroys it).
+        private readonly List<Unit> _resting = new List<Unit>();
+
         private UnitSO _definition;
         private GameObject _template;
         private AsyncOperationHandle<GameObject> _meshHandle;
@@ -92,6 +97,8 @@ namespace FalseGods.Integration.Sulfur.Combat
         }
 
         public int InFlight => _flights.Count;
+
+        public int Resting => _resting.Count;
 
         public bool Prepare()
         {
@@ -217,8 +224,69 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        public bool Drop(ArenaWorldPoint at)
+        {
+            if (!Prepare())
+            {
+                return false;
+            }
+
+            try
+            {
+                var where = new Vector3(at.X, at.Y, at.Z);
+
+                // Same real spawn as a throw — a live destructible, weapon-fire and loot and all — but from here on
+                // the game's physics owns it, not our arc.
+                var unit = UnitSO.SpawnUnit(_definition, _template, where, Quaternion.identity);
+                if (unit == null)
+                {
+                    _logger?.LogWarning("[crate] the game returned no unit for the resting destructible.");
+                    return false;
+                }
+
+                unit.gameObject.SetActive(true);
+
+                var breakable = unit as Breakable;
+                if (breakable != null)
+                {
+                    // A dropped crate must survive the fall and the jostle of stacking, so neither the game's
+                    // shatter-on-contact nor its collision-speed damage may fire; it stays shootable regardless
+                    // (weapon fire reaches the Hitmesh on its own path). Whether a hard drop should shatter is a
+                    // later tuning call — the pile has to be reliable first.
+                    breakable.BreakOnFirstContact = false;
+                    breakable.TakeDamageOnCollision = false;
+                }
+
+                if (unit.Rigidbody != null)
+                {
+                    // The template spawns kinematic for flight; a resting crate is the opposite — real gravity,
+                    // driven by nothing but the physics engine, so it falls, rests, and piles like a vanilla barrel.
+                    unit.Rigidbody.isKinematic = false;
+                    unit.Rigidbody.useGravity = true;
+                }
+
+                _resting.Add(unit);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] the crate could not be dropped: {exception}");
+                return false;
+            }
+        }
+
         public void Advance(float deltaSeconds)
         {
+            // Resting crates are not driven here, but a shot-down one leaves a null behind; drop those so the count
+            // stays honest and the list does not accumulate dead references.
+            for (var index = _resting.Count - 1; index >= 0; index--)
+            {
+                if (_resting[index] == null)
+                {
+                    _resting.RemoveAt(index);
+                }
+            }
+
             for (var index = _flights.Count - 1; index >= 0; index--)
             {
                 var flight = _flights[index];
@@ -259,6 +327,18 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             _flights.Clear();
+
+            for (var index = 0; index < _resting.Count; index++)
+            {
+                var unit = _resting[index];
+                if (unit != null)
+                {
+                    // Tearing down is not a kill: remove the pile without loot or a break.
+                    UnityEngine.Object.Destroy(unit.gameObject);
+                }
+            }
+
+            _resting.Clear();
 
             if (_template != null)
             {
