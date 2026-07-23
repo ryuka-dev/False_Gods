@@ -95,6 +95,7 @@ namespace FalseGods.Plugin
 
         private EncounterId _encounter;
         private WorldPosition _originWire;
+        private float _spriteScale; // 0 = leave the presentation's own default; a live config value overrides it
 
         public LocalEncounterController(ILogger logger, float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
@@ -145,6 +146,17 @@ namespace FalseGods.Plugin
             {
                 _presentation.FacingMode = mode;
                 _presentation.LockPitch = lockPitch;
+            }
+        }
+
+        /// <summary>Push the live boss visual scale to the renderer (changeable in-game via config); also applied to
+        /// a boss started later from the host gate.</summary>
+        public void SetSpriteScale(float scale)
+        {
+            _spriteScale = scale;
+            if (_presentation != null && scale > 0f)
+            {
+                _presentation.SpriteScale = scale;
             }
         }
 
@@ -353,6 +365,11 @@ namespace FalseGods.Plugin
 
             var bossSpawn = arena.BossSpawn;
             _presentation = new BossPresentation(_logger, new Vector3(bossSpawn.X, bossSpawn.Y, bossSpawn.Z));
+            if (_spriteScale > 0f)
+            {
+                _presentation.SpriteScale = _spriteScale;
+            }
+
             _presenter = new BossPresenter(_presentation);
             _arenaPresentation = new ArenaPresentation(_realization!, _logger);
 

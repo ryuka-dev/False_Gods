@@ -56,6 +56,7 @@ namespace FalseGods.Plugin
         private ConfigEntry<Key> _raiseKey = null!;
         private ConfigEntry<BossFacingMode> _facingMode = null!;
         private ConfigEntry<bool> _lockPitch = null!;
+        private ConfigEntry<float> _spriteScale = null!;
         private ConfigEntry<float> _maxClientHitDamage = null!;
 
         private BepInExLogger _log = null!;
@@ -82,6 +83,15 @@ namespace FalseGods.Plugin
             _lockPitch = Config.Bind("Boss", "LockPitch", false,
                 "In LocalBillboard facing, false = yaw + natural elevation pitch toward the camera (vanilla), "
                 + "true = yaw only (upright). Ignored by the Fixed and NearestPlayer modes.");
+
+            // TEMPORARY dev affordance — like the whole "Boss" config section, this exists only to tune the boss
+            // in-engine during development. A shipping build fixes the boss size in authored content; players must
+            // not be able to change it. Remove before release (do not let it ossify into shipped config).
+            _spriteScale = Config.Bind("Boss", "SpriteScale", 2.0f,
+                "[DEV/TEMPORARY - removed before release] Uniform visual size of the boss (body sprite, hitboxes, "
+                + "and health bar scale together, the way the vanilla boss is one scaled sprite). 1.0 is the base "
+                + "size; the default is tuned so the boss reads at roughly the vanilla cave boss's size. Changeable "
+                + "live; non-positive values are ignored.");
 
             _maxClientHitDamage = Config.Bind("Multiplayer", "MaxClientHitDamage",
                 LocalEncounterController.DefaultMaxClientHitDamage,
@@ -181,6 +191,7 @@ namespace FalseGods.Plugin
             }
 
             _boss.SetFacing(_facingMode.Value, _lockPitch.Value);
+            _boss.SetSpriteScale(_spriteScale.Value);
             _boss.Tick(UnityEngine.Time.deltaTime); // also drives a waiting host gate; a no-op when idle
         }
 
@@ -210,6 +221,7 @@ namespace FalseGods.Plugin
             }
 
             _client.SetFacing(_facingMode.Value, _lockPitch.Value);
+            _client.SetSpriteScale(_spriteScale.Value);
             _client.Tick(UnityEngine.Time.deltaTime);
         }
 

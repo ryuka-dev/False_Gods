@@ -47,6 +47,31 @@
       <HintPath>$(SulfurManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!--
+      Texture2D.LoadImage (PNG → texture) lives in UnityEngine.ImageConversionModule, which Unity 6 builds against
+      netstandard 2.1. Referencing it from this net472 project pulls a LoadImage(ReadOnlySpan<byte>) overload whose
+      System.ReadOnlySpan<T> net472 cannot resolve (CS1705 / CS0518), and papering over it means dragging in the
+      netstandard-2.1 + System.Memory facade chain. Instead BossPresentation calls LoadImage by reflection at
+      runtime (the game always has the module loaded), so no compile-time reference — and no facade chain — is
+      needed for one hostile API.
+    -->
+  </ItemGroup>
+
+  <!--
+    Boss art baked into the DLL (see EmbeddedArt/README.md). BossPresentation loads it by resource-name
+    suffix, so either source works and the glob simply matches whatever PNGs exist:
+      - EmbeddedArt/*.png            original art you own; committed; ships in a release.
+      - ExtractedAssets/Boss/*.png   vanilla/extracted placeholder; gitignored, never redistributed;
+                                     embedded only for local testing (repo root, hence the ..\.. hop).
+    An empty/absent folder matches nothing (no build error); a missing texture just falls back to a flat quad.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="EmbeddedArt\*.png">
+      <LogicalName>FalseGods.UnityRuntime.Art.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\ExtractedAssets\Boss\*.png">
+      <LogicalName>FalseGods.UnityRuntime.Art.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

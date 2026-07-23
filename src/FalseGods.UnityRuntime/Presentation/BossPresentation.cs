@@ -55,6 +55,15 @@ namespace FalseGods.UnityRuntime.Presentation
         private const float HealthBarWidth = 1.8f;
         private const float HealthBarLift = 0.5f;   // above the body top
 
+        // Uniform visual scale of the whole rig, applied to the root — mirrors SULFUR's own single-scale sprite
+        // setup (the vanilla cave boss is one scaled Sprite object). At 1.0 the body is BodyHeight (2.4) tall; the
+        // vanilla cave boss measures ≈ 4.9 world units, so the rig defaults to about twice size. Tunable live.
+        private const float DefaultSpriteScale = 2.0f;
+
+        // The embedded boss body sprite is loaded by this resource-name suffix (EmbeddedArt/README.md); absent → a
+        // flat coloured quad, so the art is never required for correct behaviour.
+        private const string BodyTextureResourceSuffix = "boss-body.png";
+
         // Local -Z is "the sprite's visible front" (a Unity Quad shows its -Z face once the pivot turns it to the
         // viewer), so these small negative offsets keep the weak point and health-bar fill in front, not z-fighting.
         private const float WeakPointDepth = -0.06f;
@@ -89,6 +98,9 @@ namespace FalseGods.UnityRuntime.Presentation
         private readonly Transform _healthFill;
         private readonly Material _healthFillMat;
 
+        private readonly Texture2D _bodyTexture;  // embedded boss sprite, or null → flat coloured quad
+        private readonly bool _bodyTextured;
+
         private GameObject _telegraph;
         private Material _telegraphMat;
 
@@ -117,6 +129,8 @@ namespace FalseGods.UnityRuntime.Presentation
             _logger = logger;
             _floorY = origin.y;
             _shader = ResolveShader(logger, out _shaderName);
+            _bodyTexture = LoadEmbeddedBodyTexture(logger);
+            _bodyTextured = _bodyTexture != null;
 
             _root = new GameObject("FalseGodsBoss");
             _root.transform.position = new Vector3(origin.x, _floorY, origin.z);
@@ -131,10 +145,22 @@ namespace FalseGods.UnityRuntime.Presentation
             _aimPivot = new GameObject("AimPivot").transform;
             _aimPivot.SetParent(_root.transform, worldPositionStays: false);
 
-            var body = CreateQuad("Body", _bodyBillboard, PhaseOneColor, out _bodyMat);
+            // With a sprite, the body starts white so the art shows its true colours (phase/hit tinting still runs
+            // over it in UpdateBodyColor); without one it keeps the flat phase-one colour.
+            var body = CreateQuad("Body", _bodyBillboard, _bodyTextured ? Color.white : PhaseOneColor, out _bodyMat);
+            if (_bodyTextured)
+            {
+                _bodyMat.mainTexture = _bodyTexture;
+            }
+
             _body = body.transform;
             _body.localPosition = Vector3.zero;
-            _body.localScale = new Vector3(BodyWidth, BodyHeight, 1f);
+            // Keep the authored body height and match the quad's width to the sprite's aspect ratio, so the art is
+            // never stretched; a flat quad keeps the original portrait width.
+            var bodyWidth = _bodyTextured
+                ? BodyHeight * (_bodyTexture.width / (float)_bodyTexture.height)
+                : BodyWidth;
+            _body.localScale = new Vector3(bodyWidth, BodyHeight, 1f);
             BodyCollider = AddBox(body);
 
             // Weak point near the top, slightly toward the viewer, with its OWN collider so R15's "hitbox detached
@@ -152,6 +178,10 @@ namespace FalseGods.UnityRuntime.Presentation
 
             // Health bar: its own transform under the root with its own camera-facing billboard, so it stays readable
             // regardless of which way the body is facing.
+            // TEMPORARY / PLACEHOLDER: this floating world-space bar is a development stand-in. The shipping boss
+            // will show health on SULFUR's native boss HUD (the bar across the top of the heads-up display), and no
+            // added creature will use this floating bar. Replace it when the native boss-bar seam lands; do not build
+            // more presentation on top of it.
             var bg = CreateQuad("HealthBarBg", _root.transform, new Color(0.05f, 0.05f, 0.06f), out _);
             _healthBar = bg.transform;
             _healthBar.localPosition = new Vector3(0f, BodyHeight + HealthBarLift, 0f);
@@ -227,6 +257,11 @@ namespace FalseGods.UnityRuntime.Presentation
 
         /// <summary>In <see cref="BossFacingMode.LocalBillboard"/>: true = yaw only, false = yaw + elevation pitch.</summary>
         public bool LockPitch { get; set; }
+
+        /// <summary>Uniform visual scale of the whole boss rig (body, hitboxes, health bar), applied to the root the
+        /// way SULFUR scales its own single Sprite object. Settable live; positive values only (a non-positive value
+        /// is ignored). Defaults so the boss reads at roughly the vanilla cave boss's size.</summary>
+        public float SpriteScale { get; set; } = DefaultSpriteScale;
 
         /// <summary>The boss body's world collider — an aim ray tests it to place a hit where you aim.</summary>
         public Collider BodyCollider { get; }
@@ -313,6 +348,13 @@ namespace FalseGods.UnityRuntime.Presentation
             }
 
             var camera = Camera.main;
+
+            // Uniform rig scale, applied live so a config change takes effect without a re-raise. Non-positive is
+            // ignored (a bad config value must not collapse the boss to a point).
+            if (SpriteScale > 0f)
+            {
+                _root.transform.localScale = new Vector3(SpriteScale, SpriteScale, SpriteScale);
+            }
 
             if (_hasState)
             {
@@ -458,6 +500,12 @@ namespace FalseGods.UnityRuntime.Presentation
             {
                 color = Color.white;
             }
+            else if (_bodyTextured)
+            {
+                // Show the sprite's true colours; phase is conveyed by the phase pulse and the health bar rather
+                // than tinting the artwork green/orange.
+                color = Color.white;
+            }
             else
             {
                 color = _hasState && _state.PhaseVisualId >= (int)BossPhase.Two
@@ -589,6 +637,11 @@ namespace FalseGods.UnityRuntime.Presentation
             {
                 UnityEngine.Object.Destroy(_root);
             }
+
+            if (_bodyTexture != null)
+            {
+                UnityEngine.Object.Destroy(_bodyTexture);
+            }
         }
 
         // ── construction helpers ──────────────────────────────────────────────────────────────────────────
@@ -680,6 +733,113 @@ namespace FalseGods.UnityRuntime.Presentation
             {
                 _telegraph.SetActive(false);
             }
+        }
+
+        /// <summary>
+        /// Load the boss body sprite embedded in this assembly (EmbeddedArt/README.md): the first manifest resource
+        /// whose name ends with <see cref="BodyTextureResourceSuffix"/>, decoded from PNG into a runtime texture.
+        /// Returns <c>null</c> when none is embedded or decoding fails, so the caller falls back to a flat coloured
+        /// quad — the art is a pure presentation concern and never required for correct behaviour.
+        /// </summary>
+        private static Texture2D LoadEmbeddedBodyTexture(ILogger logger)
+        {
+            try
+            {
+                var assembly = typeof(BossPresentation).Assembly;
+                string resourceName = null;
+                foreach (var name in assembly.GetManifestResourceNames())
+                {
+                    if (name.EndsWith(BodyTextureResourceSuffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        resourceName = name;
+                        break;
+                    }
+                }
+
+                if (resourceName == null)
+                {
+                    logger?.Log("boss body sprite: none embedded; using a flat coloured quad.");
+                    return null;
+                }
+
+                byte[] bytes;
+                using (var stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null)
+                    {
+                        return null;
+                    }
+
+                    bytes = new byte[stream.Length];
+                    var offset = 0;
+                    while (offset < bytes.Length)
+                    {
+                        var read = stream.Read(bytes, offset, bytes.Length - offset);
+                        if (read <= 0)
+                        {
+                            break;
+                        }
+
+                        offset += read;
+                    }
+                }
+
+                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false)
+                {
+                    wrapMode = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Bilinear,
+                    name = "FalseGodsBossBody",
+                };
+
+                // LoadImage resizes the texture to the PNG's real dimensions and reads its straight alpha, which the
+                // Sprites/Default shader renders as a clean cut-out. Called by reflection (see TryLoadImageViaGame).
+                if (!TryLoadImageViaGame(texture, bytes))
+                {
+                    UnityEngine.Object.Destroy(texture);
+                    logger?.LogWarning($"boss body sprite '{resourceName}' failed to decode; using a flat coloured quad.");
+                    return null;
+                }
+
+                logger?.Log($"boss body sprite: '{resourceName}' loaded ({texture.width}x{texture.height}).");
+                return texture;
+            }
+            catch (Exception exception)
+            {
+                logger?.LogWarning($"boss body sprite failed to load ({exception.Message}); using a flat coloured quad.");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Decode PNG bytes into <paramref name="texture"/> via <c>UnityEngine.ImageConversion.LoadImage</c>, bound
+        /// by reflection. That module is built against netstandard 2.1, which this net472 assembly cannot reference
+        /// without dragging in a facade chain (see the csproj note), but the game always has it loaded at runtime —
+        /// so the byte[] overload is resolved dynamically. Returns the decode result, or <c>false</c> if the module
+        /// or a compatible overload is absent.
+        /// </summary>
+        private static bool TryLoadImageViaGame(Texture2D texture, byte[] bytes)
+        {
+            var imageConversion = Type.GetType("UnityEngine.ImageConversion, UnityEngine.ImageConversionModule");
+            if (imageConversion == null)
+            {
+                return false;
+            }
+
+            var twoArg = imageConversion.GetMethod("LoadImage", new[] { typeof(Texture2D), typeof(byte[]) });
+            if (twoArg != null)
+            {
+                return (bool)twoArg.Invoke(null, new object[] { texture, bytes });
+            }
+
+            // Older/newer signatures expose (Texture2D, byte[], bool markNonReadable); pass markNonReadable=false.
+            var threeArg = imageConversion.GetMethod(
+                "LoadImage", new[] { typeof(Texture2D), typeof(byte[]), typeof(bool) });
+            if (threeArg != null)
+            {
+                return (bool)threeArg.Invoke(null, new object[] { texture, bytes, false });
+            }
+
+            return false;
         }
 
         /// <summary>
