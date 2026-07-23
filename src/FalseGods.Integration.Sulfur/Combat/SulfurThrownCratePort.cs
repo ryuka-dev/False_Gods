@@ -49,28 +49,47 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// </remarks>
     public sealed class SulfurThrownCratePort : IThrownCratePort
     {
-        // The destructible the boss throws. The wooden crate's mesh is not addressable while in the caves, but the
-        // barrel's is; both are ordinary units, so the definition and the mesh are the only difference, and the
-        // barrel is the one reachable for a live build. ExplosiveBarrel is the obvious later variation.
-        private static readonly UnitId ThrownUnit = UnitIds.WoodenBarrel;
-
-        // The barrel model, found in the live content catalog by its own asset path — a fixed GUID cannot be used
-        // because the ones the reverse-engineered project assigns are not the game's real catalog keys, and the
-        // path survives a re-key across game versions.
-        private const string MeshPathFragment = "Barrel_Wood";
-
-        // The barrel's real body material (a wood+metal atlas), qualified by its folder so the search does not
-        // match the wood PARTICLE material of the same stem. Tried directly from the catalog: if it is
-        // addressable it dresses the barrel exactly, and no scavenged stand-in is needed.
-        private const string BodyMaterialPathFragment = "Barrels/BarrelWood";
-
-        // The break burst the game spawns when a barrel dies — debris and dust. Assembled units carry no such
-        // effect (it is authored on the prefab, not derived from the definition), so it is loaded and attached.
-        // Its debris also carries a real wood material, which dresses the body better than the raw model import.
-        private const string BreakEffectPathFragment = "BarrelBreakEffect";
+        // The destructibles the boss throws. Each is an ordinary vanilla unit whose definition is loadable
+        // (GetAsset) but whose own prefab is not, so it is assembled the same way — the only differences are the
+        // unit definition, the body mesh, and which material and break effect dress it. The barrel wears its real
+        // model (addressable); the crate is a plain cube, which suits a box and needs no model at all, dressed in
+        // the crate's own material. ExplosiveBarrel is the obvious later addition.
+        private static readonly DestructibleSpec[] Specs =
+        {
+            new DestructibleSpec
+            {
+                // The barrel's model is found in the live catalog by its asset path (a fixed GUID cannot be used —
+                // the reverse-engineered project's keys are not the game's real ones, and the path survives a
+                // re-key). Its material is folder-qualified so the search skips the wood PARTICLE material of the
+                // same stem.
+                Unit = UnitIds.WoodenBarrel,
+                Name = "barrel",
+                MeshPathFragment = "Barrel_Wood",
+                MaterialPathFragment = "Barrels/BarrelWood",
+                BreakEffectPathFragment = "BarrelBreakEffect",
+            },
+            new DestructibleSpec
+            {
+                // A box needs no imported model — a unit cube is the right shape — so the crate is built on a
+                // primitive and dressed in its own material from the catalog.
+                Unit = UnitIds.WoodenCrate,
+                Name = "crate",
+                CubeMesh = true,
+                MaterialPathFragment = "Crate",
+                BreakEffectPathFragment = "CrateBreakEffect",
+            },
+        };
 
         // The layer the vanilla destructibles sit on, so the game's weapon fire finds our body the same way.
         private const string BreakableLayerName = "Breakable";
+
+        // The game's solid-geometry layers a flying crate should break on — walls and props, but NOT the walkable
+        // floor (Geometry), whose contact is the crate's normal landing. The arena's boundary walls are colliders
+        // on GeometryNoNavMesh; the rest are included defensively and skipped if absent.
+        private static readonly string[] WallLayerNames =
+        {
+            "GeometryNoNavMesh", "StaticDoodad", "InvisibleGeometry", "LevelGenBlock",
+        };
 
         private readonly ILogger _logger;
         private readonly IThrownCrateImpact _impact;
@@ -81,16 +100,16 @@ namespace FalseGods.Integration.Sulfur.Combat
         // broken and destroyed by the game, leaving a null we prune on the next tick, in any phase.
         private readonly List<ManagedCrate> _crates = new List<ManagedCrate>();
 
-        private UnitSO _definition;
-        private GameObject _template;
-        private AsyncOperationHandle<GameObject> _meshHandle;
-        private bool _meshHandleValid;
-        private AsyncOperationHandle<GameObject> _breakEffectHandle;
-        private bool _breakEffectHandleValid;
-        private AsyncOperationHandle<Material> _materialHandle;
-        private bool _materialHandleValid;
+        // One assembled template per destructible kind that built successfully; every thrown or dropped unit is
+        // cloned from one of these. A kind whose content could not be sourced is simply absent, so the rest still
+        // work.
+        private readonly List<DestructibleTemplate> _templates = new List<DestructibleTemplate>();
+        private bool _prepared;
+        private int _nextKind;
         private FieldInfo _preventDroppingLoot;
         private bool _warnedAboutLootFlag;
+        private int _wallMask;
+        private bool _wallMaskBuilt;
 
         public SulfurThrownCratePort(ILogger logger = null, IThrownCrateImpact impact = null)
         {
@@ -118,64 +137,44 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         public bool Prepare()
         {
-            if (_template != null)
+            if (_prepared)
             {
                 return true;
             }
 
             try
             {
-                _definition = ThrownUnit.GetAsset();
-                if (_definition == null)
-                {
-                    _logger?.LogWarning("[crate] the game has no definition for the destructible; throwing is unavailable.");
-                    return false;
-                }
-
-                var mesh = LoadBarrelMesh(out var meshMaterial, out var meshError);
-                if (mesh == null)
-                {
-                    _logger?.LogWarning($"[crate] no destructible mesh could be sourced; throwing is unavailable: {meshError}");
-                    return false;
-                }
-
-                // The break effect is a nicety, not a requirement: without it the barrel still flies, breaks, and
-                // drops loot — it just vanishes without debris. A missing one is logged, not fatal. The effect
-                // also carries the barrel's own break sound and a wood material, neither of which an assembled
-                // unit has otherwise.
-                var breakEffect = LoadBreakEffect(out var debrisMaterial, out var breakSound, out var breakEffectError);
-                if (breakEffect == null)
-                {
-                    _logger?.LogWarning($"[crate] no break effect could be sourced; barrels will vanish without debris: {breakEffectError}");
-                }
-
-                // Prefer the barrel's own body material if the catalog will give it to us directly (the exact
-                // wood+metal look); otherwise the wood material scavenged from the break debris; otherwise the
-                // model's own import material.
-                var realMaterial = LoadBodyMaterial();
-                var bodyMaterial = realMaterial != null ? realMaterial
-                    : debrisMaterial != null ? debrisMaterial
-                    : meshMaterial;
-
-                _template = BuildTemplate(mesh, bodyMaterial, breakEffect, breakSound, out var templateError);
-                if (_template == null)
-                {
-                    _logger?.LogWarning($"[crate] the destructible template could not be assembled; throwing is unavailable: {templateError}");
-                    ReleaseMesh();
-                    ReleaseBreakEffect();
-                    return false;
-                }
-
                 // Looked up once: the loot gate is private, and finding it per throw would be wasteful.
-                _preventDroppingLoot = PrivateField(typeof(Breakable), "preventDroppingLoot");
-                if (_preventDroppingLoot == null && !_warnedAboutLootFlag)
+                if (_preventDroppingLoot == null)
                 {
-                    _warnedAboutLootFlag = true;
-                    _logger?.LogWarning("[crate] could not find the loot gate on the game's breakable; a landing "
-                        + "crate will be removed quietly instead of breaking. Landing still drops nothing.");
+                    _preventDroppingLoot = PrivateField(typeof(Breakable), "preventDroppingLoot");
+                    if (_preventDroppingLoot == null && !_warnedAboutLootFlag)
+                    {
+                        _warnedAboutLootFlag = true;
+                        _logger?.LogWarning("[crate] could not find the loot gate on the game's breakable; a landing "
+                            + "crate will be removed quietly instead of breaking. Landing still drops nothing.");
+                    }
                 }
 
-                _logger?.Log("[crate] destructible content ready.");
+                var built = new List<string>();
+                foreach (var spec in Specs)
+                {
+                    var template = BuildKind(spec);
+                    if (template != null)
+                    {
+                        _templates.Add(template);
+                        built.Add(spec.Name);
+                    }
+                }
+
+                if (_templates.Count == 0)
+                {
+                    _logger?.LogWarning("[crate] no destructible kind could be assembled; throwing is unavailable.");
+                    return false;
+                }
+
+                _prepared = true;
+                _logger?.Log($"[crate] destructible content ready: {string.Join(", ", built)}.");
                 return true;
             }
             catch (Exception exception)
@@ -183,6 +182,108 @@ namespace FalseGods.Integration.Sulfur.Combat
                 _logger?.LogWarning($"[crate] destructible content could not be prepared: {exception}");
                 return false;
             }
+        }
+
+        /// <summary>Assemble the inactive template one destructible kind is cloned from, sourcing its mesh (a real
+        /// model or a plain cube), material and break effect. Returns null — and warns — if the kind cannot be
+        /// built, so the others still work.</summary>
+        private DestructibleTemplate BuildKind(DestructibleSpec spec)
+        {
+            var definition = spec.Unit.GetAsset();
+            if (definition == null)
+            {
+                _logger?.LogWarning($"[crate] the game has no definition for the {spec.Name}; skipped.");
+                return null;
+            }
+
+            var template = new DestructibleTemplate { Definition = definition, Name = spec.Name };
+
+            Material meshMaterial = null;
+            Mesh mesh;
+            if (spec.CubeMesh)
+            {
+                mesh = CubeMesh();
+            }
+            else
+            {
+                mesh = LoadAddressableMesh(spec.MeshPathFragment, template, out meshMaterial, out var meshError);
+                if (mesh == null)
+                {
+                    _logger?.LogWarning($"[crate] no {spec.Name} mesh could be sourced ({meshError}); skipped.");
+                    template.Release();
+                    return null;
+                }
+            }
+
+            // The break effect is a nicety, not a requirement: without it the unit still flies, breaks, and drops
+            // loot — it just vanishes without debris. It also carries the kind's own break sound and a material,
+            // neither of which an assembled unit has otherwise.
+            var breakEffect = LoadBreakEffect(spec.BreakEffectPathFragment, template, out var debrisMaterial, out var breakSound, out var effectError);
+            if (breakEffect == null)
+            {
+                _logger?.LogWarning($"[crate] no {spec.Name} break effect could be sourced ({effectError}); it will vanish without debris.");
+            }
+
+            // Prefer the kind's own body material straight from the catalog; else the material scavenged from the
+            // break debris; else the model's own import material (a cube has none).
+            var realMaterial = LoadBodyMaterial(spec.MaterialPathFragment, template);
+            var bodyMaterial = realMaterial != null ? realMaterial
+                : debrisMaterial != null ? debrisMaterial
+                : meshMaterial;
+
+            var body = BuildTemplate(definition, mesh, bodyMaterial, breakEffect, breakSound, out var templateError);
+            if (body == null)
+            {
+                _logger?.LogWarning($"[crate] the {spec.Name} template could not be assembled ({templateError}); skipped.");
+                template.Release();
+                return null;
+            }
+
+            template.Template = body;
+            return template;
+        }
+
+        /// <summary>The built-in unit cube's mesh, borrowed from a throwaway primitive. The shared mesh is a
+        /// persistent engine resource, so it outlives the primitive we read it from.</summary>
+        private static Mesh CubeMesh()
+        {
+            var temp = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            temp.SetActive(false);
+            var mesh = temp.GetComponent<MeshFilter>().sharedMesh;
+            UnityEngine.Object.Destroy(temp);
+            return mesh;
+        }
+
+        /// <summary>The next kind to spawn, cycled so a pile or a volley mixes the kinds evenly.</summary>
+        private DestructibleTemplate PickKind() => _templates[_nextKind++ % _templates.Count];
+
+        /// <summary>Clone one destructible from a kind's template through the game's own spawn — a real unit, with
+        /// weapon fire and loot — wake it, and switch off the vanilla break-on-contact rules so we own its life.
+        /// The caller sets its rigidbody for flight or for rest.</summary>
+        private Unit SpawnFrom(DestructibleTemplate kind, Vector3 position, out Breakable breakable)
+        {
+            breakable = null;
+
+            var unit = UnitSO.SpawnUnit(kind.Definition, kind.Template, position, Quaternion.identity);
+            if (unit == null)
+            {
+                return null;
+            }
+
+            // The clone is inactive because the template is; waking it runs the unit's own Start after Spawn has
+            // already marked it spawned, so nothing re-initialises.
+            unit.gameObject.SetActive(true);
+
+            breakable = unit as Breakable;
+            if (breakable != null)
+            {
+                // Ours to decide when it breaks, not the physics engine's — neither shatter-on-contact nor
+                // collision-speed damage may fire while we carry or pile it. It stays shootable regardless.
+                breakable.BreakOnFirstContact = false;
+                breakable.TakeDamageOnCollision = false;
+            }
+
+            return unit;
         }
 
         public bool Throw(ArenaWorldPoint from, ArenaWorldPoint to, float flightSeconds, float apexHeight)
@@ -203,25 +304,11 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var start = new Vector3(from.X, from.Y, from.Z);
                 var target = new Vector3(to.X, to.Y, to.Z);
 
-                // The game's own spawn: clones the template, sets its stats from the definition on it, runs Spawn,
-                // finds its room, and registers it as a live unit — so it is a real destructible, not a look-alike.
-                var unit = UnitSO.SpawnUnit(_definition, _template, start, Quaternion.identity);
+                var unit = SpawnFrom(PickKind(), start, out var breakable);
                 if (unit == null)
                 {
                     _logger?.LogWarning("[crate] the game returned no unit for the destructible.");
                     return false;
-                }
-
-                // The clone is inactive because the template is; waking it runs the unit's own Start after Spawn
-                // has already marked it spawned, so nothing re-initialises.
-                unit.gameObject.SetActive(true);
-
-                var breakable = unit as Breakable;
-                if (breakable != null)
-                {
-                    // Ours to decide when it lands, not the physics engine's.
-                    breakable.BreakOnFirstContact = false;
-                    breakable.TakeDamageOnCollision = false;
                 }
 
                 if (unit.Rigidbody != null)
@@ -255,24 +342,11 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 // Same real spawn as a throw — a live destructible, weapon-fire and loot and all — but from here on
                 // the game's physics owns it, not our arc.
-                var unit = UnitSO.SpawnUnit(_definition, _template, where, Quaternion.identity);
+                var unit = SpawnFrom(PickKind(), where, out var breakable);
                 if (unit == null)
                 {
                     _logger?.LogWarning("[crate] the game returned no unit for the resting destructible.");
                     return false;
-                }
-
-                unit.gameObject.SetActive(true);
-
-                var breakable = unit as Breakable;
-                if (breakable != null)
-                {
-                    // A dropped crate must survive the fall and the jostle of stacking, so neither the game's
-                    // shatter-on-contact nor its collision-speed damage may fire; it stays shootable regardless
-                    // (weapon fire reaches the Hitmesh on its own path). Whether a hard drop should shatter is a
-                    // later tuning call — the pile has to be reliable first.
-                    breakable.BreakOnFirstContact = false;
-                    breakable.TakeDamageOnCollision = false;
                 }
 
                 if (unit.Rigidbody != null)
@@ -382,21 +456,44 @@ namespace FalseGods.Integration.Sulfur.Combat
                         break;
 
                     case Phase.Flying:
-                        if (!AdvanceFlight(crate, deltaSeconds))
+                    {
+                        crate.Elapsed += deltaSeconds;
+                        var progress = crate.Elapsed / crate.FlightSeconds;
+
+                        if (progress >= 1f)
                         {
                             // Reached its landing spot: splash there, then break it, no loot.
                             _crates.RemoveAt(index);
                             Land(crate);
+                            break;
                         }
-                        else if (_impact != null && _impact.Contact(ToPoint(crate.Unit.transform.position)))
+
+                        var from = crate.Unit.transform.position;
+                        var to = ArcPoint(crate, progress);
+
+                        // A wall (or any solid geometry) between where it was and where the arc takes it next:
+                        // detonate against it instead of passing through. Kinematic flight ignores physics, so the
+                        // crate would otherwise sail through the arena's walls.
+                        if (HitsGeometry(from, to, out var wallPoint))
                         {
-                            // Detonated on a player it reached in the air: it hurt and shoved them and is spent,
-                            // so break it where it hit — no loot.
+                            crate.Unit.transform.position = wallPoint;
+                            _crates.RemoveAt(index);
+                            _impact?.Splash(ToPoint(wallPoint));
+                            BreakNoLoot(crate);
+                            break;
+                        }
+
+                        crate.Unit.transform.position = to;
+
+                        // Reached a player's body in the air: detonate on them.
+                        if (_impact != null && _impact.Contact(ToPoint(to)))
+                        {
                             _crates.RemoveAt(index);
                             BreakNoLoot(crate);
                         }
 
                         break;
+                    }
                 }
             }
         }
@@ -425,20 +522,72 @@ namespace FalseGods.Integration.Sulfur.Combat
             crate.BeginFlight(crate.Hover, crate.Target, crate.FlightSeconds, crate.ApexHeight);
         }
 
-        /// <summary>Advance a flying crate along its arc. Returns false when it has arrived (the caller lands it).</summary>
-        private static bool AdvanceFlight(ManagedCrate crate, float deltaSeconds)
+        /// <summary>The point on a crate's arc at <paramref name="progress"/> (0 at the throw, 1 at the target).</summary>
+        private static Vector3 ArcPoint(ManagedCrate crate, float progress)
         {
-            crate.Elapsed += deltaSeconds;
-            var progress = crate.Elapsed / crate.FlightSeconds;
-            if (progress >= 1f)
+            var ground = Vector3.Lerp(crate.Start, crate.Target, BallisticArc.HorizontalFraction(progress));
+            ground.y += BallisticArc.Height(progress, crate.ApexHeight);
+            return ground;
+        }
+
+        /// <summary>Whether the segment from <paramref name="from"/> to <paramref name="to"/> crosses solid arena
+        /// geometry, and where. A thin ray suffices for the arena's thick walls; triggers are ignored so only real
+        /// collision surfaces stop a crate.</summary>
+        private bool HitsGeometry(Vector3 from, Vector3 to, out Vector3 point)
+        {
+            point = to;
+
+            var mask = WallMask();
+            if (mask == 0)
             {
                 return false;
             }
 
-            var ground = Vector3.Lerp(crate.Start, crate.Target, BallisticArc.HorizontalFraction(progress));
-            ground.y += BallisticArc.Height(progress, crate.ApexHeight);
-            crate.Unit.transform.position = ground;
-            return true;
+            var delta = to - from;
+            var distance = delta.magnitude;
+            if (distance < 1e-4f)
+            {
+                return false;
+            }
+
+            if (Physics.Raycast(from, delta / distance, out var hit, distance, mask, QueryTriggerInteraction.Ignore))
+            {
+                point = hit.point;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>The physics layer mask of the arena's solid walls and props — built once from the game's own
+        /// geometry layer names, and deliberately excluding the walkable floor, whose contact is a normal landing.
+        /// A crate on the "Breakable" layer is not in the mask, so crates neither block nor break on each other.</summary>
+        private int WallMask()
+        {
+            if (_wallMaskBuilt)
+            {
+                return _wallMask;
+            }
+
+            var mask = 0;
+            foreach (var name in WallLayerNames)
+            {
+                var layer = LayerMask.NameToLayer(name);
+                if (layer >= 0)
+                {
+                    mask |= 1 << layer;
+                }
+            }
+
+            if (mask == 0)
+            {
+                _logger?.LogWarning("[crate] none of the arena's wall layers were found; flying crates will pass "
+                    + "through walls instead of breaking on them.");
+            }
+
+            _wallMask = mask;
+            _wallMaskBuilt = true;
+            return _wallMask;
         }
 
         public void Release()
@@ -455,34 +604,32 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             _crates.Clear();
 
-            if (_template != null)
+            // Every unit cloned from a template shared its mesh, material, and break effect; only now that the
+            // templates and their clones are gone is it safe to destroy each template and release its handles.
+            foreach (var template in _templates)
             {
-                UnityEngine.Object.Destroy(_template);
-                _template = null;
+                template.Release();
             }
 
-            // The handles were held because every barrel cloned from the template shares their mesh, material, and
-            // break effect; only now that the template and its clones are gone is it safe to release them.
-            ReleaseMesh();
-            ReleaseBreakEffect();
-            ReleaseMaterial();
+            _templates.Clear();
+            _prepared = false;
         }
 
         /// <summary>
-        /// Find the barrel model in the game's live content catalog by its own asset path and hand back its mesh
-        /// (and a material to render it with). The handle is held so the mesh stays alive for every barrel built
-        /// from it; it is released in <see cref="Release"/>. Searching the catalog rather than naming a fixed GUID
-        /// is what makes this independent of the reverse-engineered project's invented keys.
+        /// Find a model in the game's live content catalog by its own asset path and hand back its mesh (and a
+        /// material to render it with). The handle is held on the template so the mesh stays alive for every unit
+        /// built from it, and is released when the template is. Searching the catalog rather than naming a fixed
+        /// GUID is what makes this independent of the reverse-engineered project's invented keys.
         /// </summary>
-        private Mesh LoadBarrelMesh(out Material material, out string error)
+        private Mesh LoadAddressableMesh(string meshPathFragment, DestructibleTemplate template, out Material material, out string error)
         {
             material = null;
             error = null;
 
-            var location = FindLocation(MeshPathFragment, null, out var searchDiagnostic);
+            var location = FindLocation(meshPathFragment, null, out var searchDiagnostic);
             if (location == null)
             {
-                error = $"no catalog entry whose path contains '{MeshPathFragment}'. {searchDiagnostic}";
+                error = $"no catalog entry whose path contains '{meshPathFragment}'. {searchDiagnostic}";
                 return null;
             }
 
@@ -492,7 +639,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var model = handle.WaitForCompletion();
                 if (handle.Status != AsyncOperationStatus.Succeeded || model == null)
                 {
-                    error = $"barrel model at '{location.InternalId}' did not load (status={handle.Status})";
+                    error = $"model at '{location.InternalId}' did not load (status={handle.Status})";
                     try { Addressables.Release(handle); } catch (Exception) { }
                     return null;
                 }
@@ -500,7 +647,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var filter = model.GetComponentInChildren<MeshFilter>();
                 if (filter == null || filter.sharedMesh == null)
                 {
-                    error = $"barrel model at '{location.InternalId}' has no mesh";
+                    error = $"model at '{location.InternalId}' has no mesh";
                     try { Addressables.Release(handle); } catch (Exception) { }
                     return null;
                 }
@@ -508,9 +655,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var renderer = model.GetComponentInChildren<MeshRenderer>();
                 material = renderer != null ? renderer.sharedMaterial : null;
 
-                _meshHandle = handle;
-                _meshHandleValid = true;
-                _logger?.Log($"[crate] barrel mesh found at '{location.InternalId}'.");
+                template.Handles.Add(handle);
+                _logger?.Log($"[crate] {template.Name} mesh found at '{location.InternalId}'.");
                 return filter.sharedMesh;
             }
             catch (Exception exception)
@@ -525,7 +671,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// the game's own <see cref="Breakable"/> and <see cref="Hitmesh"/>, wired to each other, with the unit
         /// definition set so the game's spawn can build the barrel's stats and loot from it.
         /// </summary>
-        private GameObject BuildTemplate(Mesh mesh, Material material, GameObject breakEffect, object breakSound, out string error)
+        private GameObject BuildTemplate(UnitSO definition, Mesh mesh, Material material, GameObject breakEffect, object breakSound, out string error)
         {
             error = null;
             try
@@ -555,7 +701,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // Breakable is a Unit; the definition goes on the field SetStats actually reads (it reads the
                 // component's own unitSO, not the argument it is passed — a quirk of the game's SetStats).
                 var breakable = template.AddComponent<Breakable>();
-                breakable.unitSO = _definition;
+                breakable.unitSO = definition;
 
                 // The debris burst the game plays on death. spawnOnDeath is public; the LQ list is set empty (not
                 // null) so the game's death path, which reads its Count, is safe on an assembled unit.
@@ -594,7 +740,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// to dress the body with. The handle is held so the effect and its material stay alive for every barrel;
         /// released in <see cref="Release"/>. A miss is not fatal — the barrel simply breaks without debris.
         /// </summary>
-        private GameObject LoadBreakEffect(out Material debrisMaterial, out object breakSound, out string error)
+        private GameObject LoadBreakEffect(string breakEffectPathFragment, DestructibleTemplate template, out Material debrisMaterial, out object breakSound, out string error)
         {
             debrisMaterial = null;
             breakSound = null;
@@ -603,12 +749,12 @@ namespace FalseGods.Integration.Sulfur.Combat
             // Prefer the plain full-quality effect (bursts outward AND carries the break sound): an exact
             // "...Effect.prefab" match skips both the "_LQ" variant (no sound) and the "(Exploding)" variant
             // (debris drops instead of bursting). Fall back to the LQ burst, then to anything.
-            var location = FindLocation(BreakEffectPathFragment + ".prefab", null, out var searchDiagnostic)
-                ?? FindLocation(BreakEffectPathFragment + "_LQ", null, out searchDiagnostic)
-                ?? FindLocation(BreakEffectPathFragment, null, out searchDiagnostic);
+            var location = FindLocation(breakEffectPathFragment + ".prefab", null, out var searchDiagnostic)
+                ?? FindLocation(breakEffectPathFragment + "_LQ", null, out searchDiagnostic)
+                ?? FindLocation(breakEffectPathFragment, null, out searchDiagnostic);
             if (location == null)
             {
-                error = $"no catalog entry whose path contains '{BreakEffectPathFragment}'. {searchDiagnostic}";
+                error = $"no catalog entry whose path contains '{breakEffectPathFragment}'. {searchDiagnostic}";
                 return null;
             }
 
@@ -628,9 +774,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                 debrisMaterial = ScavengeBodyMaterial(effect, out var materialName);
                 breakSound = ScavengeBreakSound(effect);
 
-                _breakEffectHandle = handle;
-                _breakEffectHandleValid = true;
-                _logger?.Log($"[crate] break effect found at '{location.InternalId}' "
+                template.Handles.Add(handle);
+                _logger?.Log($"[crate] {template.Name} break effect found at '{location.InternalId}' "
                     + $"(body material: {(debrisMaterial != null ? $"'{materialName}'" : "none")}, "
                     + $"break sound: {(breakSound != null ? "yes" : "none")}).");
                 return effect;
@@ -647,12 +792,12 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// nothing) when the material is not addressable — the whole reason the scavenged stand-in exists. When it
         /// works, the barrel is dressed exactly, wood bands and metal both.
         /// </summary>
-        private Material LoadBodyMaterial()
+        private Material LoadBodyMaterial(string bodyMaterialPathFragment, DestructibleTemplate template)
         {
-            var location = FindLocationOfType(BodyMaterialPathFragment, null, typeof(Material), out _);
+            var location = FindLocationOfType(bodyMaterialPathFragment, null, typeof(Material), out _);
             if (location == null)
             {
-                _logger?.Log($"[crate] no addressable body material '{BodyMaterialPathFragment}'; using a stand-in.");
+                _logger?.Log($"[crate] no addressable {template.Name} body material '{bodyMaterialPathFragment}'; using a stand-in.");
                 return null;
             }
 
@@ -666,9 +811,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                     return null;
                 }
 
-                _materialHandle = handle;
-                _materialHandleValid = true;
-                _logger?.Log($"[crate] real body material found at '{location.InternalId}'.");
+                template.Handles.Add(handle);
+                _logger?.Log($"[crate] {template.Name} body material found at '{location.InternalId}'.");
                 return material;
             }
             catch (Exception)
@@ -773,36 +917,6 @@ namespace FalseGods.Integration.Sulfur.Combat
             return layer >= 0 ? layer : 0;
         }
 
-        private void ReleaseMesh()
-        {
-            if (_meshHandleValid)
-            {
-                try { Addressables.Release(_meshHandle); }
-                catch (Exception) { /* not loaded / already released */ }
-                _meshHandleValid = false;
-            }
-        }
-
-        private void ReleaseBreakEffect()
-        {
-            if (_breakEffectHandleValid)
-            {
-                try { Addressables.Release(_breakEffectHandle); }
-                catch (Exception) { /* not loaded / already released */ }
-                _breakEffectHandleValid = false;
-            }
-        }
-
-        private void ReleaseMaterial()
-        {
-            if (_materialHandleValid)
-            {
-                try { Addressables.Release(_materialHandle); }
-                catch (Exception) { /* not loaded / already released */ }
-                _materialHandleValid = false;
-            }
-        }
-
         /// <summary>The first GameObject location in the live catalog whose asset path contains
         /// <paramref name="pathFragment"/>. On a miss, <paramref name="diagnostic"/> reports a few nearby
         /// destructible-looking paths so the real name is visible in one log rather than another guess.</summary>
@@ -866,6 +980,46 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         private static FieldInfo PrivateField(Type type, string name) =>
             type?.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+
+        /// <summary>How to build one kind of destructible: which vanilla unit it is, and where its mesh, material,
+        /// and break effect come from. A cube kind needs no model at all.</summary>
+        private sealed class DestructibleSpec
+        {
+            public UnitId Unit;
+            public string Name;
+            public bool CubeMesh;
+            public string MeshPathFragment;
+            public string MaterialPathFragment;
+            public string BreakEffectPathFragment;
+        }
+
+        /// <summary>One assembled kind: the inactive template every unit of it is cloned from, its definition, and
+        /// the addressable handles held alive for as long as the template lives.</summary>
+        private sealed class DestructibleTemplate
+        {
+            public UnitSO Definition;
+            public GameObject Template;
+            public string Name;
+            public readonly List<AsyncOperationHandle> Handles = new List<AsyncOperationHandle>();
+
+            /// <summary>Destroy the template and release its held content. Safe to call on a half-built kind.</summary>
+            public void Release()
+            {
+                if (Template != null)
+                {
+                    UnityEngine.Object.Destroy(Template);
+                    Template = null;
+                }
+
+                foreach (var handle in Handles)
+                {
+                    try { Addressables.Release(handle); }
+                    catch (Exception) { /* not loaded / already released */ }
+                }
+
+                Handles.Clear();
+            }
+        }
 
         /// <summary>Which of its three lives a crate is living right now.</summary>
         private enum Phase
