@@ -115,6 +115,11 @@ namespace FalseGods.Plugin
                 + "System.");
 
             _log = new BepInExLogger(Logger);
+
+            // The Strategy A generation hooks patch the base game, so they are installed once, here, rather than
+            // as a side effect of constructing a port. They stay inert until a hijacked load arms them.
+            LevelGenerationHijackPatches.Install(_log);
+
             _hijack = new SulfurArenaHijackPort(_log);
             _boss = new LocalEncounterController(_log, _maxClientHitDamage.Value);
 

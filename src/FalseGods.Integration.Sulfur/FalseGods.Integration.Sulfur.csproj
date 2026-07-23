@@ -59,6 +59,18 @@
       <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.LevelGeneration.dll</HintPath>
       <Private>false</Private>
     </Reference>
+
+    <!-- The level-generation node graph the game's levels are built by: MakerSet / MakerGraphContext /
+         MakerNodeBase live here (namespace MakerGraphTool), NOT in Core. XNode is MakerNodeBase's own base
+         (Node), needed for the base-type chain to resolve when we patch. -->
+    <Reference Include="Knackelibang.MakerGraph">
+      <HintPath>$(SulfurManagedDir)\Knackelibang.MakerGraph.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="XNode">
+      <HintPath>$(SulfurManagedDir)\XNode.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>$(SulfurManagedDir)\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>

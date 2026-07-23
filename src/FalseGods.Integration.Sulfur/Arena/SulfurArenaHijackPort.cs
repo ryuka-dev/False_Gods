@@ -39,6 +39,9 @@ namespace FalseGods.Integration.Sulfur.Arena
                 return;
             }
 
+            // Arm the generation hooks for exactly this load. They release themselves when the generation run
+            // ends (LevelGenerationHijackPatches); the catch below covers the load never starting at all.
+            LevelGenerationHijack.Arm();
             try
             {
                 _logger?.Log($"[hijack] loading {CaveEnvironment} level {FirstLevelIndex} (native level load).");
@@ -46,6 +49,7 @@ namespace FalseGods.Integration.Sulfur.Arena
             }
             catch (Exception exception)
             {
+                LevelGenerationHijack.Disarm();
                 _logger?.LogWarning($"[hijack] GoToLevel threw: {exception}");
             }
         }
