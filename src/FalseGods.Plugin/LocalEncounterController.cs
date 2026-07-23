@@ -93,6 +93,11 @@ namespace FalseGods.Plugin
         private HostEncounterGate? _hostGate;
         private ArenaRealizeResult? _pendingStart;
 
+        // False while the encounter is fought in an arena the LEVEL owns (Strategy A): the arena outlives the
+        // fight there, so tearing the encounter down must not take the level's start area with it.
+        private bool _ownsArena;
+        private ArenaManifest? _manifest;
+
         private EncounterId _encounter;
         private WorldPosition _originWire;
         private float _spriteScale; // 0 = leave the presentation's own default; a live config value overrides it
@@ -110,6 +115,12 @@ namespace FalseGods.Plugin
             _contentDirectory = Path.GetDirectoryName(typeof(LocalEncounterController).Assembly.Location) ?? ".";
         }
 
+        /// <summary>
+        /// The arena a hijacked level load left standing, when there is one. Set by the Composition Root; while it
+        /// reports a live arena, a raise fights in <i>that</i> arena instead of loading and placing its own.
+        /// </summary>
+        public HijackedArenaContent? LevelArena { get; set; }
+
         public bool IsUp => _presentation != null;
 
         /// <summary>Whether the controller owns a live encounter attempt — fighting, or still gating.</summary>
@@ -119,7 +130,7 @@ namespace FalseGods.Plugin
         public bool HasReplication => _replication != null;
 
         /// <summary>This encounter's validated manifest (for a mid-fight host attach), or null before the gate.</summary>
-        public ArenaManifest? CurrentManifest => _flow?.Manifest;
+        public ArenaManifest? CurrentManifest => _manifest;
 
         /// <summary>The realized arena's host-chosen origin, for a mid-fight replication attach.</summary>
         public WorldPosition CurrentOrigin => _originWire;
@@ -174,6 +185,29 @@ namespace FalseGods.Plugin
                 return false;
             }
 
+            _encounter = encounter;
+            _hostIntegration = hostIntegration;
+
+            // ── The arena may already be here. A hijacked level load realized our arena AS the level, through
+            // this same load flow — same content hash, same parity check, same borrowed materials — so the
+            // encounter fights in that one rather than loading a second copy of it on top of itself. The arena
+            // belongs to the level, not to this encounter: dropping the boss leaves the cave standing.
+            var levelArena = LevelArena;
+            if (levelArena != null && levelArena.IsLive)
+            {
+                var standing = levelArena.Realized;
+                if (standing?.Manifest is null || standing.Arena is null)
+                {
+                    _logger?.LogWarning("The level's arena is standing but reported no load result; cannot raise in it.");
+                    return false;
+                }
+
+                _ownsArena = false;
+                _realization = levelArena.Realization;
+                _flow = null;
+                return RaiseInArena(standing, HijackedArenaContent.Origin);
+            }
+
             var camera = Camera.main;
             if (camera == null)
             {
@@ -181,8 +215,7 @@ namespace FalseGods.Plugin
                 return false;
             }
 
-            _encounter = encounter;
-            _hostIntegration = hostIntegration;
+            _ownsArena = true;
 
             // ── LOAD (local): shipped bundle + artifact, parsed and hash-recomputed.
             _realization = new BundleArenaRealization(
@@ -226,32 +259,43 @@ namespace FalseGods.Plugin
                 return false;
             }
 
+            return RaiseInArena(realized, origin);
+        }
+
+        /// <summary>
+        /// Everything from a validated, standing arena onwards: the ready gate, then the boss. Shared by both
+        /// ways an arena can get here — loaded and placed by this raise, or already standing because a hijacked
+        /// level load made it the level. There is deliberately one gate and one start path, whichever it was.
+        /// </summary>
+        private bool RaiseInArena(ArenaRealizeResult realized, ArenaWorldPoint origin)
+        {
+            _manifest = realized.Manifest;
             _originWire = new WorldPosition(origin.X, origin.Y, origin.Z);
 
-            if (hostIntegration != null)
+            if (_hostIntegration != null)
             {
                 // ── MULTIPLAYER GATE: EnterArena to every client; the boss starts from Tick when the whole
                 // roster has proven matching content (§5.3 steps 1/4/5), or the attempt aborts (§5.3.1).
-                _hostSender = new ReplicationSender(hostIntegration.Channel, hostIntegration.Session);
+                _hostSender = new ReplicationSender(_hostIntegration.Channel, _hostIntegration.Session);
                 _hostGate = new HostEncounterGate(
-                    hostIntegration.Channel,
-                    hostIntegration.Session,
-                    hostIntegration.Roster,
+                    _hostIntegration.Channel,
+                    _hostIntegration.Session,
+                    _hostIntegration.Roster,
                     _hostSender,
-                    encounter,
-                    realized.Manifest,
+                    _encounter,
+                    realized.Manifest!,
                     _originWire,
                     GateTimeoutSeconds);
                 _pendingStart = realized;
                 _hostGate.Open();
-                _logger?.Log($"Encounter {encounter}: arena realized and EnterArena broadcast; waiting for every "
+                _logger?.Log($"Encounter {_encounter}: arena realized and EnterArena broadcast; waiting for every "
                     + $"session peer's ArenaReady (timeout {GateTimeoutSeconds:0}s).");
                 return true;
             }
 
             // ── SINGLE-PLAYER GATE: the real gate over the one-member local roster — no second code path.
-            var gate = new EncounterReadyGate(realized.Manifest, LocalRoster.Instance);
-            var status = gate.SubmitReady(LocalRoster.LocalPeer, realized.Manifest);
+            var gate = new EncounterReadyGate(realized.Manifest!, LocalRoster.Instance);
+            var status = gate.SubmitReady(LocalRoster.LocalPeer, realized.Manifest!);
             if (status != GateStatus.Resolved)
             {
                 Abort($"ready gate did not resolve locally: {status}/{gate.AbortReason}");
@@ -284,12 +328,10 @@ namespace FalseGods.Plugin
                         break;
                     case GateStatus.Aborted:
                         _logger?.LogWarning($"Encounter {_encounter} aborted at the gate: {_hostGate.AbortReason} "
-                            + $"(outstanding: [{_hostGate.DescribeOutstanding()}]). Clients were told; tearing the "
-                            + "local arena down.");
+                            + $"(outstanding: [{_hostGate.DescribeOutstanding()}]). Clients were told; releasing the "
+                            + "local arena.");
                         CleanupGate();
-                        _flow?.Teardown();
-                        _flow = null;
-                        _realization = null;
+                        ReleaseArena();
                         break;
                 }
 
@@ -325,12 +367,13 @@ namespace FalseGods.Plugin
             _coordinator?.BeginExit();
             _coordinator = null;
             _arena = null;
-            _flow?.Teardown();
-            _flow = null;
-            _realization = null;
+            var ownedArena = _ownsArena;
+            ReleaseArena();
             _replication = null; // the driver is per-encounter; the next raise gets a fresh one
             _hostIntegration = null;
-            _logger?.Log("Encounter torn down; arena navigation restored and nothing remains.");
+            _logger?.Log(ownedArena
+                ? "Encounter torn down; arena navigation restored and nothing remains."
+                : "Encounter torn down; the level's arena is left standing, as it belongs to the level.");
         }
 
         /// <summary>Everything after the gate: encounter domain, boss on the arena's authoritative floor, and —
@@ -517,15 +560,30 @@ namespace FalseGods.Plugin
             }
         }
 
+        /// <summary>
+        /// Give up this encounter's claim on the arena: torn down when the encounter loaded it, merely let go of
+        /// when the arena belongs to the level (Strategy A) and must outlive the fight. Idempotent at any stage.
+        /// </summary>
+        private void ReleaseArena()
+        {
+            if (_ownsArena)
+            {
+                _flow?.Teardown();
+            }
+
+            _flow = null;
+            _realization = null;
+            _manifest = null;
+            _ownsArena = false;
+        }
+
         /// <summary>A failed raise leaves nothing behind: the flow's teardown is idempotent at any stage.</summary>
         private void Abort(string reason)
         {
             _logger?.LogWarning($"Encounter not started ({reason}). Nothing was placed; the fail-closed path "
                 + "tore down whatever had been acquired.");
             CleanupGate();
-            _flow?.Teardown();
-            _flow = null;
-            _realization = null;
+            ReleaseArena();
             _arena = null;
             _coordinator = null;
             _hostIntegration = null;

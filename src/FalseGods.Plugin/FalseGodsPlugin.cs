@@ -65,6 +65,7 @@ namespace FalseGods.Plugin
 
         private BepInExLogger _log = null!;
         private IArenaHijackPort _hijack = null!;
+        private HijackedArenaContent _levelArena = null!;
         private LocalEncounterController _boss = null!;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
@@ -121,11 +122,15 @@ namespace FalseGods.Plugin
             // as a side effect of constructing a port. They stay inert until a hijacked load arms them, and pull
             // the arena from content this root owns — the adapter cannot reach the bundle pipeline itself.
             LevelGenerationHijackPatches.Install(_log);
-            LevelGenerationHijack.ArenaRooms = new HijackedArenaContent(
-                Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".", _log).CreateRoomSource();
+            _levelArena = new HijackedArenaContent(
+                Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".", _log);
+            LevelGenerationHijack.ArenaRooms = _levelArena.CreateRoomSource();
 
             _hijack = new SulfurArenaHijackPort(_log);
-            _boss = new LocalEncounterController(_log, _maxClientHitDamage.Value);
+
+            // When a hijacked level left our arena standing, a raise fights in that one instead of loading a
+            // second copy of the same content on top of itself.
+            _boss = new LocalEncounterController(_log, _maxClientHitDamage.Value) { LevelArena = _levelArena };
 
             // Subscribe before any adapter can load (their hard BepInDependency on this GUID guarantees the order),
             // so a registration always lands in an initialized seam. Composition changes are applied in Update, in

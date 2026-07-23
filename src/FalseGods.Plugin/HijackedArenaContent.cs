@@ -36,12 +36,30 @@ namespace FalseGods.Plugin
 
         private BundleArenaRealization? _realization;
         private ArenaLoadFlow? _flow;
+        private ArenaRealizeResult? _realized;
 
         public HijackedArenaContent(string contentDirectory, ILogger logger)
         {
             _contentDirectory = contentDirectory ?? throw new ArgumentNullException(nameof(contentDirectory));
             _logger = logger;
         }
+
+        /// <summary>
+        /// Whether a hijacked arena is standing in the world right now. Asked of the realized hierarchy itself, so
+        /// a level the player left — which destroyed the arena along with the rest of the level — reads as gone
+        /// without us having to observe the level change.
+        /// </summary>
+        public bool IsLive => _realization != null && _realization.CurrentRoot != null;
+
+        /// <summary>The live arena's validated load result — the manifest and spawn points an encounter needs —
+        /// or null when no hijacked arena is standing.</summary>
+        public ArenaRealizeResult? Realized => IsLive ? _realized : null;
+
+        /// <summary>The live arena's realization, for presentation that needs to reach its hierarchy.</summary>
+        public BundleArenaRealization? Realization => IsLive ? _realization : null;
+
+        /// <summary>The origin a hijacked arena is realized at — the level's own.</summary>
+        public static ArenaWorldPoint Origin => LevelOrigin;
 
         /// <summary>The source the generation hooks pull the arena room from.</summary>
         public HijackedArenaRoomSource CreateRoomSource() =>
@@ -76,6 +94,9 @@ namespace FalseGods.Plugin
                 return HijackedArenaLoad.Failed($"arena load failed: {realized.FailureReason}");
             }
 
+            // Kept so an encounter raised in this level can fight in the arena already standing in it, rather
+            // than loading a second copy of the same content.
+            _realized = realized;
             return HijackedArenaLoad.Loaded(realized.Arena.PlayerSpawn);
         }
 
@@ -88,6 +109,7 @@ namespace FalseGods.Plugin
             _flow?.Teardown();
             _flow = null;
             _realization = null;
+            _realized = null;
         }
     }
 }
