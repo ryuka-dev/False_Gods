@@ -1,8 +1,10 @@
 using System;
 using BepInEx;
 using BepInEx.Configuration;
+using FalseGods.Application.Arena;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Simulation;
+using FalseGods.Integration.Sulfur.Arena;
 using FalseGods.Plugin.Diagnostics;
 using FalseGods.RuntimeContracts.Integration;
 using FalseGods.UnityRuntime.Presentation;
@@ -58,8 +60,10 @@ namespace FalseGods.Plugin
         private ConfigEntry<bool> _lockPitch = null!;
         private ConfigEntry<float> _spriteScale = null!;
         private ConfigEntry<float> _maxClientHitDamage = null!;
+        private ConfigEntry<Key> _hijackKey = null!;
 
         private BepInExLogger _log = null!;
+        private IArenaHijackPort _hijack = null!;
         private LocalEncounterController _boss = null!;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
@@ -100,7 +104,18 @@ namespace FalseGods.Plugin
                 + "single weapon hit. The host clamps to this; the simulation still decides weak-point, phase, and "
                 + "death. Read once at load.");
 
+            // TEMPORARY dev affordance (Strategy A bring-up): load our arena as the first cave level through the
+            // game's own level generation, so navigation is built natively (the additive raise fails on a large
+            // arena when the live level's nav is not scanned at the raise site). This first step loads the real
+            // cave level to prove the entry point; substituting our arena for the generated content follows. Not a
+            // shipping control - a developer-menu entry replaces the keybind later.
+            _hijackKey = Config.Bind("Boss", "HijackArenaKey", Key.H,
+                "[DEV/TEMPORARY - removed before release] Load the boss arena as the first cave level through the "
+                + "game's native level generation (native navigation and player spawn). The game uses the new Input "
+                + "System.");
+
             _log = new BepInExLogger(Logger);
+            _hijack = new SulfurArenaHijackPort(_log);
             _boss = new LocalEncounterController(_log, _maxClientHitDamage.Value);
 
             // Subscribe before any adapter can load (their hard BepInDependency on this GUID guarantees the order),
@@ -115,6 +130,14 @@ namespace FalseGods.Plugin
 
         private void Update()
         {
+            // DEV (Strategy A bring-up): load our arena as the native cave level. Role-independent - it drives the
+            // game's own level load, not our additive raise. Temporary, like the whole "Boss" dev config section.
+            if (KeyPressed(_hijackKey.Value))
+            {
+                _hijack.LoadHijackedArena();
+                return;
+            }
+
             var integration = FalseGodsIntegrations.Current;
             var role = EvaluateRole(integration);
 
