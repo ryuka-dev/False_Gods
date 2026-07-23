@@ -388,6 +388,13 @@ namespace FalseGods.Integration.Sulfur.Combat
                             _crates.RemoveAt(index);
                             Land(crate);
                         }
+                        else if (_impact != null && _impact.Contact(ToPoint(crate.Unit.transform.position)))
+                        {
+                            // Detonated on a player it reached in the air: it hurt and shoved them and is spent,
+                            // so break it where it hit — no loot.
+                            _crates.RemoveAt(index);
+                            BreakNoLoot(crate);
+                        }
 
                         break;
                 }

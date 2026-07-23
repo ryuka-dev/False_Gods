@@ -13,14 +13,16 @@ using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 namespace FalseGods.Integration.Sulfur.Combat
 {
     /// <summary>
-    /// <see cref="IThrownCrateImpact"/> over the game's own player: where a crate lands it splashes a circle,
-    /// dealing damage through <c>Unit.ReceiveDamage</c> (the canonical entry point, the same one the boss uses) and
-    /// shoving anyone inside it away by handing a momentum to their movement controller.
+    /// <see cref="IThrownCrateImpact"/> over the game's own player: a crate detonates on a body it reaches in
+    /// flight and splashes a circle where it lands, dealing damage through <c>Unit.ReceiveDamage</c> (the canonical
+    /// entry point, the same one the boss uses) and shoving anyone caught away by handing a momentum to their
+    /// movement controller.
     /// </summary>
     /// <remarks>
-    /// <para><b>Reach.</b> A flat circle of a fixed radius on the ground, centred on the landing point — the crate
-    /// need not land dead on the player, only near them, and a crate arcing high overhead is irrelevant because the
-    /// splash only happens where it comes down.</para>
+    /// <para><b>Two reaches.</b> In flight the test is a sphere of a fixed radius around the crate, centred on the
+    /// player's body rather than their feet, so a player who jumped into the path or hangs in the air is caught in
+    /// three dimensions. On landing it is a flat circle of its own radius on the ground — a crate need not land dead
+    /// on the player, only near them, and its height on the way down no longer matters because it has come down.</para>
     /// <para><b>Knockback.</b> The movement controller's own <c>SetMomentum</c> is the game's way to launch a
     /// player (the same lever the boss spider's collision uses); the controller then bleeds that momentum off with
     /// its normal friction and gravity, so the push decays on its own with no control taken away and no timer to
@@ -30,32 +32,73 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// </remarks>
     public sealed class SulfurCrateImpact : IThrownCrateImpact
     {
+        // Roughly the height of a player's body centre above their feet, so the in-flight sphere is centred on the
+        // body a crate would actually strike, not on the ground at their feet.
+        private const float PlayerCenterHeight = 0.9f;
+
         private readonly int _damage;
-        private readonly float _radius;
+        private readonly float _contactRadius;
+        private readonly float _splashRadius;
         private readonly float _knockbackSpeed;
         private readonly float _knockbackLift;
         private readonly ILogger _logger;
 
-        public SulfurCrateImpact(int damage, float radius, float knockbackSpeed, float knockbackLift, ILogger logger = null)
+        public SulfurCrateImpact(
+            int damage, float contactRadius, float splashRadius, float knockbackSpeed, float knockbackLift, ILogger logger = null)
         {
             _damage = damage;
-            _radius = radius;
+            _contactRadius = contactRadius;
+            _splashRadius = splashRadius;
             _knockbackSpeed = knockbackSpeed;
             _knockbackLift = knockbackLift;
             _logger = logger;
         }
 
+        public bool Contact(ArenaWorldPoint at)
+        {
+            var players = LivePlayers();
+            if (players == null)
+            {
+                return false;
+            }
+
+            var crate = new Vector3(at.X, at.Y, at.Z);
+            var radiusSquared = _contactRadius * _contactRadius;
+            var caught = false;
+
+            for (var index = 0; index < players.Count; index++)
+            {
+                var player = players[index];
+                if (player == null || player.playerUnit == null)
+                {
+                    continue;
+                }
+
+                // A sphere in three dimensions, centred on the player's body — catches a jumper or a hoverer the
+                // crate reaches in the air, not only one it meets at foot height.
+                var center = player.transform.position + Vector3.up * PlayerCenterHeight;
+                if ((center - crate).sqrMagnitude > radiusSquared)
+                {
+                    continue;
+                }
+
+                Strike(player, crate);
+                caught = true;
+            }
+
+            return caught;
+        }
+
         public bool Splash(ArenaWorldPoint at)
         {
-            var gameManager = StaticInstance<GameManager>.Instance;
-            var players = gameManager != null ? gameManager.Players : null;
+            var players = LivePlayers();
             if (players == null)
             {
                 return false;
             }
 
             var impact = new Vector3(at.X, at.Y, at.Z);
-            var radiusSquared = _radius * _radius;
+            var radiusSquared = _splashRadius * _splashRadius;
             var caught = false;
 
             for (var index = 0; index < players.Count; index++)
@@ -79,6 +122,12 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             return caught;
+        }
+
+        private static System.Collections.Generic.List<Player> LivePlayers()
+        {
+            var gameManager = StaticInstance<GameManager>.Instance;
+            return gameManager != null ? gameManager.Players : null;
         }
 
         private void Strike(Player player, Vector3 impact)
@@ -105,7 +154,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                     away.y = 0f;
                     var direction = away.sqrMagnitude > 1e-4f ? away.normalized : Vector3.forward;
                     controller.SetMomentum(direction * _knockbackSpeed + Vector3.up * _knockbackLift);
-                    _logger?.Log($"[crate] splash hit a player for {_damage}, knockback {_knockbackSpeed:0.#} + lift {_knockbackLift:0.#}.");
+                    _logger?.Log($"[crate] hit a player for {_damage}, knockback {_knockbackSpeed:0.#} + lift {_knockbackLift:0.#}.");
                 }
             }
             catch (Exception exception)

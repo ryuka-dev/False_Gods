@@ -106,11 +106,12 @@ namespace FalseGods.Plugin
         // as roughly no movement instead of a full-speed feint. Larger damps harder but trusts a real turn slower.
         private const float VolleyLeadSmoothingSeconds = 0.4f;
 
-        // Crate impact: a crate landing splashes a circle centred on its landing point. The damage matches the
-        // vanilla cave boss's thrown mud ball (10); the radius and knockback are common-sense values. All destined
-        // for authored boss/attack content, not shipping consts.
+        // Crate impact: a crate detonates on a body it reaches in flight (a tight sphere) and splashes a wider
+        // circle where it lands. The damage matches the vanilla cave boss's thrown mud ball (10); the radii and
+        // knockback are common-sense values. All destined for authored boss/attack content, not shipping consts.
         private const int CrateHitDamage = 10;
-        private const float CrateHitRadius = 2.5f;
+        private const float CrateContactRadius = 1.2f;
+        private const float CrateSplashRadius = 2.5f;
         private const float CrateKnockbackSpeed = 12f;
         private const float CrateKnockbackLift = 4f;
 
@@ -227,7 +228,9 @@ namespace FalseGods.Plugin
 
             _log = new BepInExLogger(Logger);
             _crates = new SulfurThrownCratePort(
-                _log, new SulfurCrateImpact(CrateHitDamage, CrateHitRadius, CrateKnockbackSpeed, CrateKnockbackLift, _log));
+                _log,
+                new SulfurCrateImpact(
+                    CrateHitDamage, CrateContactRadius, CrateSplashRadius, CrateKnockbackSpeed, CrateKnockbackLift, _log));
             _playerMotion = new SulfurPlayerMotionPort();
             _playerVelocity = new TargetMotionTracker(VolleyLeadSmoothingSeconds);
 
