@@ -19,7 +19,8 @@ namespace FalseGods.Application.Combat
             float liftSeconds,
             float holdSeconds,
             float flightSeconds,
-            float apexHeight)
+            float apexHeight,
+            float leadShare)
         {
             Seed = seed;
             Count = count;
@@ -30,6 +31,7 @@ namespace FalseGods.Application.Combat
             HoldSeconds = holdSeconds;
             FlightSeconds = flightSeconds;
             ApexHeight = apexHeight;
+            LeadShare = leadShare;
         }
 
         /// <summary>Seeds the scatter pattern; the same seed lays the crates out the same way on every peer.</summary>
@@ -58,5 +60,14 @@ namespace FalseGods.Application.Combat
 
         /// <summary>Height of each crate's arc above the line from the hover point to its landing spot.</summary>
         public float ApexHeight { get; }
+
+        /// <summary>
+        /// The fraction of crates aimed at where the player is predicted to be, the rest at where the player is
+        /// now. Each crate decides independently, seeded, so one volley threatens both spots at once: a player who
+        /// jinks to bait the lead is still caught by the crates aimed where they stand, and a player who runs
+        /// straight is still caught by the crates aimed where they are going. Clamped to [0, 1]; 0 never leads,
+        /// 1 always does.
+        /// </summary>
+        public float LeadShare { get; }
     }
 }

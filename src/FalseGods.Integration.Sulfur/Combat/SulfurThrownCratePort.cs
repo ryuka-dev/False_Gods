@@ -292,7 +292,11 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public int LaunchVolley(ArenaWorldPoint center, CrateVolleyShape shape)
+        // Salt for the per-crate "lead this one or not" coin, kept clear of the scatter's salts (0..2*count+2) so
+        // the choice is independent of where a crate lands within its slice.
+        private const int LeadChoiceSalt = 40009;
+
+        public int LaunchVolley(ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape)
         {
             if (!Prepare())
             {
@@ -318,6 +322,11 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var index = 0; index < chosen.Count; index++)
             {
                 var crate = chosen[index];
+
+                // Each crate independently aims at where the player is now or where they are predicted to be, a
+                // seeded coin so both spots are threatened in every volley — no single way of moving dodges it all.
+                var leads = SeededRandom.Unit01(shape.Seed, LeadChoiceSalt + index) < shape.LeadShare;
+                var center = leads ? leadCenter : currentCenter;
 
                 // The scatter is seeded so every peer throwing this volley lands the crates the same way; the count
                 // handed to the pattern is what actually flew, so a short pile still rings the target evenly.

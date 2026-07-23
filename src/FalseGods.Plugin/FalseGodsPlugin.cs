@@ -5,6 +5,7 @@ using BepInEx.Configuration;
 using FalseGods.Application.Arena;
 using FalseGods.Application.Combat;
 using FalseGods.Application.Replication;
+using FalseGods.Core.Bosses.Combat;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Arena;
 using FalseGods.Integration.Sulfur.Combat;
@@ -71,16 +72,39 @@ namespace FalseGods.Plugin
         private const float DropHeight = 4f;
 
         // Volley shape: lift a handful of crates off the pile, hold them a beat to telegraph, then scatter them
-        // around the player. Bring-up numbers - readable rise, a clear tell, a spread that surrounds without being
+        // around where the player will be. Bring-up numbers - readable rise, a spread that surrounds without being
         // unfair.
         private const int VolleyCount = 6;
         private const float VolleySpreadMin = 2f;
         private const float VolleySpreadMax = 6f;
         private const float VolleyLiftHeight = 5f;
         private const float VolleyLiftSeconds = 0.5f;
-        private const float VolleyHoldSeconds = 0.45f;
+
+        // The telegraph hangs for a random span, rolled per volley from its seed, so the player cannot time a dodge
+        // to a fixed rhythm - which is what lets the volley lead a moving player without being trivially side-stepped.
+        private const float VolleyHoldMin = 0.5f;
+        private const float VolleyHoldMax = 1.5f;
+
+        // Salt for the hold roll, kept well clear of the scatter's salts (0..2*count+2) so the two draws from the
+        // volley's one seed are independent.
+        private const int VolleyHoldSalt = 9973;
+
         private const float VolleyFlightSeconds = 1.2f;
         private const float VolleyApex = 4f;
+
+        // How much of a crate's airtime to lead the player by. 1.0 aims where the player would be if they held their
+        // course for the whole flight; dialling it back softens the lead if the full prediction over-commits. Tuned
+        // in-game together with the random telegraph above.
+        private const float VolleyLeadFraction = 1f;
+
+        // The fraction of each volley's crates aimed at the predicted point rather than the player's current spot.
+        // Half and half means no single way of moving dodges a whole volley: jink to bait the lead and the
+        // current-aimed crates still land on you; run straight and the lead-aimed crates still catch you ahead.
+        private const float VolleyLeadShare = 0.5f;
+
+        // The window the player's velocity is averaged over before it feeds the lead, so a stand-still jitter reads
+        // as roughly no movement instead of a full-speed feint. Larger damps harder but trusts a real turn slower.
+        private const float VolleyLeadSmoothingSeconds = 0.4f;
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
@@ -100,6 +124,8 @@ namespace FalseGods.Plugin
         private int _nextVolleySeed = 1;
 
         private IThrownCratePort _crates = null!;
+        private IPlayerMotionPort _playerMotion = null!;
+        private TargetMotionTracker _playerVelocity = null!;
 
         private float _appliedFogStart;
         private float _appliedFogEnd;
@@ -193,6 +219,8 @@ namespace FalseGods.Plugin
 
             _log = new BepInExLogger(Logger);
             _crates = new SulfurThrownCratePort(_log);
+            _playerMotion = new SulfurPlayerMotionPort();
+            _playerVelocity = new TargetMotionTracker(VolleyLeadSmoothingSeconds);
 
             // The Strategy A generation hooks patch the base game, so they are installed once, here, rather than
             // as a side effect of constructing a port. They stay inert until a hijacked load arms them, and pull
@@ -232,6 +260,18 @@ namespace FalseGods.Plugin
             }
 
             ApplyFogChanges();
+
+            // Track the player's velocity every frame so a volley can lead by the average, not the instant — read
+            // once here and reused when a volley fires this frame.
+            var playerMotion = _playerMotion.TryReadLocalPlayer();
+            if (playerMotion.Known)
+            {
+                _playerVelocity.Observe(playerMotion.Velocity, Time.deltaTime);
+            }
+            else
+            {
+                _playerVelocity.Reset();
+            }
 
             if (KeyPressed(_throwCrateKey.Value))
             {
@@ -329,8 +369,9 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>
-        /// Bring-up volley: lift several resting crates off the pile and fire them as a spread around the player.
-        /// Nothing happens without a pile — that is the mechanic, not a bug — so it says so when the pile is empty.
+        /// Bring-up volley: lift several resting crates off the pile and fire them as a spread at where the player
+        /// will be when they land. The telegraph hangs a random beat so the lead cannot be dodged on a fixed
+        /// rhythm. Nothing happens without a pile — that is the mechanic, not a bug — so it says so when empty.
         /// </summary>
         private void LaunchCrateVolleyAtThePlayer()
         {
@@ -341,18 +382,49 @@ namespace FalseGods.Plugin
                 return;
             }
 
+            var seed = _nextVolleySeed++;
+
+            // The telegraph length is part of the volley's seeded shape, so it is rolled here (where the seed is
+            // chosen) and both the hover and the lead below are computed from the same span.
+            var hold = SeededRandom.Range(seed, VolleyHoldSalt, VolleyHoldMin, VolleyHoldMax);
+
+            // A crate's whole airtime is fixed by the shape, not the distance, so the lead is a single step: aim
+            // where the player will be after they rise, hover, and fly. The foot height comes from the camera; only
+            // the ground position is led.
+            var airtime = (VolleyLiftSeconds + hold + VolleyFlightSeconds) * VolleyLeadFraction;
             var eye = camera.transform.position;
-            var foot = new ArenaWorldPoint(eye.x, eye.y - LocalEncounterController.EyeToFootDrop, eye.z);
+            var footY = eye.y - LocalEncounterController.EyeToFootDrop;
+
+            var motion = _playerMotion.TryReadLocalPlayer();
+            SimVector2 current;
+            SimVector2 lead;
+            if (motion.Known)
+            {
+                // The velocity is the smoothed average tracked each frame, not this instant's reading, so a
+                // stand-still jitter no longer flings the lead across the arena.
+                current = motion.Position;
+                lead = LeadAim.Predict(motion.Position, _playerVelocity.SmoothedVelocity, airtime);
+            }
+            else
+            {
+                // No player to read: aim both at the camera, with no lead — the volley still fires, just at one spot.
+                current = new SimVector2(eye.x, eye.z);
+                lead = current;
+            }
+
+            var currentCenter = new ArenaWorldPoint(current.X, footY, current.Z);
+            var leadCenter = new ArenaWorldPoint(lead.X, footY, lead.Z);
 
             var shape = new CrateVolleyShape(
-                _nextVolleySeed++, VolleyCount, VolleySpreadMin, VolleySpreadMax,
-                VolleyLiftHeight, VolleyLiftSeconds, VolleyHoldSeconds, VolleyFlightSeconds, VolleyApex);
+                seed, VolleyCount, VolleySpreadMin, VolleySpreadMax,
+                VolleyLiftHeight, VolleyLiftSeconds, hold, VolleyFlightSeconds, VolleyApex, VolleyLeadShare);
 
-            var launched = _crates.LaunchVolley(foot, shape);
+            var launched = _crates.LaunchVolley(currentCenter, leadCenter, shape);
             if (launched > 0)
             {
-                _log.Log($"[crate] volley of {launched} lifted from the pile; {_crates.Resting} still resting. "
-                    + "They spread around you - shoot them out of the air for loot.");
+                _log.Log($"[crate] volley of {launched} lifted; {_crates.Resting} still resting. "
+                    + $"Hold {hold:0.00}s; some aimed here ({current.X:0.0}, {current.Z:0.0}), "
+                    + $"some led {airtime:0.00}s to ({lead.X:0.0}, {lead.Z:0.0}). Shoot them for loot.");
             }
             else
             {
