@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using FalseGods.Application.Arena;
@@ -117,8 +118,11 @@ namespace FalseGods.Plugin
             _log = new BepInExLogger(Logger);
 
             // The Strategy A generation hooks patch the base game, so they are installed once, here, rather than
-            // as a side effect of constructing a port. They stay inert until a hijacked load arms them.
+            // as a side effect of constructing a port. They stay inert until a hijacked load arms them, and pull
+            // the arena from content this root owns — the adapter cannot reach the bundle pipeline itself.
             LevelGenerationHijackPatches.Install(_log);
+            LevelGenerationHijack.ArenaRooms = new HijackedArenaContent(
+                Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".", _log).CreateRoomSource();
 
             _hijack = new SulfurArenaHijackPort(_log);
             _boss = new LocalEncounterController(_log, _maxClientHitDamage.Value);

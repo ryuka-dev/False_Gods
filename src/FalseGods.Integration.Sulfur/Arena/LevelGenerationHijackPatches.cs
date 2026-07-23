@@ -1,8 +1,10 @@
 using System;
 using System.Collections;
 using HarmonyLib;
+using LevelGeneration;
 using MakerGraphTool;
 using MakerGraphTool.Nodes;
+using PerfectRandom.Sulfur.Core.LevelGeneration;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 
 namespace FalseGods.Integration.Sulfur.Arena
@@ -55,6 +57,14 @@ namespace FalseGods.Integration.Sulfur.Arena
                     AccessTools.DeclaredMethod(typeof(MakerNodeBase), nameof(MakerNodeBase.StartExecution)),
                     prefix: new HarmonyMethod(AccessTools.DeclaredMethod(
                         typeof(LevelGenerationHijackPatches), nameof(ObserveOrSkipStep))));
+
+                // Execute is an iterator, but a prefix that supplies __result replaces the enumerator the method
+                // hands back — the generated state machine is never touched, so there is nothing here that a
+                // transpiler's iterator caveats apply to.
+                harmony.Patch(
+                    AccessTools.DeclaredMethod(typeof(CreateStartAreaNode), "Execute"),
+                    prefix: new HarmonyMethod(AccessTools.DeclaredMethod(
+                        typeof(LevelGenerationHijackPatches), nameof(PlaceArenaAsStartArea))));
 
                 // Two overloads; the parameterless-target one delegates to this, so patching it covers both.
                 harmony.Patch(
@@ -131,6 +141,80 @@ namespace FalseGods.Integration.Sulfur.Arena
             }
 
             __result = DisarmWhenFinished(__result);
+        }
+
+        /// <summary>
+        /// Runs in place of the level's own start-area step: puts our arena in the level instead of a vanilla
+        /// start room. The arena is acquired here, before the step is taken over, so that content which will not
+        /// load costs an ordinary cave level rather than a level with no start area at all.
+        /// </summary>
+        private static bool PlaceArenaAsStartArea(CreateStartAreaNode __instance, ref IEnumerator __result)
+        {
+            if (!LevelGenerationHijack.IsArmed || __instance == null)
+            {
+                return true;
+            }
+
+            try
+            {
+                var rooms = LevelGenerationHijack.ArenaRooms;
+                if (rooms == null)
+                {
+                    LevelGenerationHijack.Logger?.LogWarning(
+                        "[levelgen] no arena source installed; generating the level's own start area.");
+                    return true;
+                }
+
+                // StartExecution has already bound the context and reset the per-step seed before calling us.
+                if (!(__instance.Context is LevelGenerationContext context))
+                {
+                    LevelGenerationHijack.Logger?.LogWarning(
+                        "[levelgen] start-area step has no level-generation context; leaving it to generate.");
+                    return true;
+                }
+
+                var room = rooms.Acquire();
+                if (room == null)
+                {
+                    return true; // the source already reported why
+                }
+
+                __result = StartAreaFromArena(__instance, context, room);
+                return false;
+            }
+            catch (Exception exception)
+            {
+                LevelGenerationHijack.Logger?.LogWarning(
+                    $"[levelgen] arena injection threw, generating the level's own start area: {exception}");
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// The start-area step, with our arena as the start room: the level's ordered rooms, the player spawn the
+        /// rest of generation reads, and a sealed (empty) set of outgoing connectors.
+        /// </summary>
+        private static IEnumerator StartAreaFromArena(
+            CreateStartAreaNode node, LevelGenerationContext context, Room room)
+        {
+            // Hand the arena to the level's own managed results, so the level that created it also destroys it.
+            // Its bundle and borrowed materials stay ours to release (HijackedArenaRoomSource).
+            node.AddManagedObject(room.gameObject);
+
+            context.orderedRooms.Clear();
+            context.orderedRooms.Add(room);
+            context.spawnPoint = room.GetPlayerSpawnPoint(string.Empty);
+            context.startOutConnectors = room.gameObject.GetChildConnectorsSorted();
+
+            if (context.spawnPoint == null)
+            {
+                // The player spawner reads this directly; losing it would be a null dereference three steps later.
+                LevelGenerationHijack.Logger?.LogWarning(
+                    "[levelgen] the arena room exposes no player spawn point; the level will have nowhere to place the player.");
+            }
+
+            LevelGenerationHijack.Logger?.Log("[levelgen] arena placed as the level's start area.");
+            yield return null;
         }
 
         /// <summary>The game's <c>DummyRunner</c>: one frame, no work.</summary>

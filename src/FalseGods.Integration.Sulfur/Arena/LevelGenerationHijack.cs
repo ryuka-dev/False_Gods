@@ -41,6 +41,12 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// <summary>True while a level load we asked for is generating. Read by the generation hooks.</summary>
         public static bool IsArmed { get; private set; }
 
+        /// <summary>
+        /// Where a hijacked load gets its arena room. Installed once by the Composition Root; when absent, a
+        /// hijacked load simply generates the level's own start area, which is the safe way to be misconfigured.
+        /// </summary>
+        public static HijackedArenaRoomSource? ArenaRooms { get; set; }
+
         /// <summary>Diagnostics only — never required for correct behaviour.</summary>
         public static ILogger? Logger { get; set; }
 
