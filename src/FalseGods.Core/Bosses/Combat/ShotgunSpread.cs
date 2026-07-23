@@ -58,29 +58,12 @@ namespace FalseGods.Core.Bosses.Combat
             // and each crate is jittered only within the middle half of its own slice, so adjacent crates keep a
             // clear gap between their bearings and never trade places or overlap.
             var slice = 2.0 * Math.PI / count;
-            var phase = Unit01(seed, 0) * 2.0 * Math.PI;
-            var jitter = (Unit01(seed, index * 2 + 1) - 0.5) * (slice * 0.5);
+            var phase = SeededRandom.Unit01(seed, 0) * 2.0 * Math.PI;
+            var jitter = (SeededRandom.Unit01(seed, index * 2 + 1) - 0.5) * (slice * 0.5);
             var angle = phase + slice * index + jitter;
 
-            var radius = Lerp(minRadius, maxRadius, (float)Unit01(seed, index * 2 + 2));
+            var radius = SeededRandom.Range(seed, index * 2 + 2, minRadius, maxRadius);
             return new SpreadOffset((float)(Math.Cos(angle) * radius), (float)(Math.Sin(angle) * radius));
         }
-
-        /// <summary>
-        /// A deterministic value in [0, 1) from two integers — a small integer hash finalizer, so the pattern is
-        /// reproducible without carrying a random-number generator through the call.
-        /// </summary>
-        private static double Unit01(int seed, int salt)
-        {
-            var h = unchecked((uint)seed * 2654435761u + (uint)salt * 2246822519u + 374761393u);
-            h ^= h >> 15;
-            h = unchecked(h * 2246822519u);
-            h ^= h >> 13;
-            h = unchecked(h * 3266489917u);
-            h ^= h >> 16;
-            return h / 4294967296.0; // 2^32 — maps the full uint range onto [0, 1)
-        }
-
-        private static float Lerp(float a, float b, float t) => a + (b - a) * t;
     }
 }
