@@ -213,6 +213,14 @@ namespace FalseGods.Integration.Sulfur.Arena
                     "[levelgen] the arena room exposes no player spawn point; the level will have nowhere to place the player.");
             }
 
+            // The loading-setup step has already applied the environment's own fog; ours goes on top of it here,
+            // and nothing later in a hijacked level changes it back.
+            var fog = LevelGenerationHijack.Fog;
+            if (fog != null)
+            {
+                SulfurLevelFog.TryApply(fog.StartDistance, fog.EndDistance, LevelGenerationHijack.Logger);
+            }
+
             LevelGenerationHijack.Logger?.Log("[levelgen] arena placed as the level's start area.");
             yield return null;
         }

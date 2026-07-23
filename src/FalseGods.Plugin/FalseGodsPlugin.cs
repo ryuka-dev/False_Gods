@@ -62,6 +62,11 @@ namespace FalseGods.Plugin
         private ConfigEntry<float> _spriteScale = null!;
         private ConfigEntry<float> _maxClientHitDamage = null!;
         private ConfigEntry<Key> _hijackKey = null!;
+        private ConfigEntry<float> _fogStartDistance = null!;
+        private ConfigEntry<float> _fogEndDistance = null!;
+
+        private float _appliedFogStart;
+        private float _appliedFogEnd;
 
         private BepInExLogger _log = null!;
         private IArenaHijackPort _hijack = null!;
@@ -116,6 +121,18 @@ namespace FalseGods.Plugin
                 + "game's native level generation (native navigation and player spawn). The game uses the new Input "
                 + "System.");
 
+            // TEMPORARY dev affordance: the cave environment's fog cutoff is tuned for corridor-sized rooms, which
+            // leaves a 60-unit boss arena's walls invisible from the middle of it. Tunable live so the look can be
+            // found in-engine; the value it settles on belongs in the arena's authored content, not in a player
+            // config.
+            _fogStartDistance = Config.Bind("Arena", "FogStartDistance", 10f,
+                "[DEV/TEMPORARY - removed before release] Distance at which the boss arena's fog begins to "
+                + "thicken. Only applies to the arena loaded as a level; the level's own fog COLOUR is kept.");
+            _fogEndDistance = Config.Bind("Arena", "FogEndDistance", 80f,
+                "[DEV/TEMPORARY - removed before release] Distance at which the boss arena's fog becomes opaque. "
+                + "The arena is 60 units across, so a far corner sits about 60 units from the player's spawn. "
+                + "Changeable live while standing in the arena.");
+
             _log = new BepInExLogger(Logger);
 
             // The Strategy A generation hooks patch the base game, so they are installed once, here, rather than
@@ -125,6 +142,9 @@ namespace FalseGods.Plugin
             _levelArena = new HijackedArenaContent(
                 Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".", _log);
             LevelGenerationHijack.ArenaRooms = _levelArena.CreateRoomSource();
+            _appliedFogStart = _fogStartDistance.Value;
+            _appliedFogEnd = _fogEndDistance.Value;
+            LevelGenerationHijack.Fog = new ArenaFogRange(_appliedFogStart, _appliedFogEnd);
 
             _hijack = new SulfurArenaHijackPort(_log);
 
@@ -152,6 +172,8 @@ namespace FalseGods.Plugin
                 return;
             }
 
+            ApplyFogChanges();
+
             var integration = FalseGodsIntegrations.Current;
             var role = EvaluateRole(integration);
 
@@ -163,6 +185,29 @@ namespace FalseGods.Plugin
 
             TearDownClientComposition();
             RunLocalComposition(integration, role);
+        }
+
+        /// <summary>
+        /// Push a live fog edit into the standing arena, so the look can be tuned without reloading the level.
+        /// Only while a hijacked arena is actually up: an ordinary level's fog is the level's business.
+        /// </summary>
+        private void ApplyFogChanges()
+        {
+            var start = _fogStartDistance.Value;
+            var end = _fogEndDistance.Value;
+            if (start == _appliedFogStart && end == _appliedFogEnd)
+            {
+                return;
+            }
+
+            _appliedFogStart = start;
+            _appliedFogEnd = end;
+            LevelGenerationHijack.Fog = new ArenaFogRange(start, end);
+
+            if (_levelArena.IsLive)
+            {
+                SulfurLevelFog.TryApply(start, end, _log);
+            }
         }
 
         private void OnDestroy()

@@ -5,6 +5,21 @@ using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 
 namespace FalseGods.Integration.Sulfur.Arena
 {
+    /// <summary>How far a hijacked level's fog reaches: where it starts thickening and where it becomes opaque.
+    /// The fog colour is deliberately not part of this — that stays the level's own.</summary>
+    public sealed class ArenaFogRange
+    {
+        public ArenaFogRange(float startDistance, float endDistance)
+        {
+            StartDistance = startDistance;
+            EndDistance = endDistance;
+        }
+
+        public float StartDistance { get; }
+
+        public float EndDistance { get; }
+    }
+
     /// <summary>
     /// The single owner of "a hijacked level load is in progress" — the flag that scopes every Strategy A
     /// level-generation hook to exactly the load we asked for, and to nothing else the player does.
@@ -46,6 +61,13 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// hijacked load simply generates the level's own start area, which is the safe way to be misconfigured.
         /// </summary>
         public static HijackedArenaRoomSource? ArenaRooms { get; set; }
+
+        /// <summary>
+        /// The fog range a hijacked level should use, or null to leave the level's own alone. A boss arena is far
+        /// wider than the corridor-sized rooms the cave environment's fog cutoff is tuned for, so without this the
+        /// walls are simply not visible from the middle of it.
+        /// </summary>
+        public static ArenaFogRange? Fog { get; set; }
 
         /// <summary>Diagnostics only — never required for correct behaviour.</summary>
         public static ILogger? Logger { get; set; }
