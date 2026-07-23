@@ -73,12 +73,12 @@ namespace FalseGods.Integration.Sulfur.Combat
         private const string BreakableLayerName = "Breakable";
 
         private readonly ILogger _logger;
-        private readonly List<Flight> _flights = new List<Flight>();
 
-        // Crates that have been dropped and are resting/piling on the ground. Unlike a flight, the game's own
-        // physics owns their position — we hold them only so a teardown can remove them and a later lift can pull
-        // one back out. A resting crate becomes null here once a player shoots it (the game breaks and destroys it).
-        private readonly List<Unit> _resting = new List<Unit>();
+        // Every crate this port owns, in whatever phase of its life. One crate has a single authority here: it is
+        // resting (the game's physics owns its position), lifting off the pile, or flying an arc we drive — and it
+        // moves between those phases in place rather than migrating between lists. A crate a player shoots is
+        // broken and destroyed by the game, leaving a null we prune on the next tick, in any phase.
+        private readonly List<ManagedCrate> _crates = new List<ManagedCrate>();
 
         private UnitSO _definition;
         private GameObject _template;
@@ -96,9 +96,23 @@ namespace FalseGods.Integration.Sulfur.Combat
             _logger = logger;
         }
 
-        public int InFlight => _flights.Count;
+        public int InFlight => CountWhere(phase => phase != Phase.Resting);
 
-        public int Resting => _resting.Count;
+        public int Resting => CountWhere(phase => phase == Phase.Resting);
+
+        private int CountWhere(Func<Phase, bool> predicate)
+        {
+            var total = 0;
+            for (var index = 0; index < _crates.Count; index++)
+            {
+                if (predicate(_crates[index].Phase))
+                {
+                    total++;
+                }
+            }
+
+            return total;
+        }
 
         public bool Prepare()
         {
@@ -214,7 +228,9 @@ namespace FalseGods.Integration.Sulfur.Combat
                     unit.Rigidbody.isKinematic = true;
                 }
 
-                _flights.Add(new Flight(unit, breakable, start, target, flightSeconds, apexHeight));
+                var crate = new ManagedCrate(unit, breakable);
+                crate.BeginFlight(start, target, flightSeconds, apexHeight);
+                _crates.Add(crate);
                 return true;
             }
             catch (Exception exception)
@@ -265,7 +281,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                     unit.Rigidbody.useGravity = true;
                 }
 
-                _resting.Add(unit);
+                // A new crate is resting by default — the game's physics owns it until it is lifted.
+                _crates.Add(new ManagedCrate(unit, breakable));
                 return true;
             }
             catch (Exception exception)
@@ -275,70 +292,149 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        public int LaunchVolley(ArenaWorldPoint center, CrateVolleyShape shape)
+        {
+            if (!Prepare())
+            {
+                return 0;
+            }
+
+            // Only crates already resting on the pile are lifted; a crate already in the air stays there.
+            var chosen = new List<ManagedCrate>();
+            for (var index = 0; index < _crates.Count && chosen.Count < shape.Count; index++)
+            {
+                var candidate = _crates[index];
+                if (candidate.Phase == Phase.Resting && candidate.Unit != null)
+                {
+                    chosen.Add(candidate);
+                }
+            }
+
+            if (chosen.Count == 0)
+            {
+                return 0;
+            }
+
+            for (var index = 0; index < chosen.Count; index++)
+            {
+                var crate = chosen[index];
+
+                // The scatter is seeded so every peer throwing this volley lands the crates the same way; the count
+                // handed to the pattern is what actually flew, so a short pile still rings the target evenly.
+                var offset = ShotgunSpread.Offset(
+                    shape.Seed, index, chosen.Count, shape.SpreadMinRadius, shape.SpreadMaxRadius);
+                var target = new Vector3(center.X + offset.X, center.Y, center.Z + offset.Z);
+
+                var from = crate.Unit.transform.position;
+                crate.BeginLift(from, from + Vector3.up * shape.LiftHeight, target, shape);
+
+                // We drive it from here on, so it leaves the physics engine's hands — and, like a thrown crate, it
+                // must not shatter on contact or on its own speed while we carry it.
+                if (crate.Breakable != null)
+                {
+                    crate.Breakable.BreakOnFirstContact = false;
+                    crate.Breakable.TakeDamageOnCollision = false;
+                }
+
+                if (crate.Unit.Rigidbody != null)
+                {
+                    crate.Unit.Rigidbody.isKinematic = true;
+                    crate.Unit.Rigidbody.useGravity = false;
+                }
+            }
+
+            return chosen.Count;
+        }
+
         public void Advance(float deltaSeconds)
         {
-            // Resting crates are not driven here, but a shot-down one leaves a null behind; drop those so the count
-            // stays honest and the list does not accumulate dead references.
-            for (var index = _resting.Count - 1; index >= 0; index--)
+            for (var index = _crates.Count - 1; index >= 0; index--)
             {
-                if (_resting[index] == null)
-                {
-                    _resting.RemoveAt(index);
-                }
-            }
+                var crate = _crates[index];
 
-            for (var index = _flights.Count - 1; index >= 0; index--)
-            {
-                var flight = _flights[index];
-
-                // Shot out of the air: the game already broke it, dropped its loot, and destroyed it.
-                if (flight.Unit == null)
+                // Shot out of the air (or off the pile): the game already broke it, dropped its loot, and
+                // destroyed it, in whatever phase it was in.
+                if (crate.Unit == null)
                 {
-                    _flights.RemoveAt(index);
+                    _crates.RemoveAt(index);
                     continue;
                 }
 
-                flight.Elapsed += deltaSeconds;
-                var progress = flight.Elapsed / flight.FlightSeconds;
-
-                if (progress >= 1f)
+                switch (crate.Phase)
                 {
-                    _flights.RemoveAt(index);
-                    Land(flight);
-                    continue;
-                }
+                    case Phase.Resting:
+                        // The game's physics owns a resting crate's position; we only hold it for teardown and lift.
+                        break;
 
-                var ground = Vector3.Lerp(flight.Start, flight.Target, BallisticArc.HorizontalFraction(progress));
-                ground.y += BallisticArc.Height(progress, flight.ApexHeight);
-                flight.Unit.transform.position = ground;
+                    case Phase.Lifting:
+                        AdvanceLift(crate, deltaSeconds);
+                        break;
+
+                    case Phase.Flying:
+                        if (!AdvanceFlight(crate, deltaSeconds))
+                        {
+                            _crates.RemoveAt(index);
+                            Land(crate);
+                        }
+
+                        break;
+                }
             }
+        }
+
+        /// <summary>Raise a crate off the pile to its hover point, hold it there a beat, then hand it to the arc.
+        /// Returns nothing — a lift never resolves the crate; it becomes a flight, which the next tick advances.</summary>
+        private static void AdvanceLift(ManagedCrate crate, float deltaSeconds)
+        {
+            crate.Elapsed += deltaSeconds;
+
+            if (crate.Elapsed < crate.LiftSeconds)
+            {
+                var rising = Vector3.Lerp(crate.LiftFrom, crate.Hover, crate.Elapsed / crate.LiftSeconds);
+                crate.Unit.transform.position = rising;
+                return;
+            }
+
+            if (crate.Elapsed < crate.LiftSeconds + crate.HoldSeconds)
+            {
+                // The telegraph: crates hang at the top so the player can read the volley before it fires.
+                crate.Unit.transform.position = crate.Hover;
+                return;
+            }
+
+            // Fire: the arc starts from where the crate now hovers and ends at the scattered target chosen at lift.
+            crate.BeginFlight(crate.Hover, crate.Target, crate.FlightSeconds, crate.ApexHeight);
+        }
+
+        /// <summary>Advance a flying crate along its arc. Returns false when it has arrived (the caller lands it).</summary>
+        private static bool AdvanceFlight(ManagedCrate crate, float deltaSeconds)
+        {
+            crate.Elapsed += deltaSeconds;
+            var progress = crate.Elapsed / crate.FlightSeconds;
+            if (progress >= 1f)
+            {
+                return false;
+            }
+
+            var ground = Vector3.Lerp(crate.Start, crate.Target, BallisticArc.HorizontalFraction(progress));
+            ground.y += BallisticArc.Height(progress, crate.ApexHeight);
+            crate.Unit.transform.position = ground;
+            return true;
         }
 
         public void Release()
         {
-            for (var index = 0; index < _flights.Count; index++)
+            for (var index = 0; index < _crates.Count; index++)
             {
-                var flight = _flights[index];
-                if (flight.Unit != null)
+                var crate = _crates[index];
+                if (crate.Unit != null)
                 {
-                    // Tearing down is not a landing and certainly not a kill: no loot, no noise.
-                    UnityEngine.Object.Destroy(flight.Unit.gameObject);
+                    // Tearing down is not a landing and certainly not a kill: no loot, no noise, in any phase.
+                    UnityEngine.Object.Destroy(crate.Unit.gameObject);
                 }
             }
 
-            _flights.Clear();
-
-            for (var index = 0; index < _resting.Count; index++)
-            {
-                var unit = _resting[index];
-                if (unit != null)
-                {
-                    // Tearing down is not a kill: remove the pile without loot or a break.
-                    UnityEngine.Object.Destroy(unit.gameObject);
-                }
-            }
-
-            _resting.Clear();
+            _crates.Clear();
 
             if (_template != null)
             {
@@ -614,27 +710,27 @@ namespace FalseGods.Integration.Sulfur.Combat
         }
 
         /// <summary>The barrel arrived: break it the game's way, but with the loot switched off.</summary>
-        private void Land(Flight flight)
+        private void Land(ManagedCrate crate)
         {
             try
             {
-                flight.Unit.transform.position = flight.Target;
+                crate.Unit.transform.position = crate.Target;
 
-                if (flight.Breakable != null && _preventDroppingLoot != null)
+                if (crate.Breakable != null && _preventDroppingLoot != null)
                 {
-                    _preventDroppingLoot.SetValue(flight.Breakable, true);
-                    flight.Breakable.Break();
+                    _preventDroppingLoot.SetValue(crate.Breakable, true);
+                    crate.Breakable.Break();
                     return;
                 }
 
-                UnityEngine.Object.Destroy(flight.Unit.gameObject);
+                UnityEngine.Object.Destroy(crate.Unit.gameObject);
             }
             catch (Exception exception)
             {
                 _logger?.LogWarning($"[crate] a landing crate could not be broken cleanly: {exception}");
-                if (flight.Unit != null)
+                if (crate.Unit != null)
                 {
-                    UnityEngine.Object.Destroy(flight.Unit.gameObject);
+                    UnityEngine.Object.Destroy(crate.Unit.gameObject);
                 }
             }
         }
@@ -741,31 +837,88 @@ namespace FalseGods.Integration.Sulfur.Combat
         private static FieldInfo PrivateField(Type type, string name) =>
             type?.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
 
-        private sealed class Flight
+        /// <summary>Which of its three lives a crate is living right now.</summary>
+        private enum Phase
         {
-            public Flight(Unit unit, Breakable breakable, Vector3 start, Vector3 target, float flightSeconds, float apexHeight)
+            /// <summary>Dropped and left to the game's physics — falling, at rest, or piling.</summary>
+            Resting,
+
+            /// <summary>Lifted off the pile and rising to its hover point under our control, before it fires.</summary>
+            Lifting,
+
+            /// <summary>Riding the arc we drive toward its landing spot.</summary>
+            Flying,
+        }
+
+        /// <summary>
+        /// One crate and everything the port needs to carry it through its life. A single object holds the crate in
+        /// every phase, so there is one authority for it and phases change in place — a resting crate is lifted, a
+        /// lifted crate is fired — rather than the crate migrating between separate lists.
+        /// </summary>
+        private sealed class ManagedCrate
+        {
+            public ManagedCrate(Unit unit, Breakable breakable)
             {
                 Unit = unit;
                 Breakable = breakable;
-                Start = start;
-                Target = target;
-                FlightSeconds = flightSeconds;
-                ApexHeight = apexHeight;
             }
 
             public Unit Unit { get; }
 
             public Breakable Breakable { get; }
 
-            public Vector3 Start { get; }
+            /// <summary>Which phase the crate is in. A crate starts resting (the enum default); the motion-begin
+            /// methods below are the only things that move it on, so a phase can never be entered without its
+            /// motion being set up in the same step.</summary>
+            public Phase Phase { get; private set; }
 
-            public Vector3 Target { get; }
-
-            public float FlightSeconds { get; }
-
-            public float ApexHeight { get; }
-
+            /// <summary>Time spent in the current phase's motion; reset when a phase begins.</summary>
             public float Elapsed { get; set; }
+
+            // The flight (also the fired half of a volley): a parabola from Start to Target.
+            public Vector3 Start { get; private set; }
+
+            public Vector3 Target { get; private set; }
+
+            public float FlightSeconds { get; private set; }
+
+            public float ApexHeight { get; private set; }
+
+            // The lift off the pile: straight up from LiftFrom to Hover, then a hold, then the flight to Target.
+            public Vector3 LiftFrom { get; private set; }
+
+            public Vector3 Hover { get; private set; }
+
+            public float LiftSeconds { get; private set; }
+
+            public float HoldSeconds { get; private set; }
+
+            /// <summary>Enter the flying phase: the arc from <paramref name="start"/> to
+            /// <paramref name="target"/>.</summary>
+            public void BeginFlight(Vector3 start, Vector3 target, float flightSeconds, float apexHeight)
+            {
+                Start = start;
+                Target = target;
+                FlightSeconds = flightSeconds > 0f ? flightSeconds : 0.01f;
+                ApexHeight = apexHeight;
+                Elapsed = 0f;
+                Phase = Phase.Flying;
+            }
+
+            /// <summary>Enter the lifting phase: the rise off the pile, remembering the scattered
+            /// <paramref name="target"/> the crate will be fired at once it has lifted and held.</summary>
+            public void BeginLift(Vector3 liftFrom, Vector3 hover, Vector3 target, CrateVolleyShape shape)
+            {
+                LiftFrom = liftFrom;
+                Hover = hover;
+                Target = target;
+                LiftSeconds = shape.LiftSeconds > 0f ? shape.LiftSeconds : 0.01f;
+                HoldSeconds = shape.HoldSeconds > 0f ? shape.HoldSeconds : 0f;
+                FlightSeconds = shape.FlightSeconds > 0f ? shape.FlightSeconds : 0.01f;
+                ApexHeight = shape.ApexHeight;
+                Elapsed = 0f;
+                Phase = Phase.Lifting;
+            }
         }
     }
 }

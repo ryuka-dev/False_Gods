@@ -70,6 +70,18 @@ namespace FalseGods.Plugin
         private const float DropDistance = 6f;
         private const float DropHeight = 4f;
 
+        // Volley shape: lift a handful of crates off the pile, hold them a beat to telegraph, then scatter them
+        // around the player. Bring-up numbers - readable rise, a clear tell, a spread that surrounds without being
+        // unfair.
+        private const int VolleyCount = 6;
+        private const float VolleySpreadMin = 2f;
+        private const float VolleySpreadMax = 6f;
+        private const float VolleyLiftHeight = 5f;
+        private const float VolleyLiftSeconds = 0.5f;
+        private const float VolleyHoldSeconds = 0.45f;
+        private const float VolleyFlightSeconds = 1.2f;
+        private const float VolleyApex = 4f;
+
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
         private ConfigEntry<BossFacingMode> _facingMode = null!;
@@ -81,6 +93,11 @@ namespace FalseGods.Plugin
         private ConfigEntry<float> _fogEndDistance = null!;
         private ConfigEntry<Key> _throwCrateKey = null!;
         private ConfigEntry<Key> _dropCrateKey = null!;
+        private ConfigEntry<Key> _volleyCrateKey = null!;
+
+        // A fresh seed per volley so successive dev volleys scatter differently; the host would pick this and send
+        // it once when this is wired to the boss, so every peer lays the same volley out.
+        private int _nextVolleySeed = 1;
 
         private IThrownCratePort _crates = null!;
 
@@ -167,6 +184,13 @@ namespace FalseGods.Plugin
                 + "you under real gravity; it falls, rests, and stacks with others. Tap repeatedly to build a "
                 + "pile. Resting crates stay shootable.");
 
+            // TEMPORARY bring-up affordance: fire a shotgun volley from the pile - lift several resting crates,
+            // hold them a beat, then scatter them around you on an arc. Drop a pile with the drop key first.
+            _volleyCrateKey = Config.Bind("Boss", "VolleyCrateKey", Key.V,
+                "[DEV/TEMPORARY - removed before release] Lift a handful of resting crates off the pile, hold "
+                + "them a moment, then fire them as a spread scattered around you. Shoot them out of the air for "
+                + "loot; the ones that land drop nothing. Build a pile with the drop key first.");
+
             _log = new BepInExLogger(Logger);
             _crates = new SulfurThrownCratePort(_log);
 
@@ -217,6 +241,11 @@ namespace FalseGods.Plugin
             if (KeyPressed(_dropCrateKey.Value))
             {
                 DropOneCrateNearThePlayer();
+            }
+
+            if (KeyPressed(_volleyCrateKey.Value))
+            {
+                LaunchCrateVolleyAtThePlayer();
             }
 
             // Crates fly on their own clock, not the encounter's: they outlive a boss and exist without one.
@@ -296,6 +325,38 @@ namespace FalseGods.Plugin
             {
                 _log.Log($"[crate] crate dropped at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
                     + $"{_crates.Resting} resting. Tap again to stack a pile.");
+            }
+        }
+
+        /// <summary>
+        /// Bring-up volley: lift several resting crates off the pile and fire them as a spread around the player.
+        /// Nothing happens without a pile — that is the mechanic, not a bug — so it says so when the pile is empty.
+        /// </summary>
+        private void LaunchCrateVolleyAtThePlayer()
+        {
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                _log.LogWarning("[crate] no main camera; stand in a level first.");
+                return;
+            }
+
+            var eye = camera.transform.position;
+            var foot = new ArenaWorldPoint(eye.x, eye.y - LocalEncounterController.EyeToFootDrop, eye.z);
+
+            var shape = new CrateVolleyShape(
+                _nextVolleySeed++, VolleyCount, VolleySpreadMin, VolleySpreadMax,
+                VolleyLiftHeight, VolleyLiftSeconds, VolleyHoldSeconds, VolleyFlightSeconds, VolleyApex);
+
+            var launched = _crates.LaunchVolley(foot, shape);
+            if (launched > 0)
+            {
+                _log.Log($"[crate] volley of {launched} lifted from the pile; {_crates.Resting} still resting. "
+                    + "They spread around you - shoot them out of the air for loot.");
+            }
+            else
+            {
+                _log.Log("[crate] no resting crates to lift - build a pile with the drop key first.");
             }
         }
 

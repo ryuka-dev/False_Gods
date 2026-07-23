@@ -46,6 +46,15 @@ namespace FalseGods.Application.Combat
         /// </summary>
         bool Drop(ArenaWorldPoint at);
 
+        /// <summary>
+        /// Lift up to <see cref="CrateVolleyShape.Count"/> crates off the pile — floating them up under our control
+        /// rather than gravity — hold them a beat, then throw them as a shotgun spread scattered around
+        /// <paramref name="center"/>. The scatter comes from the shape's seed, so every peer throwing the same
+        /// volley lays the crates out identically. Only crates already resting are lifted; returns how many were
+        /// launched, which is zero when the pile is empty.
+        /// </summary>
+        int LaunchVolley(ArenaWorldPoint center, CrateVolleyShape shape);
+
         /// <summary>Move every crate still in the air, and resolve the ones that have arrived or been broken.</summary>
         void Advance(float deltaSeconds);
 
