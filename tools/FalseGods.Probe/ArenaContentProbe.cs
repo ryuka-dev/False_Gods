@@ -57,7 +57,7 @@ namespace FalseGods.Probe
         // Pinned by tests/FalseGods.ProtocolTests/ArenaContentArtifactFixtureTests.cs. The in-game recompute must
         // reproduce this exact digest — a change here is a ContentHashSchemaVersion change, never a quiet edit.
         private const string GoldenContentHashHex =
-            "7d200bb138fcdb898e17cf1feb8235beae23b7a2ac74bdad840f9fb9b200f885";
+            "261aa735bc3a27a09ac6a57fa49b9d69eb99cc01d42538d2ba6de869e961fffa";
 
         // R14 tolerances: the same prefab is serialized into the bundle and read back, so local transforms should
         // match to well within these. Tight enough to catch a real hierarchy/transform divergence, loose enough to

@@ -14,6 +14,9 @@ ExtractedAssets/
 tools/**/probe-*.txt
 ProbeReports/
 
+# Blender working files for authored geometry (the cave-wall shell etc.) — local DCC source
+BlenderWork/
+
 # Build output
 bin/
 obj/

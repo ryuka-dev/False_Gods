@@ -40,12 +40,14 @@ namespace FalseGods.EditorTools
         private const int GeometryNoNavMeshLayer = 22;
         private const int DefaultLayer = 0; // pure-visual décor: not rasterized, not collided
 
-        // Cave dimensions (metres). A ~60x60 arena — roughly 2x the largest vanilla cave room (~33x30,
-        // measured off CaveNormal3New), which direction B lets us exceed since we author our own space.
-        private const float RoomSize = 60f;
+        // Rectangular arena footprint (metres), sized to enclose the hand-sculpted CaveShell wall (its measured
+        // world footprint is ~62x83). Centred on the origin; the CaveShell carries its own MeshCollider, which does
+        // the containment, so the floor only has to reach under the wall. The visual walls are no longer generated
+        // — the CaveShell IS the wall. Re-measure and bump these if the sculpted wall grows past them.
+        private const float RoomSizeX = 68f;
+        private const float RoomSizeZ = 88f;
         private const float FloorThickness = 0.5f;
-        private const float WallHeight = 30f;   // tall cavern; ceiling caps at y = WallHeight
-        private const float WallThickness = 1f;
+        private const float WallHeight = 30f;   // ceiling caps at y = WallHeight
         private const float CeilingThickness = 0.5f;
 
         // LightingRoot — two realtime lights. No baked lightmaps: SULFUR generates levels at runtime, so the
@@ -74,6 +76,12 @@ namespace FalseGods.EditorTools
         private const string RockMaterialPath = MaterialsFolder + "/FG_Rock.mat";
         private const int RockMeshCount = 6;
 
+        // The hand-sculpted cave-wall shell (authored in Blender, imported as CaveShell.fbx) lives under VisualRoot
+        // as a single child with this name.
+        // Like the rocks it is hand-owned, pure-visual, preserved across structure regen, and excluded from the
+        // content artifact/hash; at runtime its sub-materials are painted with CaveWallBot/Mid/Top by convention.
+        public const string CaveShellName = "CaveShell";
+
         // One-time starting layout for SeedRocks: the initial Rock_* instances the author then drags to taste.
         // The mesh index cycles the six rock meshes. Not read by Generate — rocks are hand-owned once seeded.
         private static readonly (Vector3 pos, Vector3 euler, Vector3 scale)[] RockSeeds = new[]
@@ -99,33 +107,27 @@ namespace FalseGods.EditorTools
             EnsureFolder(ArenaFolder);
             EnsureFolder(MaterialsFolder);
 
-            var floorMesh = SaveMesh(BuildBoxMesh(new Vector3(RoomSize, FloorThickness, RoomSize)),
+            var floorMesh = SaveMesh(BuildBoxMesh(new Vector3(RoomSizeX, FloorThickness, RoomSizeZ)),
                 ArenaFolder + "/FG_PocFloor.asset");
-            var ceilingMesh = SaveMesh(BuildBoxMesh(new Vector3(RoomSize, CeilingThickness, RoomSize)),
+            var ceilingMesh = SaveMesh(BuildBoxMesh(new Vector3(RoomSizeX, CeilingThickness, RoomSizeZ)),
                 ArenaFolder + "/FG_PocCeiling.asset");
-            var wallXMesh = SaveMesh(BuildBoxMesh(new Vector3(RoomSize, WallHeight, WallThickness)),
-                ArenaFolder + "/FG_PocWallX.asset"); // runs along X (north/south walls)
-            var wallZMesh = SaveMesh(BuildBoxMesh(new Vector3(WallThickness, WallHeight, RoomSize)),
-                ArenaFolder + "/FG_PocWallZ.asset"); // runs along Z (east/west walls)
 
             var groundMaterial = SaveUrpLitMaterial(MaterialsFolder + "/PocRoom_Ground.mat",
                 new Color(0.42f, 0.40f, 0.38f));
-            var wallMaterial = SaveUrpLitMaterial(MaterialsFolder + "/PocRoom_Wall.mat",
-                new Color(0.35f, 0.34f, 0.33f));
             var ceilingMaterial = SaveUrpLitMaterial(MaterialsFolder + "/PocRoom_Ceiling.mat",
                 new Color(0.25f, 0.24f, 0.24f));
 
-            var meshes = new CaveMeshes(floorMesh, ceilingMesh, wallXMesh, wallZMesh);
-            var materials = new CaveMaterials(groundMaterial, wallMaterial, ceilingMaterial);
+            var meshes = new CaveMeshes(floorMesh, ceilingMesh);
+            var materials = new CaveMaterials(groundMaterial, ceilingMaterial);
 
             var root = new GameObject("PocRoom");
             try
             {
                 BuildHierarchy(root, meshes, materials);
 
-                // Rocks are hand-owned décor: carry any the author has placed over into the rebuilt structure so
-                // regenerating never discards them (they are excluded from the content hash, so no rehash either).
-                PreserveExistingRocks(root);
+                // Hand-owned décor (rocks + the sculpted CaveShell wall): carry anything the author has placed over
+                // into the rebuilt structure so regenerating never discards it (all excluded from the content hash).
+                PreserveHandAuthoredDecor(root);
 
                 var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabPath, out var success);
                 if (!success || prefab == null)
@@ -187,9 +189,10 @@ namespace FalseGods.EditorTools
             }
         }
 
-        /// <summary>Moves any hand-authored Rock_* décor from the current prefab into the freshly built root so a
-        /// structure regeneration never discards it (rocks are hand-owned; structure is code-owned).</summary>
-        private static void PreserveExistingRocks(GameObject newRoot)
+        /// <summary>Moves hand-authored décor (the Rock_* rocks and, when present, the sculpted CaveShell cave
+        /// wall) from the current prefab into the freshly built root so a structure regeneration never discards it
+        /// (décor is hand-owned; the flat structure is code-owned).</summary>
+        private static void PreserveHandAuthoredDecor(GameObject newRoot)
         {
             var existing = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
             if (existing == null)
@@ -197,7 +200,7 @@ namespace FalseGods.EditorTools
 
             var newVisualRoot = newRoot.transform.Find("VisualRoot");
             if (newVisualRoot == null)
-                throw new InvalidOperationException("Freshly built root has no VisualRoot to hold preserved rocks.");
+                throw new InvalidOperationException("Freshly built root has no VisualRoot to hold preserved décor.");
 
             var clone = (GameObject)UnityEngine.Object.Instantiate(existing);
             try
@@ -206,15 +209,15 @@ namespace FalseGods.EditorTools
                 if (oldVisualRoot == null)
                     return;
 
-                var rocks = new System.Collections.Generic.List<Transform>();
+                var preserved = new System.Collections.Generic.List<Transform>();
                 foreach (Transform child in oldVisualRoot)
-                    if (IsRockName(child.name))
-                        rocks.Add(child);
+                    if (IsHandAuthoredDecor(child.name))
+                        preserved.Add(child);
 
-                // Reparent out of the clone (worldPositionStays:false keeps each rock's authored local transform),
-                // then destroy the clone — the moved rocks survive as children of the new root.
-                foreach (var rock in rocks)
-                    rock.SetParent(newVisualRoot, worldPositionStays: false);
+                // Reparent out of the clone (worldPositionStays:false keeps each object's authored local transform),
+                // then destroy the clone — the moved objects survive as children of the new root.
+                foreach (var decor in preserved)
+                    decor.SetParent(newVisualRoot, worldPositionStays: false);
             }
             finally
             {
@@ -231,6 +234,9 @@ namespace FalseGods.EditorTools
         }
 
         private static bool IsRockName(string name) => name.StartsWith("Rock_", StringComparison.Ordinal);
+
+        private static bool IsHandAuthoredDecor(string name) =>
+            IsRockName(name) || string.Equals(name, CaveShellName, StringComparison.Ordinal);
 
         /// <summary>Our own URP/Lit rock material over the vanilla 4x4 Rocks_Color texture (matching vanilla
         /// `RocksColor`). Created once; if it already exists it is returned untouched so author tuning persists.</summary>
@@ -273,16 +279,16 @@ namespace FalseGods.EditorTools
 
         private readonly struct CaveMeshes
         {
-            public readonly Mesh Floor, Ceiling, WallX, WallZ;
-            public CaveMeshes(Mesh floor, Mesh ceiling, Mesh wallX, Mesh wallZ)
-            { Floor = floor; Ceiling = ceiling; WallX = wallX; WallZ = wallZ; }
+            public readonly Mesh Floor, Ceiling;
+            public CaveMeshes(Mesh floor, Mesh ceiling)
+            { Floor = floor; Ceiling = ceiling; }
         }
 
         private readonly struct CaveMaterials
         {
-            public readonly Material Ground, Wall, Ceiling;
-            public CaveMaterials(Material ground, Material wall, Material ceiling)
-            { Ground = ground; Wall = wall; Ceiling = ceiling; }
+            public readonly Material Ground, Ceiling;
+            public CaveMaterials(Material ground, Material ceiling)
+            { Ground = ground; Ceiling = ceiling; }
         }
 
         /// <summary>
@@ -318,40 +324,18 @@ namespace FalseGods.EditorTools
             AddMeshChild(visualRoot, "Floor", meshes.Floor, materials.Ground, GeometryLayer,
                 new Vector3(0f, -FloorThickness / 2f, 0f));
 
-            // Walls: pure-visual boxes on Default(0), inner face flush with the floor edge (±RoomSize/2).
-            var wallOffset = (RoomSize + WallThickness) / 2f;
-            var wallY = WallHeight / 2f;
-            AddMeshChild(visualRoot, "Wall_N", meshes.WallX, materials.Wall, DefaultLayer,
-                new Vector3(0f, wallY, wallOffset));
-            AddMeshChild(visualRoot, "Wall_S", meshes.WallX, materials.Wall, DefaultLayer,
-                new Vector3(0f, wallY, -wallOffset));
-            AddMeshChild(visualRoot, "Wall_E", meshes.WallZ, materials.Wall, DefaultLayer,
-                new Vector3(wallOffset, wallY, 0f));
-            AddMeshChild(visualRoot, "Wall_W", meshes.WallZ, materials.Wall, DefaultLayer,
-                new Vector3(-wallOffset, wallY, 0f));
-
             // Ceiling: caps the cavern, bottom face at y = WallHeight.
             AddMeshChild(visualRoot, "Ceiling", meshes.Ceiling, materials.Ceiling, DefaultLayer,
                 new Vector3(0f, WallHeight + CeilingThickness / 2f, 0f));
 
-            // Decoration rocks are NOT built here — they are hand-authored Rock_* children under VisualRoot,
-            // seeded once by SeedRocks and preserved across regen by PreserveExistingRocks.
+            // The walls are NOT built here — the hand-sculpted CaveShell (a preserved VisualRoot child carrying its
+            // own MeshCollider on GeometryNoNavMesh) is the wall, visually and physically. Decoration rocks are
+            // likewise hand-authored Rock_* children, preserved across regen by PreserveHandAuthoredDecor.
 
             // ── Physics ────────────────────────────────────────────────────────────────────────────────────
-            // Floor collider on Geometry(3) makes the ground solid.
+            // Floor collider on Geometry(3) makes the ground solid. Wall containment is the CaveShell's MeshCollider.
             AddBoxCollider(collisionRoot, "FloorCollider", GeometryLayer,
-                new Vector3(0f, -FloorThickness / 2f, 0f), new Vector3(RoomSize, FloorThickness, RoomSize));
-
-            // Boundary walls: collider-only boxes on GeometryNoNavMesh(22) — solid, excluded from nav.
-            var boundaryLength = RoomSize + 2f * WallThickness; // overlap the corners
-            AddBoxCollider(collisionRoot, "WallNorth", GeometryNoNavMeshLayer,
-                new Vector3(0f, wallY, wallOffset), new Vector3(boundaryLength, WallHeight, WallThickness));
-            AddBoxCollider(collisionRoot, "WallSouth", GeometryNoNavMeshLayer,
-                new Vector3(0f, wallY, -wallOffset), new Vector3(boundaryLength, WallHeight, WallThickness));
-            AddBoxCollider(collisionRoot, "WallEast", GeometryNoNavMeshLayer,
-                new Vector3(wallOffset, wallY, 0f), new Vector3(WallThickness, WallHeight, boundaryLength));
-            AddBoxCollider(collisionRoot, "WallWest", GeometryNoNavMeshLayer,
-                new Vector3(-wallOffset, wallY, 0f), new Vector3(WallThickness, WallHeight, boundaryLength));
+                new Vector3(0f, -FloorThickness / 2f, 0f), new Vector3(RoomSizeX, FloorThickness, RoomSizeZ));
 
             // ── Markers ────────────────────────────────────────────────────────────────────────────────────
             // Spawn logic is not the bundle's business — the runtime reads these positions from the artifact.

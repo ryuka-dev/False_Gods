@@ -198,6 +198,14 @@ namespace FalseGods.ApplicationTests
                 return MaterialBorrowResult.Resolved(0);
             }
 
+            public SubmeshBorrow? CapturedSubmeshBorrow { get; private set; }
+
+            public MaterialBorrowResult PaintSubmeshes(SubmeshBorrow borrow)
+            {
+                CapturedSubmeshBorrow = borrow;
+                return MaterialBorrowResult.Resolved(0);
+            }
+
             public void Release() => _journal.Add("vanilla.Release");
         }
 

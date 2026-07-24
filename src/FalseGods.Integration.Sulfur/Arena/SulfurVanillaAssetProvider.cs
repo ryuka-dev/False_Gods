@@ -141,6 +141,48 @@ namespace FalseGods.Integration.Sulfur.Arena
             return MaterialBorrowResult.Resolved(applied);
         }
 
+        public MaterialBorrowResult PaintSubmeshes(SubmeshBorrow borrow)
+        {
+            if (borrow == null || borrow.MaterialNames == null || borrow.MaterialNames.Count == 0)
+                return MaterialBorrowResult.Resolved(0);
+
+            var root = _realizedRoot();
+            if (root == null)
+                return MaterialBorrowResult.Failed("no realized arena root to paint decoration");
+
+            var target = root.transform.Find(borrow.TargetPath);
+            if (target == null)
+                return MaterialBorrowResult.Resolved(0); // optional décor absent — not a failure
+
+            var renderer = target.GetComponent<Renderer>();
+            if (renderer == null)
+                return MaterialBorrowResult.Failed($"decoration '{borrow.TargetPath}' has no Renderer to paint");
+
+            var carrier = LoadCarrier(borrow.CarrierGuid, out var carrierError);
+            if (carrier == null)
+                return MaterialBorrowResult.Failed($"decoration carrier '{borrow.CarrierGuid}' did not load: {carrierError}");
+
+            var materials = renderer.sharedMaterials;
+            var count = Math.Min(materials.Length, borrow.MaterialNames.Count);
+            var applied = 0;
+            for (var i = 0; i < count; i++)
+            {
+                var material = FindMaterial(carrier, borrow.MaterialNames[i], out var materialError);
+                if (material == null)
+                {
+                    return MaterialBorrowResult.Failed(
+                        $"decoration submaterial '{borrow.MaterialNames[i]}' in carrier '{borrow.CarrierGuid}': {materialError}");
+                }
+
+                materials[i] = material;
+                applied++;
+            }
+
+            renderer.sharedMaterials = materials; // reassign: the array getter returns a copy
+            _logger?.Log($"[vanilla-material] {applied} submesh paint(s) on '{borrow.TargetPath}'");
+            return MaterialBorrowResult.Resolved(applied);
+        }
+
         public void Release()
         {
             if (_carriers.Count == 0)

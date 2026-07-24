@@ -27,6 +27,17 @@ namespace FalseGods.Application.Arena
         public const int SubMaterialIndex = 0;
     }
 
+    /// <summary>The hand-sculpted cave-wall shell (VisualRoot/CaveShell) is hand-authored presentation excluded
+    /// from the content hash; at load its three height-band sub-materials are painted with the vanilla cave-wall
+    /// materials, in sub-mesh order, from the same donor carrier the surfaces borrow from — so the wall gets the
+    /// game's real MasterShader look (correct lighting/shading) over the mesh's own UVs + face assignment. PoC-arena
+    /// content constants, grouped here like <see cref="ArenaMarkerKinds"/>.</summary>
+    public static class WallShellDecoration
+    {
+        public const string Path = "VisualRoot/CaveShell";
+        public static readonly string[] BandMaterialNames = { "CaveWallBot", "CaveWallMid", "CaveWallTop" };
+    }
+
     /// <summary>Where the local arena load stands. Failure at any step returns the flow to
     /// <see cref="NotLoaded"/> with everything it had acquired released.</summary>
     public enum ArenaLoadStage
@@ -219,6 +230,12 @@ namespace FalseGods.Application.Arena
                 return Fail($"arena decoration paint failed: {rockPaint.Error ?? "unknown"}");
             }
 
+            var wallPaint = PaintWallShell(borrowRequests);
+            if (!wallPaint.Success)
+            {
+                return Fail($"arena wall-shell paint failed: {wallPaint.Error ?? "unknown"}");
+            }
+
             var nav = _navigation.Apply();
             if (!nav.Success)
             {
@@ -286,6 +303,21 @@ namespace FalseGods.Application.Arena
                 RockDecoration.SubMaterialIndex,
                 carrierGuid,
                 RockDecoration.MaterialName));
+        }
+
+        /// <summary>Paint the sculpted cave-wall shell's three height bands (sub-meshes) with the vanilla
+        /// CaveWallBot/Mid/Top materials, reusing the same carrier the surfaces borrow from. Skipped when the arena
+        /// borrows nothing, or when no CaveShell is present (fail-open — the wall shell is optional décor).</summary>
+        private MaterialBorrowResult PaintWallShell(IReadOnlyList<MaterialBorrowRequest> borrowRequests)
+        {
+            if (borrowRequests.Count == 0)
+            {
+                return MaterialBorrowResult.Resolved(0);
+            }
+
+            var carrierGuid = borrowRequests[0].CarrierGuid;
+            return _vanillaAssets.PaintSubmeshes(new SubmeshBorrow(
+                WallShellDecoration.Path, carrierGuid, WallShellDecoration.BandMaterialNames));
         }
 
         private static IReadOnlyList<MaterialBorrowRequest> BuildMaterialBorrowRequests(

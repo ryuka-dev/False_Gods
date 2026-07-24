@@ -52,10 +52,10 @@ namespace FalseGods.EditorTools
 
         private static string BuildInternal()
         {
-            // The room is generated, not hand-authored — regenerate so the bundle always reflects the
-            // current generator (stale-asset builds are exactly the kind of divergence R14 is about).
-            PocRoomGenerator.Generate();
-
+            // The arena prefab is hand-authored (floor/ceiling/collision + the sculpted CaveShell wall + rocks),
+            // so the build packs whatever is currently saved in the prefab — it does NOT regenerate. Save the
+            // prefab before building; the artifact is exported from the same saved prefab below, so the two cannot
+            // diverge (R14). PocRoomGenerator is now only a one-off scaffold for a fresh box, not the build source.
             Directory.CreateDirectory(OutputDirectory);
 
             var builds = new[]

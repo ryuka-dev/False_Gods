@@ -34,6 +34,18 @@ namespace FalseGods.Application.Arena
         string CarrierGuid,
         string MaterialName);
 
+    /// <summary>
+    /// Paint the sub-materials of one hand-authored décor renderer (found at <see cref="TargetPath"/>) with a list
+    /// of vanilla materials from carrier <see cref="CarrierGuid"/>: sub-material <c>i</c> gets
+    /// <c>MaterialNames[i]</c>. Used for the sculpted cave-wall shell, whose three height bands borrow
+    /// CaveWallBot/Mid/Top. Like the other décor paints it targets an object excluded from the content hash, so the
+    /// mesh is free to change without a rehash. Absent target is a success with zero applied (optional décor).
+    /// </summary>
+    public sealed record SubmeshBorrow(
+        string TargetPath,
+        string CarrierGuid,
+        IReadOnlyList<string> MaterialNames);
+
     /// <summary>The outcome of resolving the material borrows: how many were applied, or the fail-closed reason.
     /// Failure is an outcome, not an exception — the load flow tears down on it.</summary>
     public sealed record MaterialBorrowResult(bool Success, string? Error, int Applied)
@@ -74,6 +86,13 @@ namespace FalseGods.Application.Arena
         /// <see cref="Resolve"/>. A carrier that will not load or a material name that resolves to zero or more than
         /// one distinct material is fail-closed, exactly as in <see cref="Resolve"/>.</summary>
         MaterialBorrowResult PaintByConvention(MaterialConventionPaint paint);
+
+        /// <summary>Paint the sub-materials of one décor renderer with a list of vanilla materials (see
+        /// <see cref="SubmeshBorrow"/>). An absent target is a success with zero applied (optional décor). A
+        /// carrier that will not load or a material name that resolves to zero or more than one distinct material
+        /// is fail-closed, exactly as in <see cref="Resolve"/>. Shares the carrier cache and <see cref="Release"/>
+        /// lifetime with the other paints.</summary>
+        MaterialBorrowResult PaintSubmeshes(SubmeshBorrow borrow);
 
         void Release();
     }

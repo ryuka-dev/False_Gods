@@ -12,6 +12,9 @@
 /*.slnx
 /.vsconfig
 
+# Local game deploy targets for the CaveShell auto-build (machine-specific plugin paths, never committed)
+/LocalDeployTargets.txt
+
 # Vanilla game assets copied locally for authoring (meshes/textures/materials extracted from the
 # player's own installed SULFUR). Never committed — the player's own content, not redistributed here.
 # The built bundle in /Build/ (also ignored) carries the baked copies; provenance is in the README.

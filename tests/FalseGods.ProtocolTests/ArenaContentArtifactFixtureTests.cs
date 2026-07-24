@@ -17,7 +17,7 @@ namespace FalseGods.ProtocolTests
         // canonical hash definition must update this deliberately (a hash change is a ContentHashSchemaVersion
         // change — MultiplayerLoadingContract §5.2.1).
         private const string GoldenContentHashHex =
-            "7d200bb138fcdb898e17cf1feb8235beae23b7a2ac74bdad840f9fb9b200f885";
+            "261aa735bc3a27a09ac6a57fa49b9d69eb99cc01d42538d2ba6de869e961fffa";
 
         private static string FixtureText() =>
             File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arena-content-PocRoom.artifact"));
@@ -31,20 +31,20 @@ namespace FalseGods.ProtocolTests
             Assert.Equal(1, artifact.Definition.ArenaVersion);
             Assert.Equal(ContentHashSchemaVersion.Current, artifact.SchemaVersion);
 
-            // The authored identity set the exporter declares for the cave arena. Decoration rocks are
-            // hand-authored presentation and carry NO artifact rows (excluded from hash + parity, like lighting).
-            // ArenaRoot + 4 roots + Floor + 4 walls + Ceiling.
-            Assert.Equal(11, artifact.Definition.Nodes.Count);
+            // The authored identity set the exporter declares for the cave arena. The sculpted CaveShell wall and
+            // the decoration rocks are hand-authored presentation and carry NO artifact rows (excluded from hash +
+            // parity, like the lighting). ArenaRoot + 4 roots + Floor + Ceiling.
+            Assert.Equal(7, artifact.Definition.Nodes.Count);
             Assert.Empty(artifact.Definition.VanillaProxies);   // the cave uses only our own meshes
-            Assert.Equal(5, artifact.Definition.Colliders.Count); // floor + four boundary walls
+            Assert.Equal(1, artifact.Definition.Colliders.Count); // the floor; wall containment is the CaveShell's MeshCollider
             Assert.Single(artifact.Definition.NavDefinitions);  // the walkable floor surface
             Assert.Equal(2, artifact.Definition.Spawns.Count);  // player + dummy enemy
             Assert.Empty(artifact.Definition.Mechanisms);
-            // The borrowed cave surfaces: Floor + 4 walls + Ceiling (rocks carry their own baked material).
-            Assert.Equal(6, artifact.Definition.MaterialBorrows.Count);
-            Assert.Equal(6, artifact.MaterialBorrowPlacements.Count);        // their runtime target paths
-            // 4 roots + Floor + 4 walls + Ceiling + 5 colliders + 2 spawns.
-            Assert.Equal(17, artifact.Parity.Count);
+            // The borrowed cave surfaces: Floor + Ceiling (the wall bands + rocks are painted by convention).
+            Assert.Equal(2, artifact.Definition.MaterialBorrows.Count);
+            Assert.Equal(2, artifact.MaterialBorrowPlacements.Count);        // their runtime target paths
+            // 4 roots + Floor + Ceiling + floor collider + 2 spawns.
+            Assert.Equal(9, artifact.Parity.Count);
         }
 
         [Fact]

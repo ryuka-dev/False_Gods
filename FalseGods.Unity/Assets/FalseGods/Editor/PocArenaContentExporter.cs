@@ -59,17 +59,13 @@ namespace FalseGods.EditorTools
         // so name-borrow is deterministic and fail-closed.
         private const string CaveCarrierGuid = "92103c239550ca740906311170fcc458";
 
-        // Cave surface material names to borrow (must exist, uniquely, on CaveCarrierGuid).
+        // Cave surface material names to borrow (must exist, uniquely, on CaveCarrierGuid). The WALLS are no longer
+        // a borrowed surface — the sculpted CaveShell is hand-authored décor whose bands are painted at runtime.
         private const string MatFloor = "CaveFloor";
-        private const string MatWall = "CaveWall";
         private const string MatCeiling = "CaveCeilingOther";
 
         private const char Sep = '\t';
         private const string Nil = "-";
-
-        // The four boundary walls have visual + collider counterparts; keep the ordering in one place.
-        private static readonly string[] WallSuffixes = { "N", "E", "S", "W" };
-        private static readonly string[] BoundaryColliderNames = { "WallNorth", "WallSouth", "WallEast", "WallWest" };
 
         [MenuItem("False Gods/Export Arena Content Artifact")]
         public static void Export()
@@ -95,13 +91,11 @@ namespace FalseGods.EditorTools
             }
         }
 
-        /// <summary>Regenerates the room, then writes the artifact next to the bundle and returns its full path.
-        /// A stale prefab is exactly the editor/runtime divergence R14 exists to catch, so the standalone entry
-        /// points regenerate first. The bundle builder, which has just generated the room itself, calls
-        /// <see cref="WriteArtifactForCurrentPrefab"/> to avoid regenerating twice.</summary>
+        /// <summary>Writes the artifact from the hand-authored prefab currently saved on disk (no regeneration).
+        /// The arena is hand-authored, so the prefab IS the source of truth; save it before exporting. Kept as an
+        /// alias of <see cref="WriteArtifactForCurrentPrefab"/> so existing callers/menus stay valid.</summary>
         public static string ExportInternal()
         {
-            PocRoomGenerator.Generate();
             return WriteArtifactForCurrentPrefab();
         }
 
@@ -125,14 +119,11 @@ namespace FalseGods.EditorTools
         private static string Guid(int n) => $"fa15e900-0000-0000-0000-{n:000000000000}";
 
         // ── Deterministic GUID number allocation (stable across regenerations) ──────────────────────────────
-        //   1..5   roots            6        Floor
-        //   40..43 walls N/E/S/W    44       Ceiling
-        //   10     FloorCollider    12..15   boundary walls
-        //   20     nav              30/31    player/enemy spawn
-        //   50     Floor borrow     52..55   wall borrows        56      Ceiling borrow
-        //   (decoration rocks are hand-authored presentation and carry no artifact rows — see the class summary)
-        private static int WallNode(int i) => 40 + i;      // i = 0..3
-        private static int WallBorrow(int i) => 52 + i;
+        //   1..5   roots            6        Floor              44   Ceiling
+        //   10     FloorCollider    20       nav                30/31 player/enemy spawn
+        //   50     Floor borrow     56       Ceiling borrow
+        //   (the sculpted CaveShell wall and the decoration rocks are hand-authored presentation and carry no
+        //    artifact rows — see the class summary)
 
         private static string BuildArtifact(Transform root)
         {
@@ -161,21 +152,16 @@ namespace FalseGods.EditorTools
             NodeRow(sb, root, "GameplayRoot", gameplayRoot, "GameplayRoot", pocRoom);
 
             NodeRow(sb, root, "VisualRoot/Floor", Guid(6), "Floor", visualRoot);
-            for (var i = 0; i < WallSuffixes.Length; i++)
-                NodeRow(sb, root, WallPath(i), Guid(WallNode(i)), WallName(i), visualRoot);
             NodeRow(sb, root, "VisualRoot/Ceiling", Guid(44), "Ceiling", visualRoot);
 
             // ── Colliders (kind + half-extents geometry + layer NAME; position is not hashed, per §5.2.1 input 6).
+            //    Only the floor collider is authored here; wall containment is the CaveShell's own MeshCollider.
             ColliderRow(sb, root, "CollisionRoot/FloorCollider", Guid(10));
-            ColliderRow(sb, root, "CollisionRoot/WallNorth", Guid(12));
-            ColliderRow(sb, root, "CollisionRoot/WallSouth", Guid(13));
-            ColliderRow(sb, root, "CollisionRoot/WallEast", Guid(14));
-            ColliderRow(sb, root, "CollisionRoot/WallWest", Guid(15));
 
             // ── Navigation authoring: the walkable floor surface, realized at runtime via the prebaked
-            //    NavmeshPrefab path (Option 1, RiskList R4). Bounds are the 60x60 m floor top at y=0.
+            //    NavmeshPrefab path (Option 1, RiskList R4). Bounds are the rectangular floor top at y=0.
             Row(sb, "nav", Guid(20), "WalkableSurface", "arena-nav-PocRoom",
-                Flt(0f), Flt(0f), Flt(0f), Flt(60f), Flt(0.1f), Flt(60f));
+                Flt(0f), Flt(0f), Flt(0f), Flt(68f), Flt(0.1f), Flt(88f));
 
             // ── Spawns.
             SpawnRow(sb, root, "GameplayRoot/PlayerSpawn", Guid(30), "Player", "false_gods.spawn.player");
@@ -185,8 +171,6 @@ namespace FalseGods.EditorTools
             //    Target marker + carrier GUID + material name + sub-material index are the hashed donor identity;
             //    the trailing runtime path is a locator, not hashed.
             MaterialBorrowRow(sb, Guid(50), Guid(6), 0, CaveCarrierGuid, MatFloor, "VisualRoot/Floor");
-            for (var i = 0; i < WallSuffixes.Length; i++)
-                MaterialBorrowRow(sb, Guid(WallBorrow(i)), Guid(WallNode(i)), 0, CaveCarrierGuid, MatWall, WallPath(i));
             MaterialBorrowRow(sb, Guid(56), Guid(44), 0, CaveCarrierGuid, MatCeiling, "VisualRoot/Ceiling");
 
             // ── Parity map (R14): every identity node/collider/spawn the runtime should find, by path, with the
@@ -197,9 +181,6 @@ namespace FalseGods.EditorTools
             return sb.ToString();
         }
 
-        private static string WallName(int i) => "Wall_" + WallSuffixes[i];
-        private static string WallPath(int i) => "VisualRoot/" + WallName(i);
-
         private static IEnumerable<(string Path, string Kind)> ParityTargets()
         {
             yield return ("VisualRoot", "VisualRoot");
@@ -208,13 +189,9 @@ namespace FalseGods.EditorTools
             yield return ("GameplayRoot", "GameplayRoot");
 
             yield return ("VisualRoot/Floor", "Floor");
-            for (var i = 0; i < WallSuffixes.Length; i++)
-                yield return (WallPath(i), "Wall");
             yield return ("VisualRoot/Ceiling", "Ceiling");
 
             yield return ("CollisionRoot/FloorCollider", "Box");
-            foreach (var name in BoundaryColliderNames)
-                yield return ("CollisionRoot/" + name, "Box");
 
             yield return ("GameplayRoot/PlayerSpawn", "Player");
             yield return ("GameplayRoot/EnemySpawn", "Enemy");
