@@ -17,7 +17,7 @@ namespace FalseGods.ProtocolTests
         // canonical hash definition must update this deliberately (a hash change is a ContentHashSchemaVersion
         // change — MultiplayerLoadingContract §5.2.1).
         private const string GoldenContentHashHex =
-            "261aa735bc3a27a09ac6a57fa49b9d69eb99cc01d42538d2ba6de869e961fffa";
+            "9cbb81cc897ccf2cefbe90b04edd6352778f846e1b5e210d30a37b699f16c4a7";
 
         private static string FixtureText() =>
             File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arena-content-PocRoom.artifact"));

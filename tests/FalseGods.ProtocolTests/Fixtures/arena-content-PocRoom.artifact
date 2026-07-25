@@ -11,7 +11,7 @@ node	fa15e900-0000-0000-0000-000000000003	CollisionRoot	fa15e900-0000-0000-0000-
 node	fa15e900-0000-0000-0000-000000000004	NavigationRoot	fa15e900-0000-0000-0000-000000000001	0	0	0	0	0	0	1	1	1	1
 node	fa15e900-0000-0000-0000-000000000005	GameplayRoot	fa15e900-0000-0000-0000-000000000001	0	0	0	0	0	0	1	1	1	1
 node	fa15e900-0000-0000-0000-000000000006	Floor	fa15e900-0000-0000-0000-000000000002	0	-0.25	0	0	0	0	1	1	1	1
-node	fa15e900-0000-0000-0000-000000000044	Ceiling	fa15e900-0000-0000-0000-000000000002	0	32.24	0	0	0	0	1	1	1	1
+node	fa15e900-0000-0000-0000-000000000044	Ceiling	fa15e900-0000-0000-0000-000000000002	-1.54	32.22	0	0	0	0	1	1	1	1
 collider	fa15e900-0000-0000-0000-000000000010	Box	Geometry	3	34	0.25	44
 nav	fa15e900-0000-0000-0000-000000000020	WalkableSurface	arena-nav-PocRoom	0	0	0	68	0.1	88
 spawn	fa15e900-0000-0000-0000-000000000030	Player	false_gods.spawn.player	0	0	-22	0	0	0	1	1	1	1
@@ -23,7 +23,7 @@ parity	CollisionRoot	CollisionRoot	0	0	0	0	0	0	1	1	1	1
 parity	NavigationRoot	NavigationRoot	0	0	0	0	0	0	1	1	1	1
 parity	GameplayRoot	GameplayRoot	0	0	0	0	0	0	1	1	1	1
 parity	VisualRoot/Floor	Floor	0	-0.25	0	0	0	0	1	1	1	1
-parity	VisualRoot/Ceiling	Ceiling	0	32.24	0	0	0	0	1	1	1	1
+parity	VisualRoot/Ceiling	Ceiling	-1.54	32.22	0	0	0	0	1	1	1	1
 parity	CollisionRoot/FloorCollider	Box	0	-0.25	0	0	0	0	1	1	1	1
 parity	GameplayRoot/PlayerSpawn	Player	0	0	-22	0	0	0	1	1	1	1
 parity	GameplayRoot/EnemySpawn	Enemy	0	0	14	0	0	0	1	1	1	1
