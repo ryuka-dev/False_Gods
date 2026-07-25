@@ -160,20 +160,57 @@ namespace FalseGods.Probe
                 var walkable = 0;
                 var areas = new HashSet<uint>();
 
+                // Where the walkable surface actually IS, in height. A cave with terraces reads as one number
+                // otherwise: "walkable nodes: lots" says nothing about whether the raised ledges got any. Bucketed
+                // by 2 m, with the area ids per band, so an isolated terrace shows up as its own area.
+                var nodesByBand = new SortedDictionary<int, int>();
+                var areasByBand = new SortedDictionary<int, HashSet<uint>>();
+                var minY = float.MaxValue;
+                var maxY = float.MinValue;
+
                 // A snapshot taken outside a work item. Good enough for a diagnostic; never do this in
                 // production code, where it would race the pathfinding threads.
                 recast.GetNodes(node =>
                 {
                     total++;
-                    if (node.Walkable)
-                        walkable++;
+                    if (!node.Walkable)
+                        return;
+
+                    walkable++;
                     areas.Add(node.Area);
+
+                    var y = ((Vector3)node.position).y;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+
+                    var band = Mathf.FloorToInt(y / 2f) * 2;
+                    nodesByBand.TryGetValue(band, out var count);
+                    nodesByBand[band] = count + 1;
+
+                    if (!areasByBand.TryGetValue(band, out var bandAreas))
+                    {
+                        bandAreas = new HashSet<uint>();
+                        areasByBand[band] = bandAreas;
+                    }
+
+                    bandAreas.Add(node.Area);
                 });
 
                 report.Value("total nodes", total);
                 report.Value("walkable nodes", walkable);
                 report.Value("unwalkable nodes", total - walkable);
                 report.Value("distinct areas", areas.Count);
+
+                if (walkable > 0)
+                {
+                    report.Value("walkable Y range", $"{minY:0.00} .. {maxY:0.00}");
+                    report.Line("  walkable nodes by height band (band: nodes, area ids):");
+                    foreach (var band in nodesByBand)
+                    {
+                        var ids = string.Join(",", areasByBand[band.Key].Select(a => a.ToString()).ToArray());
+                        report.Line($"    y {band.Key,4} .. {band.Key + 2,-4} : {band.Value,6} nodes   areas [{ids}]");
+                    }
+                }
             });
 
             report.Section("P0 — NavMeshCleaner (R5: the flood-fill that erases custom islands)");
