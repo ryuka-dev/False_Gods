@@ -1,15 +1,25 @@
 # False Gods — Investigation Docs
 
-Feasibility investigation for building an original boss **arena map** for SULFUR that works in vanilla
-single-player and in host-authoritative SULFUR Together multiplayer. **No gameplay implementation yet** — the
-repository holds these reports, the module skeleton under `src/` whose project reference lists encode the
-boundaries below ([ArchitectureEnforcement.md §13](ArchitectureEnforcement.md)) — with `FalseGods.Protocol`
-carrying the first real slice (`ArenaManifest` + canonical `ContentHash`) — and the `FalseGods.Unity`
-authoring project that generates and bundles the PoC test room (report 8, PoC step P2).
+An original boss **arena map** for SULFUR that works in vanilla single-player and in host-authoritative SULFUR
+Together multiplayer.
+
+**Where the project stands.** The first encounter is playable in single-player: a hand-authored cave arena is
+delivered by driving the game's own level generation, so the game builds its navigation, spawns the player and
+applies the fog natively; the boss fights, takes real weapon fire, damages the player, and throws the game's own
+crates; enemies path the cave and jump between its terraces. **Multiplayer is the open work** — the client path
+still uses the additive arena load from before the level hijack. Reports 1–9 below are the feasibility
+investigation that preceded all of this and are kept as the reasoning record; where implementation has since
+moved past them, the runbook is the current word.
 
 All claims are grounded in the decompiled game assemblies (`../Decompiled/`, gitignored) and in SULFUR
 Together's own docs/source. Concrete type/method names are cited; runtime behaviour is marked *proposed /
-unverified* until validated by the proof-of-concept.
+unverified* until validated in game.
+
+## Start here
+
+- **[BossEncounterRunbook.md](BossEncounterRunbook.md)** — how a boss encounter and its arena get built, in the
+  order that works: the production sequence and what closes each step, the measurements pinned to a game version
+  with how to re-take them, and the traps that cost real time. Read this before building the next arena.
 
 ## Reports
 
