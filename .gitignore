@@ -14,8 +14,12 @@ ExtractedAssets/
 tools/**/probe-*.txt
 ProbeReports/
 
-# Blender working files for authored geometry (the cave-wall shell etc.) — local DCC source
-BlenderWork/
+# Blender working directory. The .blend is OUR authored source for the cave and is tracked; everything
+# beside it is local-only — extracted vanilla reference meshes and textures (never redistributed) and
+# Blender's own .blend1 save backups. Ignoring the contents rather than the directory is what makes the
+# single exception below possible.
+BlenderWork/*
+!BlenderWork/Falsegods1.blend
 
 # Build output
 bin/
