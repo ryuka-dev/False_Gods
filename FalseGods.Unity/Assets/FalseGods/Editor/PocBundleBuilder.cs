@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -20,6 +21,23 @@ namespace FalseGods.EditorTools
         public const string BundleFileName = "falsegods-poc-room.bundle";
 
         private const string OutputDirectory = "Build";
+
+        private const string MaterialsFolder = "Assets/FalseGods/Materials";
+
+        /// <summary>
+        /// Placeholder materials whose textures are for AUTHORING PREVIEW ONLY and must never reach the bundle.
+        /// They wear extracted vanilla textures so the editor shows what the surface will look like in game, but
+        /// at runtime every one of them is repainted with a material borrowed from the player's own install, so
+        /// the texture is dead weight — and shipping it would redistribute a vanilla asset, which this project
+        /// does not do. What the bundle needs from these materials is their NAME, which is what the borrow
+        /// matches on.
+        /// </summary>
+        private static readonly string[] PreviewMaterials =
+        {
+            "FG_WallBot", "FG_WallMid", "FG_WallTop", "FG_Floor", "FG_Ceiling", "FG_Rock",
+        };
+
+        private static readonly string[] TextureProperties = { "_BaseMap", "_MainTex" };
 
         [MenuItem("False Gods/Build PoC AssetBundle")]
         public static void Build()
@@ -67,11 +85,22 @@ namespace FalseGods.EditorTools
                 },
             };
 
-            var manifest = BuildPipeline.BuildAssetBundles(
-                OutputDirectory,
-                builds,
-                BuildAssetBundleOptions.ChunkBasedCompression, // LZ4: cheap random-access loads at runtime
-                BuildTarget.StandaloneWindows64);
+            // The preview textures are dependencies of the packed prefab, so they would ride the bundle unless
+            // they are off the materials while it is built. Restored in the finally, whatever happens.
+            var previewTextures = StripPreviewTextures();
+            AssetBundleManifest manifest;
+            try
+            {
+                manifest = BuildPipeline.BuildAssetBundles(
+                    OutputDirectory,
+                    builds,
+                    BuildAssetBundleOptions.ChunkBasedCompression, // LZ4: cheap random-access loads at runtime
+                    BuildTarget.StandaloneWindows64);
+            }
+            finally
+            {
+                RestorePreviewTextures(previewTextures);
+            }
 
             if (manifest == null)
                 throw new InvalidOperationException("BuildPipeline.BuildAssetBundles returned null.");
@@ -87,6 +116,58 @@ namespace FalseGods.EditorTools
             Debug.Log($"[FalseGods] Arena content artifact written to {artifactPath}.");
 
             return Path.GetFullPath(bundlePath);
+        }
+
+        /// <summary>Take the preview textures off the placeholder materials and remember them, so the bundle is
+        /// built from materials that reference nothing vanilla.</summary>
+        private static List<KeyValuePair<Material, KeyValuePair<string, Texture>>> StripPreviewTextures()
+        {
+            var stripped = new List<KeyValuePair<Material, KeyValuePair<string, Texture>>>();
+            foreach (var name in PreviewMaterials)
+            {
+                var material = AssetDatabase.LoadAssetAtPath<Material>($"{MaterialsFolder}/{name}.mat");
+                if (material == null)
+                    continue;
+
+                foreach (var property in TextureProperties)
+                {
+                    if (!material.HasProperty(property))
+                        continue;
+
+                    var texture = material.GetTexture(property);
+                    if (texture == null)
+                        continue;
+
+                    stripped.Add(new KeyValuePair<Material, KeyValuePair<string, Texture>>(
+                        material, new KeyValuePair<string, Texture>(property, texture)));
+                    material.SetTexture(property, null);
+                }
+
+                EditorUtility.SetDirty(material);
+            }
+
+            if (stripped.Count > 0)
+                AssetDatabase.SaveAssets(); // the build reads the saved assets, not what is dirty in memory
+
+            return stripped;
+        }
+
+        /// <summary>Put the preview textures back. Called from a finally: a build that throws must not leave the
+        /// author with blank materials.</summary>
+        private static void RestorePreviewTextures(
+            List<KeyValuePair<Material, KeyValuePair<string, Texture>>> stripped)
+        {
+            if (stripped == null || stripped.Count == 0)
+                return;
+
+            foreach (var entry in stripped)
+            {
+                entry.Key.SetTexture(entry.Value.Key, entry.Value.Value);
+                EditorUtility.SetDirty(entry.Key);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[FalseGods] {stripped.Count} preview texture binding(s) held out of the bundle and restored.");
         }
     }
 }
