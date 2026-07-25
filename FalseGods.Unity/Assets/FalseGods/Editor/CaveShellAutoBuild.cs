@@ -22,8 +22,18 @@ namespace FalseGods.EditorTools
     {
         private const string WatchedFbx = "Assets/FalseGods/Arenas/PocRoom/CaveShell.fbx";
         private const string PrefabPath = "Assets/FalseGods/Arenas/PocRoom/PocRoom.prefab";
+        private const string ArenaFolder = "Assets/FalseGods/Arenas/PocRoom";
         private const string ShellPath = "VisualRoot/CaveShell";
+        private const string WalkablePath = "VisualRoot/CaveWalkable";
         private const string MaterialsFolder = "Assets/FalseGods/Materials";
+
+        private const string WalkableSlot = "Floor";
+
+        // Measured in-game (F10 probe): the recast graph rasterizes MESHES on {3 Geometry, 12 StaticDoodad,
+        // 18 InvisibleGeometry, 30 ProjectileTrigger}, and GameManager.geometryLayer (physics + line of sight) is
+        // {3, 12, 18, 22 GeometryNoNavMesh, 26 LevelGenBlock}.
+        private const int WalkableLayer = 3;   // rasterized, solid, and NOT in the thrown-crate wall mask: a floor
+        private const int SolidLayer = 22;     // solid and crate-breaking, but invisible to the navigation scan
 
         /// <summary>
         /// The authored material slots, by the meaningful part of their Blender name (anything after the last
@@ -158,7 +168,92 @@ namespace FalseGods.EditorTools
                     "Blender, or those sub-meshes will keep their placeholder in-game.");
             }
 
-            ApplyToPrefab(placeholders);
+            var walkablePlaceholder = PlaceholderNameFor(WalkableSlot);
+            var walkableIndex = Array.FindIndex(placeholders,
+                p => p != null && string.Equals(p.name, walkablePlaceholder, StringComparison.Ordinal));
+
+            var modelFilter = model.GetComponentInChildren<MeshFilter>();
+            if (walkableIndex < 0 || modelFilter == null || modelFilter.sharedMesh == null)
+            {
+                Debug.LogWarning($"[FalseGods] material sync: no '{WalkableSlot}' slot in the model, so the walkable " +
+                    "surface cannot be separated; the whole shell keeps whatever layer it has. Assign the cave's " +
+                    "walkable faces to a *_Floor material slot in Blender.");
+                ApplyToPrefab(placeholders);
+                return;
+            }
+
+            var source = modelFilter.sharedMesh;
+            var solidSubmeshes = new List<int>();
+            var solidPlaceholders = new List<Material>();
+            for (var i = 0; i < source.subMeshCount; i++)
+            {
+                if (i == walkableIndex)
+                    continue;
+
+                solidSubmeshes.Add(i);
+                solidPlaceholders.Add(i < placeholders.Length ? placeholders[i] : null);
+            }
+
+            var solid = SaveMesh(BuildSubset(source, solidSubmeshes, "CaveShell_Solid"), ArenaFolder + "/CaveShell_Solid.asset");
+            var walkable = SaveMesh(BuildSubset(source, new List<int> { walkableIndex }, "CaveShell_Walkable"),
+                ArenaFolder + "/CaveShell_Walkable.asset");
+
+            Debug.Log($"[FalseGods] material sync: split sub-mesh {walkableIndex} ('{WalkableSlot}') off as the " +
+                $"walkable surface — {walkable.triangles.Length / 3} tris on layer {WalkableLayer}, " +
+                $"{solid.triangles.Length / 3} tris of solid shell on layer {SolidLayer}.");
+
+            ApplyToPrefab(solidPlaceholders.ToArray(), solid, walkable, placeholders[walkableIndex]);
+        }
+
+        /// <summary>
+        /// A mesh carrying only the listed sub-meshes of <paramref name="source"/>, in the order given. Vertices are
+        /// copied wholesale rather than re-indexed: the unreferenced ones cost a few hundred KB in a bundle that is
+        /// already built per-import, and re-indexing is a chance to get the UVs wrong for no benefit anyone can see.
+        /// </summary>
+        private static Mesh BuildSubset(Mesh source, List<int> submeshes, string name)
+        {
+            var mesh = new Mesh { name = name, indexFormat = source.indexFormat };
+            mesh.vertices = source.vertices;
+            mesh.normals = source.normals;
+            mesh.tangents = source.tangents;
+            mesh.uv = source.uv;
+            mesh.uv2 = source.uv2;
+            mesh.colors = source.colors;
+            mesh.subMeshCount = submeshes.Count;
+            for (var i = 0; i < submeshes.Count; i++)
+                mesh.SetTriangles(source.GetTriangles(submeshes[i]), i, calculateBounds: false);
+
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        /// <summary>Write a generated mesh to <paramref name="path"/>, overwriting the existing asset IN PLACE when
+        /// there is one so its GUID survives — the prefab references these by GUID, and replacing the asset would
+        /// leave the shell with a missing mesh on every re-import.</summary>
+        private static Mesh SaveMesh(Mesh mesh, string path)
+        {
+            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (existing == null)
+            {
+                AssetDatabase.CreateAsset(mesh, path);
+                return mesh;
+            }
+
+            EditorUtility.CopySerialized(mesh, existing);
+            EditorUtility.SetDirty(existing);
+            UnityEngine.Object.DestroyImmediate(mesh); // the temporary, never the asset
+            return existing;
+        }
+
+        private static string PlaceholderNameFor(string slot)
+        {
+            foreach (var (candidate, placeholder) in SlotPlaceholders)
+            {
+                if (string.Equals(candidate, slot, StringComparison.OrdinalIgnoreCase))
+                    return placeholder;
+            }
+
+            return null;
         }
 
         /// <summary>The placeholder for an authored slot name, matched on the part after the last underscore so the
@@ -182,15 +277,21 @@ namespace FalseGods.EditorTools
             return null;
         }
 
-        /// <summary>Write the placeholder array onto the prefab's shell renderer. Writes through an open prefab
-        /// stage when there is one: the editor holds that copy in memory and would otherwise save it back over an
-        /// asset-level edit.</summary>
         private static void ApplyToPrefab(Material[] placeholders)
+            => EditPrefab(root => AssignShellMaterials(root, placeholders));
+
+        private static void ApplyToPrefab(Material[] solidPlaceholders, Mesh solid, Mesh walkable, Material walkablePlaceholder)
+            => EditPrefab(root => AssignShellSplit(root, solidPlaceholders, solid, walkable, walkablePlaceholder));
+
+        /// <summary>Run an edit against the arena prefab and save it. Writes through an open prefab stage when there
+        /// is one: the editor holds that copy in memory and would otherwise save it back over an asset-level
+        /// edit.</summary>
+        private static void EditPrefab(Func<GameObject, bool> edit)
         {
             var stage = UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage();
             if (stage != null && string.Equals(stage.assetPath, PrefabPath, StringComparison.Ordinal))
             {
-                if (!AssignShellMaterials(stage.prefabContentsRoot, placeholders))
+                if (!edit(stage.prefabContentsRoot))
                     return;
 
                 UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(stage.scene);
@@ -209,7 +310,7 @@ namespace FalseGods.EditorTools
             var instance = (GameObject)UnityEngine.Object.Instantiate(prefab);
             try
             {
-                if (!AssignShellMaterials(instance, placeholders))
+                if (!edit(instance))
                     return;
 
                 PrefabUtility.SaveAsPrefabAsset(instance, PrefabPath);
@@ -219,6 +320,71 @@ namespace FalseGods.EditorTools
             {
                 UnityEngine.Object.DestroyImmediate(instance);
             }
+        }
+
+        /// <summary>
+        /// Put the sculpt's walkable faces on their own object and layer, and the rest of it on a layer the
+        /// navigation scan never looks at.
+        /// <para>Which faces are walkable is an AUTHORED decision — the ones assigned to the Floor material slot —
+        /// rather than whatever the recast scan decides is flat enough. Two things follow. The walls stop
+        /// contributing their 0.5 m character-radius erosion along every surface they touch, which is what was
+        /// eating the narrow terraces; and the outside of the shell stops generating navigation nobody can reach
+        /// (measured: over half the graph's nodes sat on the cave's exterior roof).</para>
+        /// </summary>
+        private static bool AssignShellSplit(
+            GameObject root, Material[] solidPlaceholders, Mesh solid, Mesh walkable, Material walkablePlaceholder)
+        {
+            var shell = root.transform.Find(ShellPath);
+            if (shell == null)
+            {
+                Debug.LogWarning($"[FalseGods] material sync: the prefab has no {ShellPath}; skipped.");
+                return false;
+            }
+
+            Dress(shell, solid, solidPlaceholders, SolidLayer);
+
+            var walkableTransform = shell.parent.Find("CaveWalkable");
+            if (walkableTransform == null)
+            {
+                var created = new GameObject("CaveWalkable");
+                created.transform.SetParent(shell.parent, worldPositionStays: false);
+                walkableTransform = created.transform;
+            }
+
+            // The two halves are one sculpt cut in two: they must sit on exactly the same transform.
+            walkableTransform.localPosition = shell.localPosition;
+            walkableTransform.localRotation = shell.localRotation;
+            walkableTransform.localScale = shell.localScale;
+            Dress(walkableTransform, walkable, new[] { walkablePlaceholder }, WalkableLayer);
+
+            Debug.Log($"[FalseGods] material sync: {ShellPath} -> layer {SolidLayer} with " +
+                string.Join(", ", solidPlaceholders.Select((m, i) => $"{i}:{(m == null ? "NULL" : m.name)}")) +
+                $"; {WalkablePath} -> layer {WalkableLayer} with " +
+                (walkablePlaceholder == null ? "NULL" : walkablePlaceholder.name) + ".");
+            return true;
+        }
+
+        private static void Dress(Transform target, Mesh mesh, Material[] materials, int layer)
+        {
+            target.gameObject.layer = layer;
+
+            // Not '??': a missing Unity component compares equal to null through the overloaded operator while
+            // still being a real object reference, so the null-coalescing operator would hand back the missing one.
+            var filter = target.GetComponent<MeshFilter>();
+            if (filter == null)
+                filter = target.gameObject.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+
+            var renderer = target.GetComponent<MeshRenderer>();
+            if (renderer == null)
+                renderer = target.gameObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterials = materials;
+
+            var collider = target.GetComponent<MeshCollider>();
+            if (collider == null)
+                collider = target.gameObject.AddComponent<MeshCollider>();
+            collider.sharedMesh = mesh;
+            collider.convex = false;
         }
 
         private static bool AssignShellMaterials(GameObject root, Material[] placeholders)

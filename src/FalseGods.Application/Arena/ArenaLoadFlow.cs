@@ -41,6 +41,12 @@ namespace FalseGods.Application.Arena
     {
         public const string Path = "VisualRoot/CaveShell";
 
+        /// <summary>The sculpt's walkable faces, split off into their own object by the authoring pipeline so they
+        /// can sit on the navigation layer while the rest of the shell stays invisible to the scan. Painted from
+        /// the same rules — it wears the Floor placeholder — and optional: an arena whose sculpt has no Floor slot
+        /// simply has no such child.</summary>
+        public const string WalkablePath = "VisualRoot/CaveWalkable";
+
         // CaveCeilingOther, not CaveCeiling: the pinned donor carrier has no material by the latter name (measured).
         public static readonly IReadOnlyList<SubmeshMaterialRule> SurfaceRules = new[]
         {
@@ -319,9 +325,10 @@ namespace FalseGods.Application.Arena
                 RockDecoration.MaterialName));
         }
 
-        /// <summary>Paint the sculpted cave-wall shell's three height bands (sub-meshes) with the vanilla
-        /// CaveWallBot/Mid/Top materials, reusing the same carrier the surfaces borrow from. Skipped when the arena
-        /// borrows nothing, or when no CaveShell is present (fail-open — the wall shell is optional décor).</summary>
+        /// <summary>Paint the sculpted cave shell's surfaces with the vanilla cave materials, reusing the same
+        /// carrier the surfaces borrow from. The sculpt arrives in two objects — the solid shell and the walkable
+        /// floor split off onto the navigation layer — so both are painted from the same rules. Skipped when the
+        /// arena borrows nothing; an absent object is fail-open (the sculpt is optional décor).</summary>
         private MaterialBorrowResult PaintWallShell(IReadOnlyList<MaterialBorrowRequest> borrowRequests)
         {
             if (borrowRequests.Count == 0)
@@ -330,8 +337,21 @@ namespace FalseGods.Application.Arena
             }
 
             var carrierGuid = borrowRequests[0].CarrierGuid;
-            return _vanillaAssets.PaintSubmeshes(new SubmeshBorrow(
+            var shell = _vanillaAssets.PaintSubmeshes(new SubmeshBorrow(
                 WallShellDecoration.Path, carrierGuid, WallShellDecoration.SurfaceRules));
+            if (!shell.Success)
+            {
+                return shell;
+            }
+
+            var walkable = _vanillaAssets.PaintSubmeshes(new SubmeshBorrow(
+                WallShellDecoration.WalkablePath, carrierGuid, WallShellDecoration.SurfaceRules));
+            if (!walkable.Success)
+            {
+                return walkable;
+            }
+
+            return MaterialBorrowResult.Resolved(shell.Applied + walkable.Applied);
         }
 
         private static IReadOnlyList<MaterialBorrowRequest> BuildMaterialBorrowRequests(
