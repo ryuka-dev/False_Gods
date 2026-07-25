@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using LevelGeneration;
 using Pathfinding;
 using PerfectRandom.Sulfur.Core;
@@ -211,6 +212,40 @@ namespace FalseGods.Probe
                         report.Line($"    y {band.Key,4} .. {band.Key + 2,-4} : {band.Value,6} nodes   areas [{ids}]");
                     }
                 }
+            });
+
+            report.Section("P0 — off-mesh links (the authored jump connections)");
+            report.Try("NodeLink2", () =>
+            {
+                var links = UnityEngine.Object.FindObjectsByType<NodeLink2>(
+                    FindObjectsInactive.Include, FindObjectsSortMode.None);
+
+                report.Value("NodeLink2 components in scene", links.Length);
+                if (links.Length == 0)
+                {
+                    report.Line("  None. Enemies can only reach what the walkable surface itself connects.");
+                    return;
+                }
+
+                // A link that cannot snap to the navmesh is dropped SILENTLY by TryAddLink — the endpoint has to
+                // land within maxSnappingDistance (1 m) of a walkable node. The status on its source is the only
+                // place that failure is visible, and it names which END failed. The field is protected, so this
+                // diagnostic reads it by reflection rather than pretending the API is public.
+                var sourceField = typeof(NodeLink2).GetField("linkSource",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+
+                foreach (var link in links)
+                {
+                    var start = link.StartTransform == null ? "<none>" : link.StartTransform.position.ToString("0.00");
+                    var end = link.EndTransform == null ? "<none>" : link.EndTransform.position.ToString("0.00");
+                    var source = sourceField?.GetValue(link) as OffMeshLinks.OffMeshLinkSource;
+                    var status = source == null ? "not registered (TryAddLink never ran)" : source.status.ToString();
+
+                    report.Line($"  [{link.name}] {start} -> {end}  {(link.oneWay ? "one-way" : "two-way")}  status = {status}");
+                }
+
+                report.Line("  Active = attached. FailedToConnectStart/End = that endpoint was further than 1 m");
+                report.Line("  from a walkable node; move it onto the surface.");
             });
 
             report.Section("P0 — NavMeshCleaner (R5: the flood-fill that erases custom islands)");
