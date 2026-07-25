@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using Pathfinding;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.LevelGeneration;
 using UnityEngine;
@@ -36,9 +37,27 @@ namespace FalseGods.Integration.Sulfur.Arena
     /// level, so there is nothing to clean away.</para>
     /// <para><b>Sealed, single room.</b> No connectors (nothing may attach to us) and no
     /// <c>NextLevelTrigger</c> yet — the exit belongs with the boss-death unlock, not with loading.</para>
+    /// <para><b>Navigation links are wired from authored markers.</b> A recast graph only connects surfaces an
+    /// agent can walk between (climb 0.6 m, slope 45°), so the arena's raised terraces scan as walkable but
+    /// isolated. The game's own answer is an off-mesh link: <c>BuildNavMeshNode</c> re-walks every placed room
+    /// after its scan and calls <c>TryAddLink</c> on each <see cref="NodeLink2"/> the room reports, and an
+    /// <c>AiAgent</c> traversing one <i>jumps</i> it (animator "Jump"/"Land"). The component itself cannot be
+    /// authored into the bundle — the Unity project has no A* reference, and baking a game type is exactly the
+    /// bet this codebase does not take — so the prefab carries plain empty markers and the component is added
+    /// here, at the same point every other game type is attached.</para>
     /// </remarks>
     public static class SulfurArenaRoom
     {
+        /// <summary>Where the authored navigation-link markers live, relative to the arena root. Each child named
+        /// <see cref="LinkMarkerPrefix"/>* is one link: the marker itself is the START (that is what
+        /// <c>NodeLink2.StartTransform</c> reads) and its <see cref="LinkEndChildName"/> child is the END. Both
+        /// ends must sit within a metre of walkable navmesh — <c>TryAddLink</c> snaps with
+        /// <c>maxSnappingDistance = 1</c> and silently drops what it cannot reach.</summary>
+        public const string NavigationLinksPath = "NavigationRoot/NavLinks";
+
+        private const string LinkMarkerPrefix = "Link_";
+        private const string LinkEndChildName = "End";
+
         /// <summary>
         /// Wrap <paramref name="arenaGeometry"/> in a configured <see cref="Room"/> whose player spawn sits at
         /// <paramref name="playerSpawn"/>. The geometry is reparented under the returned room.
@@ -76,6 +95,11 @@ namespace FalseGods.Integration.Sulfur.Arena
 
             arenaGeometry.transform.SetParent(roomObject.transform, worldPositionStays: true);
 
+            // After EmptyEveryBakedList, so the authored links replace the empty array rather than the other way
+            // round; while the room is still inactive, so the components' OnEnable defers to activation like every
+            // other game type attached here.
+            room.nodeLinks = BuildNavigationLinks(arenaGeometry, logger);
+
             var spawnObject = new GameObject("PlayerSpawn");
             spawnObject.transform.SetParent(roomObject.transform, worldPositionStays: false);
             spawnObject.transform.position = playerSpawn;
@@ -92,6 +116,53 @@ namespace FalseGods.Integration.Sulfur.Arena
             logger?.Log($"[arena-room] arena wrapped as a Room; player spawn at "
                 + $"({playerSpawn.x:0.0}, {playerSpawn.y:0.0}, {playerSpawn.z:0.0}).");
             return room;
+        }
+
+        /// <summary>
+        /// Turn the authored link markers into real <see cref="NodeLink2"/> components for the level's navigation
+        /// step to register. Two-way by default: a terrace worth jumping up to is worth jumping down from. A marker
+        /// without an <see cref="LinkEndChildName"/> child is skipped and counted rather than failing the load —
+        /// the arena is playable without its links, only less connected, and an arena that will not load at all is
+        /// the worse outcome.
+        /// </summary>
+        private static NodeLink2[] BuildNavigationLinks(GameObject arenaGeometry, ILogger logger)
+        {
+            var holder = arenaGeometry.transform.Find(NavigationLinksPath);
+            if (holder == null)
+            {
+                return Array.Empty<NodeLink2>();
+            }
+
+            var links = new List<NodeLink2>();
+            var incomplete = 0;
+            foreach (Transform marker in holder)
+            {
+                if (!marker.name.StartsWith(LinkMarkerPrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var end = marker.Find(LinkEndChildName);
+                if (end == null)
+                {
+                    incomplete++;
+                    continue;
+                }
+
+                var link = marker.gameObject.AddComponent<NodeLink2>();
+                link.end = end;
+                link.oneWay = false;
+                links.Add(link);
+            }
+
+            if (links.Count > 0 || incomplete > 0)
+            {
+                logger?.Log($"[arena-room] {links.Count} navigation link(s) wired"
+                    + (incomplete > 0 ? $"; {incomplete} marker(s) skipped with no '{LinkEndChildName}' child" : "")
+                    + ".");
+            }
+
+            return links.ToArray();
         }
 
         /// <summary>
