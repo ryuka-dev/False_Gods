@@ -21,11 +21,12 @@ namespace FalseGods.Application.Arena
 
     /// <summary>
     /// A convention-based paint for hand-authored decoration that carries no artifact rows: paint every renderer
-    /// directly under <see cref="ParentPath"/> whose GameObject name starts with <see cref="ChildNamePrefix"/>
-    /// (sub-material <see cref="SubMaterialIndex"/>) with the vanilla material <see cref="MaterialName"/> from
-    /// carrier <see cref="CarrierGuid"/>. Used for the decoration rocks — excluded from the content hash, so their
-    /// count and placement are free to change without a rehash — via the same borrow machinery, targeted by naming
-    /// convention rather than a hashed per-node row.
+    /// anywhere under <see cref="ParentPath"/> — at any depth, so the author is free to group décor under empty
+    /// holder objects — whose GameObject name starts with <see cref="ChildNamePrefix"/> (sub-material
+    /// <see cref="SubMaterialIndex"/>) with the vanilla material <see cref="MaterialName"/> from carrier
+    /// <see cref="CarrierGuid"/>. Used for the decoration rocks — excluded from the content hash, so their count and
+    /// placement are free to change without a rehash — via the same borrow machinery, targeted by naming convention
+    /// rather than a hashed per-node row.
     /// </summary>
     public sealed record MaterialConventionPaint(
         string ParentPath,
@@ -34,17 +35,27 @@ namespace FalseGods.Application.Arena
         string CarrierGuid,
         string MaterialName);
 
+    /// <summary>One sub-mesh's borrow, keyed by the placeholder material the authored mesh already wears rather
+    /// than by sub-mesh index. <see cref="PlaceholderName"/> is matched against the renderer's current material
+    /// name; a match is repainted with <see cref="VanillaMaterialName"/> from the carrier.</summary>
+    public sealed record SubmeshMaterialRule(string PlaceholderName, string VanillaMaterialName);
+
     /// <summary>
-    /// Paint the sub-materials of one hand-authored décor renderer (found at <see cref="TargetPath"/>) with a list
-    /// of vanilla materials from carrier <see cref="CarrierGuid"/>: sub-material <c>i</c> gets
-    /// <c>MaterialNames[i]</c>. Used for the sculpted cave-wall shell, whose three height bands borrow
-    /// CaveWallBot/Mid/Top. Like the other décor paints it targets an object excluded from the content hash, so the
-    /// mesh is free to change without a rehash. Absent target is a success with zero applied (optional décor).
+    /// Paint the sub-materials of one hand-authored décor renderer (found at <see cref="TargetPath"/>) with vanilla
+    /// materials from carrier <see cref="CarrierGuid"/>. Used for the sculpted cave shell, whose wall bands, floor
+    /// and ceiling each borrow a different vanilla cave material. Like the other décor paints it targets an object
+    /// excluded from the content hash, so the mesh is free to change without a rehash. Absent target is a success
+    /// with zero applied (optional décor).
+    /// <para><b>Matched by name, never by index.</b> Unity's FBX importer orders sub-meshes by the order faces
+    /// first use each material, <i>not</i> by the authoring tool's material-slot order — so a re-sculpt that
+    /// merely reorders faces silently permutes the sub-mesh indices. Binding each borrow to the placeholder
+    /// material the authored mesh already carries makes the paint independent of that order; keeping the
+    /// placeholders aligned with the imported sub-meshes is the authoring pipeline's job.</para>
     /// </summary>
     public sealed record SubmeshBorrow(
         string TargetPath,
         string CarrierGuid,
-        IReadOnlyList<string> MaterialNames);
+        IReadOnlyList<SubmeshMaterialRule> Rules);
 
     /// <summary>The outcome of resolving the material borrows: how many were applied, or the fail-closed reason.
     /// Failure is an outcome, not an exception — the load flow tears down on it.</summary>

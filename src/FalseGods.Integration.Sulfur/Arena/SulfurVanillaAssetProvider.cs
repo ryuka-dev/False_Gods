@@ -119,13 +119,13 @@ namespace FalseGods.Integration.Sulfur.Arena
                 return MaterialBorrowResult.Failed($"decoration parent path '{paint.ParentPath}' not found in the realized arena");
 
             var applied = 0;
-            foreach (Transform child in parent)
+            // Any depth below the parent, not just its direct children: the author groups décor under empty holder
+            // objects in the prefab (a "Rock" folder per batch), which is ordinary Unity authoring and must not
+            // silently cost those pieces their paint. Holders are unaffected — they carry no Renderer, and their
+            // own names do not match the prefix.
+            foreach (var renderer in parent.GetComponentsInChildren<Renderer>(includeInactive: true))
             {
-                if (!child.name.StartsWith(paint.ChildNamePrefix, StringComparison.Ordinal))
-                    continue;
-
-                var renderer = child.GetComponent<Renderer>();
-                if (renderer == null)
+                if (!renderer.gameObject.name.StartsWith(paint.ChildNamePrefix, StringComparison.Ordinal))
                     continue;
 
                 var materials = renderer.sharedMaterials;
@@ -143,7 +143,7 @@ namespace FalseGods.Integration.Sulfur.Arena
 
         public MaterialBorrowResult PaintSubmeshes(SubmeshBorrow borrow)
         {
-            if (borrow == null || borrow.MaterialNames == null || borrow.MaterialNames.Count == 0)
+            if (borrow == null || borrow.Rules == null || borrow.Rules.Count == 0)
                 return MaterialBorrowResult.Resolved(0);
 
             var root = _realizedRoot();
@@ -162,16 +162,27 @@ namespace FalseGods.Integration.Sulfur.Arena
             if (carrier == null)
                 return MaterialBorrowResult.Failed($"decoration carrier '{borrow.CarrierGuid}' did not load: {carrierError}");
 
+            // Each sub-mesh is matched by the placeholder material it already wears, so the paint survives Unity
+            // reordering sub-meshes on re-import. A slot whose placeholder no name in the rules is counted and left
+            // alone: an unpainted surface is visible in-game and does not deserve failing the whole arena load.
             var materials = renderer.sharedMaterials;
-            var count = Math.Min(materials.Length, borrow.MaterialNames.Count);
             var applied = 0;
-            for (var i = 0; i < count; i++)
+            var unmatched = new List<string>();
+            for (var i = 0; i < materials.Length; i++)
             {
-                var material = FindMaterial(carrier, borrow.MaterialNames[i], out var materialError);
+                var placeholder = materials[i] == null ? null : materials[i].name;
+                var rule = FindRule(borrow.Rules, placeholder);
+                if (rule == null)
+                {
+                    unmatched.Add($"{i}:'{placeholder ?? "<none>"}'");
+                    continue;
+                }
+
+                var material = FindMaterial(carrier, rule.VanillaMaterialName, out var materialError);
                 if (material == null)
                 {
                     return MaterialBorrowResult.Failed(
-                        $"decoration submaterial '{borrow.MaterialNames[i]}' in carrier '{borrow.CarrierGuid}': {materialError}");
+                        $"decoration submaterial '{rule.VanillaMaterialName}' in carrier '{borrow.CarrierGuid}': {materialError}");
                 }
 
                 materials[i] = material;
@@ -179,8 +190,25 @@ namespace FalseGods.Integration.Sulfur.Arena
             }
 
             renderer.sharedMaterials = materials; // reassign: the array getter returns a copy
-            _logger?.Log($"[vanilla-material] {applied} submesh paint(s) on '{borrow.TargetPath}'");
+            _logger?.Log($"[vanilla-material] {applied} submesh paint(s) on '{borrow.TargetPath}'"
+                + (unmatched.Count > 0 ? $"; {unmatched.Count} slot(s) with no rule: {string.Join(", ", unmatched)}" : ""));
             return MaterialBorrowResult.Resolved(applied);
+        }
+
+        /// <summary>The rule whose placeholder name the slot's current material carries, or null. Exact, ordinal
+        /// match: these are asset names on both sides, not user text.</summary>
+        private static SubmeshMaterialRule FindRule(IReadOnlyList<SubmeshMaterialRule> rules, string placeholderName)
+        {
+            if (string.IsNullOrEmpty(placeholderName))
+                return null;
+
+            for (var i = 0; i < rules.Count; i++)
+            {
+                if (string.Equals(rules[i].PlaceholderName, placeholderName, StringComparison.Ordinal))
+                    return rules[i];
+            }
+
+            return null;
         }
 
         public void Release()

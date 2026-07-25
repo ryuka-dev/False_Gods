@@ -17,7 +17,9 @@ namespace FalseGods.Application.Arena
 
     /// <summary>The hand-authored decoration rocks are excluded from the content hash (like the lighting), so they
     /// carry no artifact rows and their count/placement change freely without a rehash. At load they are painted by
-    /// naming convention with the cave rock material, reusing the same donor carrier the surfaces borrow from.
+    /// naming convention with the cave rock material, reusing the same donor carrier the surfaces borrow from —
+    /// every <c>Rock_*</c> renderer anywhere under <see cref="ParentPath"/>, at any depth, so grouping rocks under
+    /// empty holder objects in the prefab is free.
     /// PoC-arena content constants, grouped here like <see cref="ArenaMarkerKinds"/>.</summary>
     public static class RockDecoration
     {
@@ -27,15 +29,27 @@ namespace FalseGods.Application.Arena
         public const int SubMaterialIndex = 0;
     }
 
-    /// <summary>The hand-sculpted cave-wall shell (VisualRoot/CaveShell) is hand-authored presentation excluded
-    /// from the content hash; at load its three height-band sub-materials are painted with the vanilla cave-wall
-    /// materials, in sub-mesh order, from the same donor carrier the surfaces borrow from — so the wall gets the
-    /// game's real MasterShader look (correct lighting/shading) over the mesh's own UVs + face assignment. PoC-arena
-    /// content constants, grouped here like <see cref="ArenaMarkerKinds"/>.</summary>
+    /// <summary>The hand-sculpted cave shell (VisualRoot/CaveShell) is hand-authored presentation excluded from the
+    /// content hash; at load its sub-materials are painted with the vanilla cave materials, in sub-mesh order, from
+    /// the same donor carrier the surfaces borrow from — so the sculpt gets the game's real MasterShader look
+    /// (correct lighting/shading) over the mesh's own UVs + face assignment.
+    /// <para>Each surface is identified by the PLACEHOLDER material the authored mesh wears, not by sub-mesh
+    /// index — see <see cref="SubmeshBorrow"/> for why index binding is unsafe here. Listing a placeholder the
+    /// mesh does not carry is harmless: only what is present gets painted.</para>
+    /// PoC-arena content constants, grouped here like <see cref="ArenaMarkerKinds"/>.</summary>
     public static class WallShellDecoration
     {
         public const string Path = "VisualRoot/CaveShell";
-        public static readonly string[] BandMaterialNames = { "CaveWallBot", "CaveWallMid", "CaveWallTop" };
+
+        // CaveCeilingOther, not CaveCeiling: the pinned donor carrier has no material by the latter name (measured).
+        public static readonly IReadOnlyList<SubmeshMaterialRule> SurfaceRules = new[]
+        {
+            new SubmeshMaterialRule("FG_WallBot", "CaveWallBot"),
+            new SubmeshMaterialRule("FG_WallMid", "CaveWallMid"),
+            new SubmeshMaterialRule("FG_WallTop", "CaveWallTop"),
+            new SubmeshMaterialRule("FG_Floor", "CaveFloor"),
+            new SubmeshMaterialRule("FG_Ceiling", "CaveCeilingOther"),
+        };
     }
 
     /// <summary>Where the local arena load stands. Failure at any step returns the flow to
@@ -317,7 +331,7 @@ namespace FalseGods.Application.Arena
 
             var carrierGuid = borrowRequests[0].CarrierGuid;
             return _vanillaAssets.PaintSubmeshes(new SubmeshBorrow(
-                WallShellDecoration.Path, carrierGuid, WallShellDecoration.BandMaterialNames));
+                WallShellDecoration.Path, carrierGuid, WallShellDecoration.SurfaceRules));
         }
 
         private static IReadOnlyList<MaterialBorrowRequest> BuildMaterialBorrowRequests(
