@@ -37,6 +37,7 @@ namespace FalseGods.Core.Bosses
         private readonly IEncounterParticipantQuery _participants;
         private readonly List<IBossDomainEvent> _events = new List<IBossDomainEvent>();
         private readonly List<DamageRequest> _damageRequests = new List<DamageRequest>();
+        private readonly List<SummonRequest> _summonRequests = new List<SummonRequest>();
 
         private readonly IReadOnlyList<BossAnchor> _anchors;
 
@@ -411,11 +412,21 @@ namespace FalseGods.Core.Bosses
                 Id, target, _definition.Stations[target].AnchorIndex, Position, PositionHeight));
         }
 
-        /// <summary>Arriving: visible again at the new station, still invulnerable until the window ends.</summary>
+        /// <summary>
+        /// Arriving: visible again at the new station, still invulnerable until the window ends — and whatever it
+        /// came here to do happens now. Summoning on arrival rather than on departure is the point of the trip:
+        /// the minions appear with the boss, in the room it just moved to.
+        /// </summary>
         private void EnterAppearing(float now)
         {
             Activity = BossActivity.Appearing;
             _activityEnteredTime = now;
+
+            var stations = _definition.Stations;
+            if (StationIndex >= 0 && StationIndex < stations.Count && stations[StationIndex].SummonCount > 0)
+            {
+                _summonRequests.Add(new SummonRequest(StationIndex, stations[StationIndex].SummonCount));
+            }
         }
 
         /// <summary>Back in the fight — and straight out again if health has already reached the station after
@@ -450,6 +461,23 @@ namespace FalseGods.Core.Bosses
             Position = anchor.Ground;
             PositionHeight = anchor.Height;
             return true;
+        }
+
+        /// <summary>
+        /// Take the summon commands accumulated since the last drain, clearing the buffer. Kept separate from
+        /// <see cref="DrainEvents"/> for the same reason <see cref="DrainDamageRequests"/> is — see
+        /// <see cref="SummonRequest"/>. The caller owns the returned list.
+        /// </summary>
+        public IReadOnlyList<SummonRequest> DrainSummonRequests()
+        {
+            if (_summonRequests.Count == 0)
+            {
+                return Array.Empty<SummonRequest>();
+            }
+
+            var drained = _summonRequests.ToArray();
+            _summonRequests.Clear();
+            return drained;
         }
 
         private void SelectAttack(float now, SimVector2 targetPosition)

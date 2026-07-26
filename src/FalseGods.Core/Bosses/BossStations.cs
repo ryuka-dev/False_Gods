@@ -46,8 +46,14 @@ namespace FalseGods.Core.Bosses
     /// </remarks>
     public readonly struct BossStation : IEquatable<BossStation>
     {
-        public BossStation(int anchorIndex, float enterAtHealthFraction)
+        public BossStation(int anchorIndex, float enterAtHealthFraction, int summonCount = 0)
         {
+            if (summonCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(summonCount), summonCount, "A station cannot summon a negative number of minions.");
+            }
+
             if (anchorIndex < 0)
             {
                 throw new ArgumentOutOfRangeException(
@@ -65,6 +71,7 @@ namespace FalseGods.Core.Bosses
 
             AnchorIndex = anchorIndex;
             EnterAtHealthFraction = enterAtHealthFraction;
+            SummonCount = summonCount;
         }
 
         /// <summary>Which of the room's authored anchors this station stands at.</summary>
@@ -74,13 +81,21 @@ namespace FalseGods.Core.Bosses
         /// where the boss starts.</summary>
         public float EnterAtHealthFraction { get; }
 
+        /// <summary>How many minions arriving here summons, or 0 for a station the boss merely stands at. This is
+        /// what makes a station somewhere it goes to <i>do</i> something rather than just somewhere it is.</summary>
+        public int SummonCount { get; }
+
         public bool Equals(BossStation other) =>
-            AnchorIndex == other.AnchorIndex && EnterAtHealthFraction.Equals(other.EnterAtHealthFraction);
+            AnchorIndex == other.AnchorIndex
+            && EnterAtHealthFraction.Equals(other.EnterAtHealthFraction)
+            && SummonCount == other.SummonCount;
 
         public override bool Equals(object? obj) => obj is BossStation other && Equals(other);
 
         public override int GetHashCode() => (AnchorIndex * 397) ^ EnterAtHealthFraction.GetHashCode();
 
-        public override string ToString() => $"anchor {AnchorIndex} at <= {EnterAtHealthFraction:P0} health";
+        public override string ToString() => SummonCount > 0
+            ? $"anchor {AnchorIndex} at <= {EnterAtHealthFraction:P0} health, summoning {SummonCount}"
+            : $"anchor {AnchorIndex} at <= {EnterAtHealthFraction:P0} health";
     }
 }

@@ -68,8 +68,12 @@ namespace FalseGods.Plugin
         private const float GateTimeoutSeconds = 30f;
 
         /// <summary>
-        /// The first boss's itinerary: it holds its home anchor, drops to the second one to act, returns, does it
-        /// once more, and comes home to die. Read against the arena's authored anchors by index — anchor 0 is the
+        /// How many minions a summoning station calls up. First-pass number, tuned in game.
+        private const int MinionsPerSummon = 4;
+
+        /// <summary>
+        /// The first boss's itinerary: it holds its home anchor, drops to the second one to summon, returns, does
+        /// it once more, and comes home to die. Read against the arena's authored anchors by index — anchor 0 is the
         /// first child of the room's anchor group, anchor 1 the second.
         /// </summary>
         /// <remarks>
@@ -81,9 +85,9 @@ namespace FalseGods.Plugin
         private static readonly IReadOnlyList<BossStation> Itinerary = new[]
         {
             new BossStation(anchorIndex: 0, enterAtHealthFraction: 1.00f),
-            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.80f),
+            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.80f, summonCount: MinionsPerSummon),
             new BossStation(anchorIndex: 0, enterAtHealthFraction: 0.60f),
-            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.40f),
+            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.40f, summonCount: MinionsPerSummon),
             new BossStation(anchorIndex: 0, enterAtHealthFraction: 0.20f),
         };
 
@@ -94,6 +98,7 @@ namespace FalseGods.Plugin
         private readonly SulfurLocalPlayer _localPlayer;
         private readonly string _contentDirectory;
         private readonly float _maxClientHitDamage;
+        private readonly IMinionSpawnPort _minionSpawns;
 
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
@@ -117,15 +122,20 @@ namespace FalseGods.Plugin
         // fight there, so tearing the encounter down must not take the level's start area with it.
         private bool _ownsArena;
         private ArenaManifest? _manifest;
+        private LoadedArena? _arenaContent; // the room's authored content, for as long as the fight uses it
 
         private EncounterId _encounter;
         private WorldPosition _originWire;
         private BossActivity _lastReportedActivity = BossActivity.Dead; // forces the first real activity to report
         private int _lastReportedPending = -1;
 
-        public LocalEncounterController(ILogger logger, float maxClientHitDamage = DefaultMaxClientHitDamage)
+        public LocalEncounterController(
+            ILogger logger,
+            IMinionSpawnPort minions,
+            float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
             _logger = logger;
+            _minionSpawns = minions ?? throw new ArgumentNullException(nameof(minions));
             _maxClientHitDamage = maxClientHitDamage;
             // The single-player Core-port bundle. Clock and roster are stateless and shared across raises; the RNG is
             // reseeded per raise so successive fights vary.
@@ -358,6 +368,8 @@ namespace FalseGods.Plugin
             CleanupGate();
             _hitIntake?.Dispose();
             _hitIntake = null;
+            _minionSpawns.DespawnAll();
+            _arenaContent = null;
             _damageBinding?.Dispose();
             _damageBinding = null;
             _presentation?.Dispose();
@@ -391,7 +403,7 @@ namespace FalseGods.Plugin
             // boss has no itinerary and simply stands where it spawns.
             var anchors = ToBossAnchors(arena.BossAnchors);
             var definition = new BossDefinition(
-                maxHealth: 5000,
+                maxHealth: 50000,
                 phaseTwoHealthFraction: 0.5f,
                 moveSpeed: 0f, // anchored: the itinerary decides where it stands, so it must not also walk
                 idleSeconds: 2.0f,
@@ -416,6 +428,7 @@ namespace FalseGods.Plugin
             // itinerary puts it at its first station, which need not be the authored enemy spawn or even on the
             // floor. The spawn event waits in the simulation's buffer and is drained by the Present() below, once
             // presentation and replication are both attached.
+            _arenaContent = arena;
             var bossSpawn = arena.BossSpawn;
             _boss.Spawn(new SimVector2(bossSpawn.X, bossSpawn.Z), bossSpawn.Y);
 
@@ -517,6 +530,33 @@ namespace FalseGods.Plugin
                 + $"({_boss.Health}/{_boss.MaxHealth} hp){pending}");
         }
 
+        /// <summary>
+        /// Put the boss's summons in the room. The places come from the arena, not from the boss: the boss asks
+        /// for a number, the room decides where they can stand. Asking for more than the room authored wraps
+        /// around its spawn points rather than dropping the extras — a room with two places can still be asked
+        /// for four minions.
+        /// </summary>
+        private void Summon(SummonRequest request)
+        {
+            var places = _arenaContent?.MinionSpawns;
+            if (places is null || places.Count == 0)
+            {
+                _logger?.LogWarning($"[minion] station {request.StationIndex} summons {request.Count}, but the "
+                    + "room authored no minion spawn points; nothing summoned.");
+                return;
+            }
+
+            var at = new ArenaWorldPoint[request.Count];
+            for (var i = 0; i < request.Count; i++)
+            {
+                at[i] = places[i % places.Count];
+            }
+
+            _logger?.Log($"[minion] station {request.StationIndex} summons {request.Count} at "
+                + $"{places.Count} authored place(s).");
+            _minionSpawns.Summon(at);
+        }
+
         /// <summary>Turn the room's authored anchor world positions into the simulation's ground-plus-height form:
         /// the fight is reasoned about on the ground plane, and the height rides along as placement.</summary>
         private static IReadOnlyList<BossAnchor> ToBossAnchors(IReadOnlyList<ArenaWorldPoint> authored)
@@ -555,7 +595,8 @@ namespace FalseGods.Plugin
                     .Append($"#{i} ({anchor.X:0.0}, {anchor.Y:0.0}, {anchor.Z:0.0})");
             }
 
-            _logger?.Log($"[boss-content] {size}; {arena.BossAnchors.Count} authored anchor(s): {places}");
+            _logger?.Log($"[boss-content] {size}; {arena.BossAnchors.Count} authored anchor(s): {places}; "
+                + $"{arena.MinionSpawns.Count} minion spawn point(s)");
         }
 
         /// <summary>
@@ -620,6 +661,12 @@ namespace FalseGods.Plugin
             if (damageRequests.Count > 0)
             {
                 ApplyOrDeferPlayerDamage(damageRequests);
+            }
+
+            var summons = _boss.DrainSummonRequests();
+            for (var i = 0; i < summons.Count; i++)
+            {
+                Summon(summons[i]);
             }
 
             var arenaEvents = _arena.DrainEvents();

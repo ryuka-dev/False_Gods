@@ -238,7 +238,10 @@ namespace FalseGods.Plugin
 
             // When a hijacked level left our arena standing, a raise fights in that one instead of loading a
             // second copy of the same content on top of itself.
-            _boss = new LocalEncounterController(_log, _maxClientHitDamage.Value) { LevelArena = _levelArena };
+            // Minions are the game's own units, spawned through the game's own entry point; the plugin is the
+            // behaviour whose lifetime scopes those asynchronous loads.
+            _boss = new LocalEncounterController(
+                _log, new SulfurMinionSpawnPort(this, _log), _maxClientHitDamage.Value) { LevelArena = _levelArena };
 
             // Subscribe before any adapter can load (their hard BepInDependency on this GUID guarantees the order),
             // so a registration always lands in an initialized seam. Composition changes are applied in Update, in

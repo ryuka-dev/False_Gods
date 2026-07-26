@@ -33,6 +33,10 @@ namespace FalseGods.Application.Arena
         /// <summary>A marker whose <b>scale</b> is the boss's authored size. Its position is not used — the boss
         /// stands at an anchor, not here.</summary>
         public const string BodyPath = "GameplayRoot/BossBody";
+
+        /// <summary>Every child is a place the boss's minions can be summoned to. Put them where the room's shape
+        /// is worth using — a terrace an enemy has to come down from is a different fight than the floor.</summary>
+        public const string MinionSpawnGroupPath = "GameplayRoot/MinionSpawns";
     }
 
     /// <summary>The hand-authored decoration rocks are excluded from the content hash (like the lighting), so they
@@ -100,13 +104,16 @@ namespace FalseGods.Application.Arena
     /// authored none.</param>
     /// <param name="BossSize">The authored boss size, or 0 when the room authored none — the presentation keeps
     /// its own default rather than shrinking the boss to nothing.</param>
+    /// <param name="MinionSpawns">The authored places minions are summoned to, in authored order; empty when the
+    /// room authored none, in which case a boss that summons simply has nowhere to put them.</param>
     public sealed record LoadedArena(
         ArenaWorldPoint Origin,
         ArenaWorldPoint PlayerSpawn,
         ArenaWorldPoint BossSpawn,
         int NavWalkableNodes,
         IReadOnlyList<ArenaWorldPoint> BossAnchors,
-        float BossSize);
+        float BossSize,
+        IReadOnlyList<ArenaWorldPoint> MinionSpawns);
 
     /// <summary>The outcome of <see cref="ArenaLoadFlow.Realize"/>: the peer's own validated
     /// <see cref="ArenaManifest"/> (the <c>ArenaReady</c> payload) and the realized arena, or the fail-closed
@@ -243,7 +250,7 @@ namespace FalseGods.Application.Arena
                 origin,
                 parityPaths,
                 new[] { playerPath, bossPath, BossRoomContent.BodyPath },
-                new[] { BossRoomContent.AnchorGroupPath });
+                new[] { BossRoomContent.AnchorGroupPath, BossRoomContent.MinionSpawnGroupPath });
             if (!realized.Success)
             {
                 return Fail($"arena realization failed: {realized.Error ?? "unknown"}");
@@ -304,8 +311,9 @@ namespace FalseGods.Application.Arena
                 player.WorldPosition,
                 boss.WorldPosition,
                 nav.WalkableNodesApplied,
-                CollectBossAnchors(realized.Markers),
-                ReadBossSize(realized.Markers));
+                CollectGroup(realized.Markers, BossRoomContent.AnchorGroupPath),
+                ReadBossSize(realized.Markers),
+                CollectGroup(realized.Markers, BossRoomContent.MinionSpawnGroupPath));
             Stage = ArenaLoadStage.Realized;
             return new ArenaRealizeResult(true, null, Manifest, Arena);
         }
@@ -416,21 +424,22 @@ namespace FalseGods.Application.Arena
             return requests;
         }
 
-        /// <summary>The authored places the boss may stand, in authored order — the members of the anchor group,
-        /// which the realization reports under paths prefixed by the group's own.</summary>
-        private static IReadOnlyList<ArenaWorldPoint> CollectBossAnchors(IReadOnlyList<RealizedMarker> markers)
+        /// <summary>The members of one authored marker group, in authored order — the realization reports them
+        /// under paths prefixed by the group's own.</summary>
+        private static IReadOnlyList<ArenaWorldPoint> CollectGroup(
+            IReadOnlyList<RealizedMarker> markers, string groupPath)
         {
-            var prefix = BossRoomContent.AnchorGroupPath + "/";
-            var anchors = new List<ArenaWorldPoint>();
+            var prefix = groupPath + "/";
+            var points = new List<ArenaWorldPoint>();
             for (var i = 0; i < markers.Count; i++)
             {
                 if (markers[i].Path.StartsWith(prefix, StringComparison.Ordinal))
                 {
-                    anchors.Add(markers[i].WorldPosition);
+                    points.Add(markers[i].WorldPosition);
                 }
             }
 
-            return anchors;
+            return points;
         }
 
         /// <summary>The authored boss size: the uniform scale of the body marker. A non-uniform or non-positive

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using FalseGods.Core.Bosses;
+using FalseGods.Core.Bosses.Combat;
 using FalseGods.Core.Bosses.Events;
 using FalseGods.Core.Simulation;
 using Xunit;
@@ -311,6 +312,91 @@ namespace FalseGods.CoreTests
             Assert.Equal(1, boss.StationIndex);
             Assert.Single(events.OfType<BossRelocated>());
         }
+
+        // ---------------------------------------------------------------- summons
+
+        [Fact]
+        public void A_station_that_summons_asks_on_arrival_not_on_leaving()
+        {
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness, Summoning());
+
+            boss.ApplyDamage(21); // reaches station 1, which summons
+            Assert.Equal(BossActivity.Vanishing, boss.Activity);
+            Assert.Empty(boss.DrainSummonRequests()); // not while it is still leaving
+
+            harness.Step(0.5f); // hidden: the move happens, still nothing summoned
+            Assert.Equal(BossActivity.Hidden, boss.Activity);
+            Assert.Empty(boss.DrainSummonRequests());
+
+            harness.Step(0.7f); // arriving: the minions come with it
+            Assert.Equal(BossActivity.Appearing, boss.Activity);
+            var summon = Assert.Single(boss.DrainSummonRequests());
+            Assert.Equal(1, summon.StationIndex);
+            Assert.Equal(3, summon.Count);
+        }
+
+        [Fact]
+        public void A_station_that_does_not_summon_asks_for_nothing()
+        {
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness, Summoning());
+
+            boss.ApplyDamage(21);                 // station 1: summons
+            RunRelocation(harness);
+            boss.DrainSummonRequests();
+
+            boss.ApplyDamage(20);                 // 79 -> 59: station 2, which does not
+            var summons = new List<SummonRequest>();
+            for (var i = 0; i < 6; i++)
+            {
+                harness.Step(0.7f);
+                summons.AddRange(boss.DrainSummonRequests());
+            }
+
+            Assert.Empty(summons);
+        }
+
+        [Fact]
+        public void Summons_are_commands_and_never_reach_the_event_stream()
+        {
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness, Summoning());
+
+            boss.ApplyDamage(21);
+            var events = RunRelocation(harness);
+
+            // They are drained separately on purpose: a summon is a command to the world, not a boss-state fact
+            // to render or replicate, and the presentation/wire mappers reject anything they do not know.
+            Assert.NotEmpty(boss.DrainSummonRequests());
+            Assert.Single(events.OfType<BossRelocated>());
+            Assert.DoesNotContain(events, e => e.GetType().Name.Contains("Summon"));
+        }
+
+        [Fact]
+        public void A_station_cannot_summon_a_negative_number()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => new BossStation(0, 1f, summonCount: -1));
+        }
+
+        private static BossDefinition Summoning() => new BossDefinition(
+            maxHealth: 100,
+            phaseTwoHealthFraction: 0.5f,
+            moveSpeed: 0f,
+            idleSeconds: 1f,
+            telegraphSeconds: 1f,
+            commitSeconds: 0.5f,
+            recoverSeconds: 1f,
+            weakPointDamageMultiplier: 1,
+            attackDamage: 10,
+            aimedHitRadius: 2f,
+            areaHitRadius: 5f,
+            stations: new[]
+            {
+                new BossStation(0, 1.00f),
+                new BossStation(1, 0.80f, summonCount: 3),
+                new BossStation(0, 0.60f),
+            });
 
         // ---------------------------------------------------------------- definition validation
 
