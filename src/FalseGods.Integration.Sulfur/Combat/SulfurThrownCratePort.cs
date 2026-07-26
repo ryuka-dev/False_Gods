@@ -121,6 +121,21 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         public int Resting => CountWhere(phase => phase == Phase.Resting);
 
+        public int RestingOn(CratePileId pile)
+        {
+            var total = 0;
+            for (var index = 0; index < _crates.Count; index++)
+            {
+                var crate = _crates[index];
+                if (crate.Phase == Phase.Resting && crate.Pile == pile && crate.Unit != null)
+                {
+                    total++;
+                }
+            }
+
+            return total;
+        }
+
         private int CountWhere(Func<Phase, bool> predicate)
         {
             var total = 0;
@@ -329,7 +344,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public bool Drop(ArenaWorldPoint at)
+        public bool Drop(ArenaWorldPoint at, CratePileId pile)
         {
             if (!Prepare())
             {
@@ -357,8 +372,9 @@ namespace FalseGods.Integration.Sulfur.Combat
                     unit.Rigidbody.useGravity = true;
                 }
 
-                // A new crate is resting by default — the game's physics owns it until it is lifted.
-                _crates.Add(new ManagedCrate(unit, breakable));
+                // A new crate is resting by default — the game's physics owns it until it is lifted — and belongs
+                // to the pile it was dropped onto, which is what decides whether the boss may ever fire it.
+                _crates.Add(new ManagedCrate(unit, breakable) { Pile = pile });
                 return true;
             }
             catch (Exception exception)
@@ -372,19 +388,21 @@ namespace FalseGods.Integration.Sulfur.Combat
         // the choice is independent of where a crate lands within its slice.
         private const int LeadChoiceSalt = 40009;
 
-        public int LaunchVolley(ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape)
+        public int LaunchVolley(
+            CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape)
         {
             if (!Prepare())
             {
                 return 0;
             }
 
-            // Only crates already resting on the pile are lifted; a crate already in the air stays there.
+            // Only crates already resting ON THIS PILE are lifted: a crate in the air stays there, and one still
+            // standing at a production point is not the boss's to fire — somebody has to bring it first.
             var chosen = new List<ManagedCrate>();
             for (var index = 0; index < _crates.Count && chosen.Count < shape.Count; index++)
             {
                 var candidate = _crates[index];
-                if (candidate.Phase == Phase.Resting && candidate.Unit != null)
+                if (candidate.Phase == Phase.Resting && candidate.Pile == pile && candidate.Unit != null)
                 {
                     chosen.Add(candidate);
                 }
@@ -1055,6 +1073,10 @@ namespace FalseGods.Integration.Sulfur.Combat
             /// methods below are the only things that move it on, so a phase can never be entered without its
             /// motion being set up in the same step.</summary>
             public Phase Phase { get; private set; }
+
+            /// <summary>Which heap this crate belongs to while it rests, and therefore whether the boss may fire
+            /// it. Meaningless once it is in the air — it is nobody's pile then, and it never rests again.</summary>
+            public CratePileId Pile { get; set; }
 
             /// <summary>Time spent in the current phase's motion; reset when a phase begins.</summary>
             public float Elapsed { get; set; }

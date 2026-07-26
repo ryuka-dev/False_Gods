@@ -1,5 +1,6 @@
 using System;
 using FalseGods.Application.Replication;
+using FalseGods.Core.Bosses.Combat;
 using FalseGods.Protocol.Wire;
 using FalseGods.RuntimeContracts.Arena;
 using FalseGods.RuntimeContracts.Multiplayer;
@@ -41,23 +42,24 @@ namespace FalseGods.Application.Combat
             _channel.Received += OnReceived;
         }
 
-        /// <summary>The host dropped a crate; do the same here.</summary>
-        public Action<ArenaWorldPoint>? OnDropped { get; set; }
+        /// <summary>The host dropped a crate onto a pile; do the same here.</summary>
+        public Action<ArenaWorldPoint, CratePileId>? OnDropped { get; set; }
 
         /// <summary>The host threw a crate; throw the same one here.</summary>
         public Action<ArenaWorldPoint, ArenaWorldPoint, float, float>? OnThrown { get; set; }
 
-        /// <summary>The host fired a volley; compute the same one here from its shape.</summary>
-        public Action<ArenaWorldPoint, ArenaWorldPoint, CrateVolleyShape>? OnVolleyFired { get; set; }
+        /// <summary>The host fired a volley off a pile; compute the same one here from its shape.</summary>
+        public Action<CratePileId, ArenaWorldPoint, ArenaWorldPoint, CrateVolleyShape>? OnVolleyFired { get; set; }
 
         public void Dispose() => _channel.Received -= OnReceived;
 
-        /// <summary>Host: tell every client what was just dropped. A client calling this sends nothing.</summary>
-        public void BroadcastDropped(ArenaWorldPoint at)
+        /// <summary>Host: tell every client what was just dropped, and onto which pile. A client calling this sends
+        /// nothing.</summary>
+        public void BroadcastDropped(ArenaWorldPoint at, CratePileId pile)
         {
             if (IsHosting)
             {
-                Broadcast(EncounterCodec.Encode(new CrateDropped(ToWire(at))));
+                Broadcast(EncounterCodec.Encode(new CrateDropped(ToWire(at), (int)pile.Kind, pile.Index)));
             }
         }
 
@@ -72,7 +74,8 @@ namespace FalseGods.Application.Combat
         }
 
         /// <summary>Host: tell every client the volley's inputs, which is the whole volley.</summary>
-        public void BroadcastVolley(ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape)
+        public void BroadcastVolley(
+            CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape)
         {
             if (!IsHosting)
             {
@@ -82,6 +85,8 @@ namespace FalseGods.Application.Combat
             Broadcast(EncounterCodec.Encode(new CrateVolleyFired(
                 ToWire(currentCenter),
                 ToWire(leadCenter),
+                (int)pile.Kind,
+                pile.Index,
                 shape.Seed,
                 shape.Count,
                 shape.SpreadMinRadius,
@@ -120,8 +125,9 @@ namespace FalseGods.Application.Combat
 
             switch (message.Value)
             {
-                case CrateDropped dropped when IsFinite(dropped.At):
-                    OnDropped?.Invoke(FromWire(dropped.At));
+                case CrateDropped dropped when IsFinite(dropped.At)
+                    && CratePileId.TryFrom(dropped.PileKind, dropped.PileIndex, out var droppedPile):
+                    OnDropped?.Invoke(FromWire(dropped.At), droppedPile);
                     break;
 
                 case CrateThrown thrown when IsFinite(thrown.From) && IsFinite(thrown.To)
@@ -130,8 +136,10 @@ namespace FalseGods.Application.Combat
                         FromWire(thrown.From), FromWire(thrown.To), thrown.FlightSeconds, thrown.ApexHeight);
                     break;
 
-                case CrateVolleyFired volley when IsSaneVolley(volley):
+                case CrateVolleyFired volley when IsSaneVolley(volley)
+                    && CratePileId.TryFrom(volley.PileKind, volley.PileIndex, out var volleyPile):
                     OnVolleyFired?.Invoke(
+                        volleyPile,
                         FromWire(volley.CurrentCenter),
                         FromWire(volley.LeadCenter),
                         new CrateVolleyShape(

@@ -15,7 +15,7 @@ namespace FalseGods.ProtocolTests
         [Fact]
         public void A_drop_round_trips()
         {
-            var original = new CrateDropped(new WorldPosition(1.5f, 2.5f, -3.5f));
+            var original = new CrateDropped(new WorldPosition(1.5f, 2.5f, -3.5f), PileKind: 2, PileIndex: 1);
 
             Assert.Equal(original, WireCodec.DeserializeCrateDropped(WireCodec.Serialize(original)));
         }
@@ -35,6 +35,8 @@ namespace FalseGods.ProtocolTests
             var original = new CrateVolleyFired(
                 new WorldPosition(1f, 2f, 3f),
                 new WorldPosition(4f, 5f, 6f),
+                PileKind: 2,
+                PileIndex: 3,
                 Seed: 12345,
                 Count: 6,
                 SpreadMinRadius: 1.4f,
@@ -52,7 +54,7 @@ namespace FalseGods.ProtocolTests
         [Fact]
         public void Trailing_bytes_throw_not_ignored()
         {
-            var payload = WireCodec.Serialize(new CrateDropped(new WorldPosition(0f, 0f, 0f)));
+            var payload = WireCodec.Serialize(new CrateDropped(new WorldPosition(0f, 0f, 0f), 1, 0));
             var padded = new byte[payload.Length + 1];
             Array.Copy(payload, padded, payload.Length);
 

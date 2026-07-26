@@ -245,13 +245,15 @@ namespace FalseGods.Protocol.Wire
         {
             var w = new WireWriter();
             WriteWorldPosition(w, message.At);
+            WriteInt(w, message.PileKind);
+            WriteInt(w, message.PileIndex);
             return w.ToArray();
         }
 
         public static CrateDropped DeserializeCrateDropped(byte[] payload)
         {
             var r = new WireReader(payload);
-            var message = new CrateDropped(ReadWorldPosition(r));
+            var message = new CrateDropped(ReadWorldPosition(r), r.ReadInt32(), r.ReadInt32());
             RequireEnd(r);
             return message;
         }
@@ -280,6 +282,8 @@ namespace FalseGods.Protocol.Wire
             var w = new WireWriter();
             WriteWorldPosition(w, message.CurrentCenter);
             WriteWorldPosition(w, message.LeadCenter);
+            WriteInt(w, message.PileKind);
+            WriteInt(w, message.PileIndex);
             WriteInt(w, message.Seed);
             WriteInt(w, message.Count);
             w.WriteSingle(message.SpreadMinRadius);
@@ -299,6 +303,8 @@ namespace FalseGods.Protocol.Wire
             var message = new CrateVolleyFired(
                 ReadWorldPosition(r),
                 ReadWorldPosition(r),
+                r.ReadInt32(),
+                r.ReadInt32(),
                 r.ReadInt32(),
                 r.ReadInt32(),
                 r.ReadSingle(),

@@ -72,6 +72,18 @@ namespace FalseGods.Plugin
         private const int MinionsPerSummon = 4;
 
         /// <summary>
+        /// The first boss's supply line: how fast the room's production points yield destructibles, and how much
+        /// the room will hold at each end. First-pass numbers, tuned in game like the boss's own — and destined
+        /// for authored boss content rather than staying constants here.
+        /// </summary>
+        private static readonly SupplyLineShape Supply = new SupplyLineShape(
+            secondsPerCrate: 6f, sourceCapacity: 6, deliveryCapacity: 12);
+
+        /// <summary>How high above a production point a destructible appears, so it falls into view and settles
+        /// rather than being born inside whatever is already stacked there.</summary>
+        private const float ProductionDropHeight = 3f;
+
+        /// <summary>
         /// The first boss's itinerary: it holds its home anchor, drops to the second one to summon, returns, does
         /// it once more, and comes home to die. Read against the arena's authored anchors by index — anchor 0 is the
         /// first child of the room's anchor group, anchor 1 the second.
@@ -99,6 +111,13 @@ namespace FalseGods.Plugin
         private readonly string _contentDirectory;
         private readonly float _maxClientHitDamage;
         private readonly IMinionSpawnPort _minionSpawns;
+        private readonly IThrownCratePort _crates;
+        private readonly Action<ArenaWorldPoint, CratePileId>? _announceProduced;
+
+        // Live only while a fight is: the supply line is the encounter's, and a room with no production points
+        // leaves it null so nothing is produced rather than producing nowhere.
+        private SupplyLine? _supply;
+        private int[]? _restingAtSource; // reused each tick so counting the room costs no allocation
 
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
@@ -129,13 +148,22 @@ namespace FalseGods.Plugin
         private BossActivity _lastReportedActivity = BossActivity.Dead; // forces the first real activity to report
         private int _lastReportedPending = -1;
 
+        /// <param name="crates">The destructibles the supply line produces. Outlives any one fight — the port is
+        /// the plugin's, not the encounter's — so the encounter only starts and stops the producing.</param>
+        /// <param name="announceProduced">Told about every destructible this encounter produced, so a host can
+        /// pass it on to its clients. The encounter decides <i>what</i> is produced; whether anyone else needs to
+        /// hear about it belongs to whoever owns the session, so it is handed out rather than reached for.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
+            IThrownCratePort crates,
+            Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
             float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
             _logger = logger;
             _minionSpawns = minions ?? throw new ArgumentNullException(nameof(minions));
+            _crates = crates ?? throw new ArgumentNullException(nameof(crates));
+            _announceProduced = announceProduced;
             _maxClientHitDamage = maxClientHitDamage;
             // The single-player Core-port bundle. Clock and roster are stateless and shared across raises; the RNG is
             // reseeded per raise so successive fights vary.
@@ -355,8 +383,85 @@ namespace FalseGods.Plugin
 
             _boss.Advance();
             ReportActivityChange();
+            AdvanceSupplyLine(deltaSeconds);
             Present();
             _presentation.Render(deltaSeconds);
+        }
+
+        /// <summary>
+        /// Run the room's production points for one frame: count what is already standing at each, ask the supply
+        /// line which are due, and put a destructible at those.
+        /// </summary>
+        /// <remarks>
+        /// Host-authoritative, like the summons: a client is told what was produced and builds the same crate, so
+        /// one that produced its own would double the boss's ammunition. Production is silently skipped rather
+        /// than refused when there is no supply line — a room that authored no production points simply has none.
+        /// </remarks>
+        private void AdvanceSupplyLine(float deltaSeconds)
+        {
+            var sources = _arenaContent?.CrateSources;
+            if (_supply is null || sources is null || sources.Count == 0)
+            {
+                return;
+            }
+
+            for (var i = 0; i < _restingAtSource!.Length; i++)
+            {
+                _restingAtSource[i] = _crates.RestingOn(CratePileId.Source(i));
+            }
+
+            _supply.Advance(deltaSeconds, _restingAtSource);
+
+            var due = _supply.DrainProductionRequests();
+            for (var i = 0; i < due.Count; i++)
+            {
+                var source = due[i];
+                if (source >= sources.Count)
+                {
+                    continue;
+                }
+
+                var pile = CratePileId.Source(source);
+                var at = sources[source];
+                var above = new ArenaWorldPoint(at.X, at.Y + ProductionDropHeight, at.Z);
+                if (!_crates.Drop(above, pile))
+                {
+                    continue;
+                }
+
+                _announceProduced?.Invoke(above, pile);
+                _logger?.Log($"[supply] source {source} produced one; {_crates.RestingOn(pile)} resting there.");
+            }
+        }
+
+        /// <summary>
+        /// Which delivery pile supplies the boss where it currently stands, and where that pile is. False when
+        /// there is no fight, or when the room authored no delivery piles — an unsupplied boss rather than a
+        /// broken one.
+        /// </summary>
+        /// <remarks>
+        /// The pile is chosen by the boss's <i>anchor</i>, not by its station: two stations that stand at the same
+        /// anchor are the same place in the room and share its pile. A room that authored fewer piles than anchors
+        /// reuses its last one, so adding an anchor never silently leaves the boss without ammunition.
+        /// </remarks>
+        public bool TryGetSupplyPile(out CratePileId pile, out ArenaWorldPoint at)
+        {
+            pile = CratePileId.Loose;
+            at = default;
+
+            var piles = _arenaContent?.CratePiles;
+            if (_boss is null || piles is null || piles.Count == 0)
+            {
+                return false;
+            }
+
+            var station = _boss.StationIndex;
+            var anchor = station >= 0 && station < Itinerary.Count ? Itinerary[station].AnchorIndex : 0;
+            var index = anchor < piles.Count ? anchor : piles.Count - 1;
+
+            pile = CratePileId.Delivery(index);
+            at = piles[index];
+            return true;
         }
 
         /// <summary>Tear the encounter down in reverse: tell the clients (when hosting), then boss visuals and
@@ -369,6 +474,10 @@ namespace FalseGods.Plugin
             _hitIntake?.Dispose();
             _hitIntake = null;
             _minionSpawns.DespawnAll();
+            // The supply line stops with the fight. The destructibles it already produced are left where they are:
+            // they are the game's own breakables standing in the level, and the crate port owns their lifetime.
+            _supply = null;
+            _restingAtSource = null;
             _arenaContent = null;
             _damageBinding?.Dispose();
             _damageBinding = null;
@@ -492,6 +601,13 @@ namespace FalseGods.Plugin
                 + $"({_originWire.X:0.0}, {_originWire.Y:0.0}, {_originWire.Z:0.0}), {navigation}, "
                 + $"boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on "
                 + "the arena floor. Shoot or melee it; weak-window hits are amplified.");
+
+            // The supply line runs for as long as the fight does: production is a thing the boss's room does while
+            // the boss is in it, not a property of the level.
+            _supply = arena.CrateSources.Count > 0
+                ? new SupplyLine(Supply, arena.CrateSources.Count)
+                : null;
+            _restingAtSource = arena.CrateSources.Count > 0 ? new int[arena.CrateSources.Count] : null;
 
             ReportAuthoredBossContent(arena);
         }

@@ -208,16 +208,17 @@ namespace FalseGods.Plugin
             // in front of you under real gravity so it falls and piles. Tap it repeatedly to build a stack. This
             // is the foundation the later "boss lifts crates off a pile and fires them" step draws from.
             _dropCrateKey = Config.Bind("Boss", "DropCrateKey", Key.M,
-                "[DEV/TEMPORARY - removed before release] Drop one of the game's crates a few metres in front of "
-                + "you under real gravity; it falls, rests, and stacks with others. Tap repeatedly to build a "
-                + "pile. Resting crates stay shootable.");
+                "[DEV/TEMPORARY - removed before release] Put one of the game's crates on the delivery pile beside "
+                + "the boss, as a carrier will; it falls, rests, and stacks with others. Tap repeatedly to stock "
+                + "the boss. Resting crates stay shootable, and only these are the boss's ammunition.");
 
             // TEMPORARY bring-up affordance: fire a shotgun volley from the pile - lift several resting crates,
             // hold them a beat, then scatter them around you on an arc. Drop a pile with the drop key first.
             _volleyCrateKey = Config.Bind("Boss", "VolleyCrateKey", Key.V,
-                "[DEV/TEMPORARY - removed before release] Lift a handful of resting crates off the pile, hold "
-                + "them a moment, then fire them as a spread scattered around you. Shoot them out of the air for "
-                + "loot; the ones that land drop nothing. Build a pile with the drop key first.");
+                "[DEV/TEMPORARY - removed before release] Lift a handful of crates off the boss's delivery pile, "
+                + "hold them a moment, then fire them as a spread scattered around you. Shoot them out of the air "
+                + "for loot; the ones that land drop nothing. Only delivered crates can be fired - crates still "
+                + "standing at a production point are not the boss's until somebody carries them over.");
 
             _log = new BepInExLogger(Logger);
             _crates = new SulfurThrownCratePort(
@@ -244,8 +245,14 @@ namespace FalseGods.Plugin
             // second copy of the same content on top of itself.
             // Minions are the game's own units, spawned through the game's own entry point; the plugin is the
             // behaviour whose lifetime scopes those asynchronous loads.
+            // The announce callback reaches for the crate flow at call time, not now: the flow is rebuilt whenever
+            // the session changes, and without a session there is nobody to tell.
             _boss = new LocalEncounterController(
-                _log, new SulfurMinionSpawnPort(this, _log), _maxClientHitDamage.Value) { LevelArena = _levelArena };
+                _log,
+                new SulfurMinionSpawnPort(this, _log),
+                _crates,
+                (at, pile) => _crateFlow?.BroadcastDropped(at, pile),
+                _maxClientHitDamage.Value) { LevelArena = _levelArena };
 
             // Subscribe before any adapter can load (their hard BepInDependency on this GUID guarantees the order),
             // so a registration always lands in an initialized seam. Composition changes are applied in Update, in
@@ -298,7 +305,7 @@ namespace FalseGods.Plugin
 
             if (KeyPressed(_dropCrateKey.Value) && CrateKeysActHere())
             {
-                DropOneCrateNearThePlayer();
+                DeliverOneCrateToTheBoss();
             }
 
             if (KeyPressed(_volleyCrateKey.Value) && CrateKeysActHere())
@@ -376,11 +383,11 @@ namespace FalseGods.Plugin
                 // whole point of sending a seed instead of positions is that it must not.
                 _crateFlow = new CrateCommandFlow(integration.Channel, integration.Session)
                 {
-                    OnDropped = at =>
+                    OnDropped = (at, pile) =>
                     {
-                        _crates.Drop(at);
-                        _log.Log($"[crate] host dropped one at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
-                            + $"{_crates.Resting} resting here.");
+                        _crates.Drop(at, pile);
+                        _log.Log($"[crate] host dropped one on {pile} at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
+                            + $"{_crates.RestingOn(pile)} resting on that pile here.");
                     },
                     OnThrown = (from, to, seconds, apex) =>
                     {
@@ -388,10 +395,10 @@ namespace FalseGods.Plugin
                         _log.Log($"[crate] host threw one from ({from.X:0.0}, {from.Y:0.0}, {from.Z:0.0}) to "
                             + $"({to.X:0.0}, {to.Y:0.0}, {to.Z:0.0}); {_crates.InFlight} in the air here.");
                     },
-                    OnVolleyFired = (current, lead, shape) =>
+                    OnVolleyFired = (pile, current, lead, shape) =>
                     {
-                        var launched = _crates.LaunchVolley(current, lead, shape);
-                        _log.Log($"[crate] host fired a volley of {shape.Count} (seed {shape.Seed}); "
+                        var launched = _crates.LaunchVolley(pile, current, lead, shape);
+                        _log.Log($"[crate] host fired a volley of {shape.Count} off {pile} (seed {shape.Seed}); "
                             + $"{launched} lifted here, aimed at ({current.X:0.0}, {current.Z:0.0}) / led to "
                             + $"({lead.X:0.0}, {lead.Z:0.0}).");
                     },
@@ -603,36 +610,26 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>
-        /// Bring-up drop: one crate a short reach in front of the player and a few metres up, left to real gravity
-        /// so it falls and rests. Tapping the key repeatedly stacks a pile — the resting foundation the supply
-        /// chain (produce, pile, carry, lift, fire) is built on.
+        /// Bring-up delivery: put one crate on the pile beside wherever the boss is standing, as a carrier will
+        /// once there are carriers. Tapping the key repeatedly stocks the boss — the ammunition a volley draws
+        /// from, and the only crates it can draw from.
         /// </summary>
-        private void DropOneCrateNearThePlayer()
+        private void DeliverOneCrateToTheBoss()
         {
-            var camera = Camera.main;
-            if (camera == null)
+            if (!_boss.TryGetSupplyPile(out var pile, out var at))
             {
-                _log.LogWarning("[crate] no main camera; stand in a level first.");
+                _log.Log("[crate] nothing to deliver to: raise the boss in a room that authored delivery piles.");
                 return;
             }
 
-            var eye = camera.transform.position;
-            var footY = eye.y - LocalEncounterController.EyeToFootDrop;
-
-            // A little ahead of the player (flattened to the ground plane) and a few metres up, so it drops onto the
-            // floor in view rather than onto their head.
-            var forward = camera.transform.forward;
-            var flat = new Vector3(forward.x, 0f, forward.z).normalized;
-            var at = new ArenaWorldPoint(
-                eye.x + flat.x * DropDistance,
-                footY + DropHeight,
-                eye.z + flat.z * DropDistance);
-
-            if (_crates.Drop(at))
+            // Dropped above the pile so it falls onto whatever is already stacked there, exactly as a produced
+            // crate falls onto its source.
+            var above = new ArenaWorldPoint(at.X, at.Y + DropHeight, at.Z);
+            if (_crates.Drop(above, pile))
             {
-                _crateFlow?.BroadcastDropped(at);
-                _log.Log($"[crate] crate dropped at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
-                    + $"{_crates.Resting} resting. Tap again to stack a pile.");
+                _crateFlow?.BroadcastDropped(above, pile);
+                _log.Log($"[crate] delivered one to {pile} at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
+                    + $"{_crates.RestingOn(pile)} on that pile. Tap again to stock the boss.");
             }
         }
 
@@ -647,6 +644,14 @@ namespace FalseGods.Plugin
             if (camera == null)
             {
                 _log.LogWarning("[crate] no main camera; stand in a level first.");
+                return;
+            }
+
+            // A volley is fired off the boss's own pile and nothing else — crates still standing at the production
+            // points are not its ammunition until somebody brings them.
+            if (!_boss.TryGetSupplyPile(out var pile, out _))
+            {
+                _log.Log("[crate] no boss pile to fire from: raise the boss in a room that authored delivery piles.");
                 return;
             }
 
@@ -687,19 +692,20 @@ namespace FalseGods.Plugin
                 seed, VolleyCount, VolleySpreadMin, VolleySpreadMax,
                 VolleyLiftHeight, VolleyLiftSeconds, hold, VolleyFlightSeconds, VolleyApex, VolleyLeadShare);
 
-            var launched = _crates.LaunchVolley(currentCenter, leadCenter, shape);
+            var launched = _crates.LaunchVolley(pile, currentCenter, leadCenter, shape);
             if (launched > 0)
             {
                 // The shape is the volley: every client computes the same crates from these inputs, so what the
                 // players dodge is the same volley rather than a description of one.
-                _crateFlow?.BroadcastVolley(currentCenter, leadCenter, shape);
-                _log.Log($"[crate] volley of {launched} lifted; {_crates.Resting} still resting. "
+                _crateFlow?.BroadcastVolley(pile, currentCenter, leadCenter, shape);
+                _log.Log($"[crate] volley of {launched} lifted off {pile}; {_crates.RestingOn(pile)} left there. "
                     + $"Hold {hold:0.00}s; some aimed here ({current.X:0.0}, {current.Z:0.0}), "
                     + $"some led {airtime:0.00}s to ({lead.X:0.0}, {lead.Z:0.0}). Shoot them for loot.");
             }
             else
             {
-                _log.Log("[crate] no resting crates to lift - build a pile with the drop key first.");
+                _log.Log($"[crate] {pile} is empty - the boss has no ammunition. Nothing has been carried to it "
+                    + "yet; stock it with the delivery key.");
             }
         }
 

@@ -1,3 +1,4 @@
+using FalseGods.Core.Bosses.Combat;
 using FalseGods.RuntimeContracts.Arena;
 
 namespace FalseGods.Application.Combat
@@ -42,20 +43,28 @@ namespace FalseGods.Application.Combat
         /// falls, comes to rest, and stacks with others already on the ground. This is the resting half of a
         /// destructible's life — produced, piled, carried, set back down — as opposed to <see cref="Throw"/>'s
         /// simulation-driven flight; nothing here drives the crate's position. It stays shootable while it rests.
-        /// Returns false when the crate could not be created.
+        /// <paramref name="pile"/> is what the crate becomes: produced at a source, delivered to the boss, or
+        /// merely lying there. Returns false when the crate could not be created.
         /// </summary>
-        bool Drop(ArenaWorldPoint at);
+        bool Drop(ArenaWorldPoint at, CratePileId pile);
 
         /// <summary>
-        /// Lift up to <see cref="CrateVolleyShape.Count"/> crates off the pile — floating them up under our control
-        /// rather than gravity — hold them a beat, then throw them as a shotgun spread. Each crate is aimed either
-        /// where the player is now (<paramref name="currentCenter"/>) or where they are predicted to be
-        /// (<paramref name="leadCenter"/>), split by <see cref="CrateVolleyShape.LeadShare"/>, then scattered around
-        /// that point. Both the scatter and the current-or-lead choice come from the shape's seed, so every peer
-        /// throwing the same volley lays the crates out identically. Only crates already resting are lifted;
-        /// returns how many were launched, which is zero when the pile is empty.
+        /// Lift up to <see cref="CrateVolleyShape.Count"/> crates off <paramref name="pile"/> — floating them up
+        /// under our control rather than gravity — hold them a beat, then throw them as a shotgun spread. Each
+        /// crate is aimed either where the player is now (<paramref name="currentCenter"/>) or where they are
+        /// predicted to be (<paramref name="leadCenter"/>), split by <see cref="CrateVolleyShape.LeadShare"/>,
+        /// then scattered around that point. Both the scatter and the current-or-lead choice come from the shape's
+        /// seed, so every peer throwing the same volley lays the crates out identically.
+        /// <para>Only crates resting <b>on that pile</b> are lifted, which is what makes the supply line a
+        /// mechanic: a boss cannot fire the crates still standing at the production points, only what was carried
+        /// to it. Returns how many were launched, which is zero when the pile is empty — an unsupplied boss.</para>
         /// </summary>
-        int LaunchVolley(ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape);
+        int LaunchVolley(
+            CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape);
+
+        /// <summary>How many crates are resting on one pile. This is what the supply line is told to decide
+        /// whether a production point is full and whether a delivery pile has room.</summary>
+        int RestingOn(CratePileId pile);
 
         /// <summary>Move every crate still in the air, and resolve the ones that have arrived or been broken.</summary>
         void Advance(float deltaSeconds);
