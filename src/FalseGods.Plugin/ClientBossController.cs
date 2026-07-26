@@ -34,9 +34,20 @@ namespace FalseGods.Plugin
     /// baseline's origin and verifies its own content hash against the baseline's before showing anything
     /// (fail-visible: mismatched content logs and shows no arena). <c>EncounterAborted</c> tears the arena down;
     /// <c>EncounterEnded</c> discards the whole encounter — puppet, arena, and stream state.
+    ///
+    /// <para><b>Two ways the arena gets here, one sequence — the same pair the host has.</b> When a hijacked
+    /// level load already left the arena standing on this peer (Strategy A), the encounter <i>adopts</i> that one
+    /// rather than realizing a second copy of the same content on top of it. Otherwise it realizes its own at the
+    /// host's origin through the ordinary <see cref="ArenaLoadFlow"/>. Either way the manifest reported in
+    /// <c>ArenaReady</c> comes from a real local load — an adopted arena was realized through the identical flow,
+    /// with the same parity check and the same locally recomputed content hash.</para>
     /// </remarks>
     internal sealed class ClientBossController : IDisposable
     {
+        // How far a standing arena's origin may sit from the one the host announced and still be the same arena.
+        // Both hijacked loads realize at exactly the level origin, so this only absorbs the wire quantization.
+        private const float OriginEpsilon = 0.05f;
+
         private readonly ILogger? _logger;
         private readonly IFalseGodsIntegration _integration;
         private readonly string _contentDirectory;
@@ -54,7 +65,8 @@ namespace FalseGods.Plugin
         private int _presentedArenaEvents;
         private bool _waitingForCameraLogged;
 
-        // The locally realized arena for the announced/joined encounter.
+        // The arena this peer fights in for the announced/joined encounter — realized here, or adopted from the
+        // level that already realized it.
         private BundleArenaRealization? _realization;
         private ArenaLoadFlow? _arenaFlow;
         private LoadedArena? _loadedArena;
@@ -62,6 +74,10 @@ namespace FalseGods.Plugin
         private EncounterId? _arenaEncounter;
         private bool _lateJoinArenaFailed;
         private bool _arenaSnapshotReplayed;
+
+        // False while the encounter is fought in an arena the LEVEL owns (Strategy A): the arena outlives the
+        // fight there, so tearing the encounter down must not take the level's start area with it.
+        private bool _ownsArena;
 
         public ClientBossController(ILogger logger, IFalseGodsIntegration integration)
         {
@@ -89,6 +105,13 @@ namespace FalseGods.Plugin
             };
             _logger?.Log("Client encounter composition ready: listening for the host's announcements and streams.");
         }
+
+        /// <summary>
+        /// The arena a hijacked level load left standing, when there is one. Set by the Composition Root; while it
+        /// reports a live arena, the encounter is fought in <i>that</i> arena instead of realizing its own copy —
+        /// the same adoption a host raise does (see <c>LocalEncounterController.Raise</c>).
+        /// </summary>
+        public HijackedArenaContent? LevelArena { get; set; }
 
         public bool IsUp => _presentation != null;
 
@@ -170,8 +193,9 @@ namespace FalseGods.Plugin
             _logger?.Log("Client encounter composition torn down; nothing remains.");
         }
 
-        /// <summary>The host announced an arena: run the identical local load at the host's origin and hand back
-        /// the locally recomputed manifest (or the failure to report). A previous arena is replaced.</summary>
+        /// <summary>The host announced an arena: get into the same arena at the host's origin — adopting the one
+        /// a hijacked level left standing, or realizing our own — and hand back the locally recomputed manifest
+        /// (or the failure to report). A previous arena is released first.</summary>
         private ClientLoadOutcome HandleEnterArena(EnterArena enter)
         {
             TeardownArena();
@@ -184,15 +208,23 @@ namespace FalseGods.Plugin
             }
             else
             {
-                _logger?.Log($"Arena for {enter.Encounter} realized at ({enter.Origin.X:0.0}, {enter.Origin.Y:0.0}, "
+                _logger?.Log($"Arena for {enter.Encounter} ready at ({enter.Origin.X:0.0}, {enter.Origin.Y:0.0}, "
                     + $"{enter.Origin.Z:0.0}); reporting ArenaReady.");
             }
 
             return outcome;
         }
 
+        /// <summary>Get this peer into the encounter's arena at <paramref name="origin"/>: adopt the one the level
+        /// already stands in when there is one, else realize our own there.</summary>
         private ClientLoadOutcome RealizeArenaAt(WorldPosition origin, EncounterId encounter)
         {
+            var levelArena = LevelArena;
+            if (levelArena != null && levelArena.IsLive)
+            {
+                return AdoptLevelArena(levelArena, origin, encounter);
+            }
+
             var realization = new BundleArenaRealization(
                 Path.Combine(_contentDirectory, LocalEncounterController.BundleFileName),
                 Path.Combine(_contentDirectory, LocalEncounterController.ArtifactFileName),
@@ -217,6 +249,7 @@ namespace FalseGods.Plugin
                 return ClientLoadOutcome.Failed(realized.FailureReason ?? "realize failed");
             }
 
+            _ownsArena = true;
             _realization = realization;
             _arenaFlow = flow;
             _loadedArena = realized.Arena;
@@ -225,6 +258,58 @@ namespace FalseGods.Plugin
             _arenaSnapshotReplayed = false;
             return ClientLoadOutcome.Ready(realized.Manifest);
         }
+
+        /// <summary>
+        /// Adopt the arena a hijacked level load already left standing on this peer, the way a host raise adopts
+        /// its own. The level realized it through the same <see cref="ArenaLoadFlow"/> — same bundle, same
+        /// realized-vs-authored parity check, same locally recomputed content hash — so its manifest is exactly
+        /// what this peer would report after loading a second copy. Loading that second copy is not merely
+        /// wasteful: the standing arena holds the AssetBundle open, and a second <c>LoadFromFile</c> of the same
+        /// file fails, which is why a client standing in a hijacked level used to fail the whole encounter closed.
+        /// <para>The arena belongs to the level, not to this encounter: an encounter teardown leaves it standing.</para>
+        /// </summary>
+        private ClientLoadOutcome AdoptLevelArena(
+            HijackedArenaContent levelArena, WorldPosition origin, EncounterId encounter)
+        {
+            var standing = levelArena.Realized;
+            var realization = levelArena.Realization;
+            if (standing?.Manifest is null || standing.Arena is null || realization is null)
+            {
+                return ClientLoadOutcome.Failed("the level's arena is standing but reported no load result");
+            }
+
+            // The host's arena and the one standing here must be the same room in the same place: boss and
+            // mechanism positions arrive in world coordinates, so an origin that disagrees would put the fight
+            // somewhere this player is not. Both hijacked loads realize at the level origin, so agreement is the
+            // normal case; a mismatch means the host is fighting elsewhere — report it rather than show a wrong
+            // arena, and never load a second copy into a level that is already our arena.
+            var standingOrigin = standing.Arena.Origin;
+            if (!SameOrigin(standingOrigin, origin))
+            {
+                return ClientLoadOutcome.Failed(
+                    $"the level's arena stands at ({standingOrigin.X:0.0}, {standingOrigin.Y:0.0}, "
+                    + $"{standingOrigin.Z:0.0}) but the host announced ({origin.X:0.0}, {origin.Y:0.0}, "
+                    + $"{origin.Z:0.0})");
+            }
+
+            _ownsArena = false;
+            _realization = realization;
+            _arenaFlow = null;
+            _loadedArena = standing.Arena;
+            _arenaPresentation = new ArenaPresentation(realization, _logger);
+            _arenaEncounter = encounter;
+            _arenaSnapshotReplayed = false;
+            _logger?.Log($"Adopting the arena the hijacked level left standing for {encounter}; "
+                + "no second copy loaded, and the level keeps it when the encounter ends.");
+            return ClientLoadOutcome.Ready(standing.Manifest);
+        }
+
+        /// <summary>Whether a standing arena is where the host says the encounter's arena is, within a tolerance
+        /// far below anything that would misplace the fight.</summary>
+        private static bool SameOrigin(ArenaWorldPoint standing, WorldPosition announced) =>
+            Math.Abs(standing.X - announced.X) <= OriginEpsilon
+            && Math.Abs(standing.Y - announced.Y) <= OriginEpsilon
+            && Math.Abs(standing.Z - announced.Z) <= OriginEpsilon;
 
         /// <summary>A late joiner never saw EnterArena: realize from the baseline's origin, then verify the
         /// locally recomputed content hash against the baseline's — mismatched content shows nothing rather than
@@ -237,9 +322,9 @@ namespace FalseGods.Plugin
                 return;
             }
 
-            if (_arenaFlow != null && _arenaEncounter == baseline.Encounter)
+            if (_loadedArena != null && _arenaEncounter == baseline.Encounter)
             {
-                return; // already realized for this encounter (the EnterArena path)
+                return; // already standing in this encounter's arena (realized here, or adopted from the level)
             }
 
             var outcome = RealizeArenaAt(baseline.ArenaOrigin, baseline.Encounter);
@@ -380,10 +465,17 @@ namespace FalseGods.Plugin
             }
         }
 
+        /// <summary>Give up this encounter's claim on the arena: torn down when the encounter realized it, merely
+        /// let go of when it belongs to the level (Strategy A) and must outlive the fight. Idempotent.</summary>
         private void TeardownArena()
         {
             _arenaPresentation = null;
-            _arenaFlow?.Teardown();
+            if (_ownsArena)
+            {
+                _arenaFlow?.Teardown();
+            }
+
+            _ownsArena = false;
             _arenaFlow = null;
             _realization = null;
             _loadedArena = null;
