@@ -67,6 +67,26 @@ namespace FalseGods.Plugin
         private const string PhaseTwoGroup = "phase_2";
         private const float GateTimeoutSeconds = 30f;
 
+        /// <summary>
+        /// The first boss's itinerary: it holds its home anchor, drops to the second one to act, returns, does it
+        /// once more, and comes home to die. Read against the arena's authored anchors by index — anchor 0 is the
+        /// first child of the room's anchor group, anchor 1 the second.
+        /// </summary>
+        /// <remarks>
+        /// Boss design, so it lives with the boss and not in the room, and an authored order rather than the
+        /// vanilla cave boss's random pool — a fight whose shape is the point should be the same fight twice.
+        /// Still code rather than content: there is no boss-content pipeline yet, and one boss does not justify
+        /// inventing one (Docs/DefinitionOfDone.md §3). The thresholds are first-pass numbers, tuned in game.
+        /// </remarks>
+        private static readonly IReadOnlyList<BossStation> Itinerary = new[]
+        {
+            new BossStation(anchorIndex: 0, enterAtHealthFraction: 1.00f),
+            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.80f),
+            new BossStation(anchorIndex: 0, enterAtHealthFraction: 0.60f),
+            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.40f),
+            new BossStation(anchorIndex: 0, enterAtHealthFraction: 0.20f),
+        };
+
         private readonly ILogger _logger;
         private readonly ISimulationClock _clock;
         private readonly IEncounterParticipantQuery _participants;
@@ -364,10 +384,13 @@ namespace FalseGods.Plugin
             _arena = new ArenaSimulation();
             _coordinator = new EncounterCoordinator(_encounter, _arena, new MechanismGroupId(PhaseTwoGroup));
 
+            // The anchors the room authored, in authored order; a station refers to one by index. Without them the
+            // boss has no itinerary and simply stands where it spawns.
+            var anchors = ToBossAnchors(arena.BossAnchors);
             var definition = new BossDefinition(
-                maxHealth: 100,
+                maxHealth: 5000,
                 phaseTwoHealthFraction: 0.5f,
-                moveSpeed: 1.5f,
+                moveSpeed: 0f, // anchored: the itinerary decides where it stands, so it must not also walk
                 idleSeconds: 2.0f,
                 telegraphSeconds: 1.5f,
                 commitSeconds: 0.4f,
@@ -375,17 +398,29 @@ namespace FalseGods.Plugin
                 weakPointDamageMultiplier: 3,
                 attackDamage: 20,
                 aimedHitRadius: 2.0f,
-                areaHitRadius: 5.0f);
+                areaHitRadius: 5.0f,
+                stations: anchors.Count > 0 ? Itinerary : null);
 
             _boss = new BossSimulation(
                 new BossInstanceId(1),
                 definition,
                 _clock,
                 new SeededAuthoritativeRandom(Environment.TickCount),
-                _participants);
+                _participants,
+                anchors);
 
+            // Spawn before building the presentation, so the boss is asked where it stands rather than told: an
+            // itinerary puts it at its first station, which need not be the authored enemy spawn or even on the
+            // floor. The spawn event waits in the simulation's buffer and is drained by the Present() below, once
+            // presentation and replication are both attached.
             var bossSpawn = arena.BossSpawn;
-            _presentation = new BossPresentation(_logger, new Vector3(bossSpawn.X, bossSpawn.Y, bossSpawn.Z));
+            _boss.Spawn(new SimVector2(bossSpawn.X, bossSpawn.Z), bossSpawn.Y);
+
+            // The authored enemy spawn's height stays the arena's ground, where telegraphs and impacts are drawn.
+            _presentation = new BossPresentation(
+                _logger,
+                new Vector3(_boss.Position.X, _boss.PositionHeight, _boss.Position.Z),
+                bossSpawn.Y);
 
             // Size is authored in the room, not chosen by the player: a room that authored none leaves the
             // presentation's own default standing.
@@ -427,7 +462,6 @@ namespace FalseGods.Plugin
                 _presentation.HitCollider.gameObject, new WeaponSink(this), _logger);
 
             _coordinator.Begin();
-            _boss.Spawn(new SimVector2(bossSpawn.X, bossSpawn.Z));
             Present();
             _presentation.Render(0f);
 
@@ -444,6 +478,19 @@ namespace FalseGods.Plugin
                 + "the arena floor. Shoot or melee it; weak-window hits are amplified.");
 
             ReportAuthoredBossContent(arena);
+        }
+
+        /// <summary>Turn the room's authored anchor world positions into the simulation's ground-plus-height form:
+        /// the fight is reasoned about on the ground plane, and the height rides along as placement.</summary>
+        private static IReadOnlyList<BossAnchor> ToBossAnchors(IReadOnlyList<ArenaWorldPoint> authored)
+        {
+            var anchors = new BossAnchor[authored.Count];
+            for (var i = 0; i < authored.Count; i++)
+            {
+                anchors[i] = new BossAnchor(new SimVector2(authored[i].X, authored[i].Z), authored[i].Y);
+            }
+
+            return anchors;
         }
 
         /// <summary>

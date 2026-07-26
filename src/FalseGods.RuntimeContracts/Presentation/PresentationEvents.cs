@@ -42,6 +42,12 @@ namespace FalseGods.RuntimeContracts.Presentation
     /// <summary>The boss was defeated — play the death. Terminal, like its domain counterpart.</summary>
     public sealed record BossDefeated(BossInstanceId Boss) : IPresentationEvent;
 
+    /// <summary>The boss is now standing somewhere else — the cue a relocation is shown with.</summary>
+    public sealed record BossMoved(
+        BossInstanceId Boss,
+        SimVector2 Position,
+        float PositionHeight) : IPresentationEvent;
+
     // Arena cues. Deliberately different names from the Core domain events (MechanismGroupActivated,
     // ArenaExitUnlocked) so a file mapping between the two vocabularies never needs alias gymnastics — the same
     // convention that pairs domain BossDied with presentation BossDefeated.

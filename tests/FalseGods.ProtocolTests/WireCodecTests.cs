@@ -24,6 +24,7 @@ namespace FalseGods.ProtocolTests
             ActiveAttackDefinitionId: withOptionals ? 11 : (int?)null,
             Target: withOptionals ? new ParticipantId(2) : (ParticipantId?)null,
             Position: new SimVector2(1.5f, -2.5f),
+            PositionHeight: 8.1f,
             Facing: new SimVector2(0f, 1f),
             Health: 40,
             MaxHealth: 100,
@@ -127,6 +128,7 @@ namespace FalseGods.ProtocolTests
             new object[] { new BossWeakPointChangedEvent(new Sequence(4), new SimulationTick(5), true) },
             new object[] { new BossDamagedEvent(new Sequence(5), new SimulationTick(6), 30, 70, true) },
             new object[] { new BossDefeatedEvent(new Sequence(6), new SimulationTick(7)) },
+            new object[] { new BossRelocatedEvent(new Sequence(7), new SimulationTick(8), 3, 1, new SimVector2(0.24f, -7.69f), 8.1f) },
         };
 
         [Theory]

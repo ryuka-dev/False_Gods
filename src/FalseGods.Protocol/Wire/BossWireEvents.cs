@@ -43,6 +43,19 @@ namespace FalseGods.Protocol.Wire
         int RemainingHealth,
         bool WeakPointHit) : IBossWireEvent;
 
+    /// <summary>
+    /// The boss moved to the next station of its itinerary and is now standing at <see cref="AnchorIndex"/>.
+    /// The position is where it <b>is</b>; the snapshot stream carries the same place continuously, but this is
+    /// the discrete decision a client can play a cue on.
+    /// </summary>
+    public sealed record BossRelocatedEvent(
+        Sequence Sequence,
+        SimulationTick Tick,
+        int StationIndex,
+        int AnchorIndex,
+        SimVector2 Position,
+        float Height) : IBossWireEvent;
+
     /// <summary>The boss died. Terminal on the boss stream.</summary>
     public sealed record BossDefeatedEvent(Sequence Sequence, SimulationTick Tick) : IBossWireEvent;
 }

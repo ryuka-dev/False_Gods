@@ -59,6 +59,7 @@ namespace FalseGods.Application.Wire
                 activeAttackDefinitionId,
                 Target: null,
                 boss.Position,
+                boss.PositionHeight,
                 boss.Facing,
                 boss.Health,
                 boss.MaxHealth,
@@ -83,6 +84,9 @@ namespace FalseGods.Application.Wire
                     return new BossPhaseChangedEvent(sequence, tick, (int)e.Phase);
                 case BossDamaged e:
                     return new BossDamagedEvent(sequence, tick, e.Amount, e.RemainingHealth, e.WeakPointHit);
+                case BossRelocated e:
+                    return new BossRelocatedEvent(
+                        sequence, tick, e.StationIndex, e.AnchorIndex, e.Position, e.Height);
                 case BossDied _:
                     return new BossDefeatedEvent(sequence, tick);
                 case null:

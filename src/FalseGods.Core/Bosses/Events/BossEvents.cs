@@ -48,6 +48,24 @@ namespace FalseGods.Core.Bosses.Events
         int RemainingHealth,
         bool WeakPointHit) : IBossDomainEvent;
 
+    /// <summary>
+    /// The boss's health fell far enough to move it to the next station of its itinerary, and it is now standing
+    /// at <see cref="AnchorIndex"/>. The authoritative "the boss is somewhere else now" fact: the position it
+    /// carries is where the boss <i>is</i>, not where it is heading.
+    /// </summary>
+    /// <remarks>
+    /// A discrete event rather than something to notice from the position stream, because it is a decision: it is
+    /// what a telegraphed vanish/appear will be hung on, and what tells a client this is a relocation rather than
+    /// a lost snapshot. One hit big enough to cross several stations produces one event, for the station it
+    /// ended at.
+    /// </remarks>
+    public sealed record BossRelocated(
+        BossInstanceId Boss,
+        int StationIndex,
+        int AnchorIndex,
+        SimVector2 Position,
+        float Height) : IBossDomainEvent;
+
     /// <summary>The boss's health reached zero. Terminal — no further events follow for this instance.</summary>
     public sealed record BossDied(BossInstanceId Boss) : IBossDomainEvent;
 }

@@ -24,6 +24,7 @@ namespace FalseGods.RuntimeContracts.Presentation
     public sealed record PresentationState(
         BossInstanceId Boss,
         SimVector2 Position,
+        float PositionHeight,
         SimVector2 Facing,
         int PhaseVisualId,
         BossVisualActivity Activity,

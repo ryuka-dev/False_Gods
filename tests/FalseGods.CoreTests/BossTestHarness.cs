@@ -46,14 +46,16 @@ namespace FalseGods.CoreTests
             return this;
         }
 
-        public BossSimulation Build(BossDefinition? definition = null, int bossId = 1)
+        public BossSimulation Build(
+            BossDefinition? definition = null, int bossId = 1, IReadOnlyList<BossAnchor>? anchors = null)
         {
             Boss = new BossSimulation(
                 new BossInstanceId(bossId),
                 definition ?? StandardDefinition,
                 Clock,
                 Random,
-                Participants);
+                Participants,
+                anchors);
             return Boss;
         }
 

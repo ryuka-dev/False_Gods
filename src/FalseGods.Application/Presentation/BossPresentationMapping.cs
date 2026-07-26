@@ -39,6 +39,7 @@ namespace FalseGods.Application.Presentation
             return new PresentationState(
                 boss.Id,
                 boss.Position,
+                boss.PositionHeight,
                 boss.Facing,
                 ToPhaseVisualId(boss.Phase),
                 ToVisualActivity(boss.Activity),
@@ -67,6 +68,8 @@ namespace FalseGods.Application.Presentation
                     return new PhaseTransition(e.Boss, ToPhaseVisualId(e.Phase));
                 case BossDamaged e:
                     return new BossHit(e.Boss, e.Amount, e.WeakPointHit);
+                case BossRelocated e:
+                    return new BossMoved(e.Boss, e.Position, e.Height);
                 case BossDied e:
                     return new BossDefeated(e.Boss);
                 case null:

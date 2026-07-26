@@ -30,6 +30,7 @@ namespace FalseGods.Protocol.Wire
         private const byte BossWeakPointTag = 5;
         private const byte BossDamagedTag = 6;
         private const byte BossDefeatedTag = 7;
+        private const byte BossRelocatedTag = 8;
 
         // Arena event stream tags, an independent tag space.
         private const byte ArenaMechanismActivatedTag = 1;
@@ -319,6 +320,7 @@ namespace FalseGods.Protocol.Wire
             WriteNullableInt(w, s.ActiveAttackDefinitionId);
             WriteNullableParticipant(w, s.Target);
             WriteVector(w, s.Position);
+            w.WriteSingle(s.PositionHeight);
             WriteVector(w, s.Facing);
             WriteInt(w, s.Health);
             WriteInt(w, s.MaxHealth);
@@ -339,6 +341,7 @@ namespace FalseGods.Protocol.Wire
             ReadNullableInt(r),
             ReadNullableParticipant(r),
             ReadVector(r),
+            r.ReadSingle(),
             ReadVector(r),
             r.ReadInt32(),
             r.ReadInt32(),
@@ -423,6 +426,13 @@ namespace FalseGods.Protocol.Wire
                     WriteInt(w, x.RemainingHealth);
                     w.WriteBool(x.WeakPointHit);
                     break;
+                case BossRelocatedEvent x:
+                    WriteBossHeader(w, BossRelocatedTag, x.Sequence, x.Tick);
+                    WriteInt(w, x.StationIndex);
+                    WriteInt(w, x.AnchorIndex);
+                    WriteVector(w, x.Position);
+                    w.WriteSingle(x.Height);
+                    break;
                 case BossDefeatedEvent x:
                     WriteBossHeader(w, BossDefeatedTag, x.Sequence, x.Tick);
                     break;
@@ -454,6 +464,9 @@ namespace FalseGods.Protocol.Wire
                     return new BossWeakPointChangedEvent(sequence, tick, r.ReadBool());
                 case BossDamagedTag:
                     return new BossDamagedEvent(sequence, tick, r.ReadInt32(), r.ReadInt32(), r.ReadBool());
+                case BossRelocatedTag:
+                    return new BossRelocatedEvent(
+                        sequence, tick, r.ReadInt32(), r.ReadInt32(), ReadVector(r), r.ReadSingle());
                 case BossDefeatedTag:
                     return new BossDefeatedEvent(sequence, tick);
                 default:

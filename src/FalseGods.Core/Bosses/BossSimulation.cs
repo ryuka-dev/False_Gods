@@ -38,6 +38,8 @@ namespace FalseGods.Core.Bosses
         private readonly List<IBossDomainEvent> _events = new List<IBossDomainEvent>();
         private readonly List<DamageRequest> _damageRequests = new List<DamageRequest>();
 
+        private readonly IReadOnlyList<BossAnchor> _anchors;
+
         private bool _spawned;
         private float _activityEnteredTime;
         private float _lastAdvanceTime;
@@ -48,16 +50,19 @@ namespace FalseGods.Core.Bosses
             BossDefinition definition,
             ISimulationClock clock,
             IAuthoritativeRandom random,
-            IEncounterParticipantQuery participants)
+            IEncounterParticipantQuery participants,
+            IReadOnlyList<BossAnchor>? anchors = null)
         {
             Id = id;
             _definition = definition ?? throw new ArgumentNullException(nameof(definition));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _random = random ?? throw new ArgumentNullException(nameof(random));
             _participants = participants ?? throw new ArgumentNullException(nameof(participants));
+            _anchors = anchors ?? Array.Empty<BossAnchor>();
             _lastAttackId = new AttackInstanceId(0);
             Activity = BossActivity.Idle;
             Phase = BossPhase.One;
+            StationIndex = -1;
         }
 
         /// <summary>This boss's stable identity, carried on every event it emits.</summary>
@@ -87,8 +92,17 @@ namespace FalseGods.Core.Bosses
         /// </summary>
         public bool IsWeakPointExposed => Activity == BossActivity.Recovering;
 
-        /// <summary>The boss's current position on the arena floor.</summary>
+        /// <summary>The boss's current position on the arena's ground plane.</summary>
         public SimVector2 Position { get; private set; }
+
+        /// <summary>
+        /// The height the boss currently stands at — the height of the anchor it occupies. Not a simulated
+        /// quantity: the boss never moves vertically, it is <i>placed</i> somewhere that has a height.
+        /// </summary>
+        public float PositionHeight { get; private set; }
+
+        /// <summary>Which step of its itinerary the boss is at, or -1 when it has none (or has not spawned).</summary>
+        public int StationIndex { get; private set; }
 
         /// <summary>The unit direction the boss faces — toward its current target, or <see cref="SimVector2.Zero"/>.</summary>
         public SimVector2 Facing { get; private set; }
@@ -103,10 +117,13 @@ namespace FalseGods.Core.Bosses
         public SimVector2 CurrentAttackAimPoint { get; private set; }
 
         /// <summary>
-        /// Bring the boss into the encounter at <paramref name="startPosition"/>, at full health in phase one.
+        /// Bring the boss into the encounter at full health in phase one. A boss with an itinerary starts at its
+        /// first station and ignores <paramref name="startPosition"/>; one without stands where it is told.
         /// Idempotent by contract: calling it again after the first spawn does nothing.
         /// </summary>
-        public void Spawn(SimVector2 startPosition)
+        /// <param name="startPosition">Where a boss with no itinerary stands.</param>
+        /// <param name="startHeight">The height a boss with no itinerary stands at.</param>
+        public void Spawn(SimVector2 startPosition, float startHeight = 0f)
         {
             if (_spawned)
             {
@@ -118,7 +135,17 @@ namespace FalseGods.Core.Bosses
             Phase = BossPhase.One;
             Activity = BossActivity.Idle;
             Position = startPosition;
+            PositionHeight = startHeight;
             Facing = SimVector2.Zero;
+            StationIndex = -1;
+
+            // The first station is the boss's starting place, so entering it is part of spawning rather than a
+            // relocation: the spawn event already says "the boss is here".
+            if (TryEnterStation(0))
+            {
+                StationIndex = 0;
+            }
+
             _activityEnteredTime = _clock.Time;
             _lastAdvanceTime = _clock.Time;
             _events.Add(new BossSpawned(Id, Phase, Health));
@@ -146,6 +173,8 @@ namespace FalseGods.Core.Bosses
                 Facing = Position.DirectionTo(targetPosition);
             }
 
+            // A boss with an itinerary never walks — its stations decide where it stands, and the definition
+            // refuses to be both at once.
             if (Activity == BossActivity.Idle && hasTarget && _definition.MoveSpeed > 0f)
             {
                 Position = Position.MoveToward(targetPosition, _definition.MoveSpeed * frameSeconds);
@@ -221,6 +250,8 @@ namespace FalseGods.Core.Bosses
                 return;
             }
 
+            AdvanceStations();
+
             if (Phase == BossPhase.One && Health <= _definition.PhaseTwoHealthThreshold)
             {
                 Phase = BossPhase.Two;
@@ -259,6 +290,61 @@ namespace FalseGods.Core.Bosses
             var drained = _damageRequests.ToArray();
             _damageRequests.Clear();
             return drained;
+        }
+
+        /// <summary>
+        /// Walk the itinerary forward to the last station this health level has reached, and put the boss there.
+        /// One hit big enough to cross several stations lands at the last of them and reports once — a boss does
+        /// not visit places the players never saw it in.
+        /// </summary>
+        private void AdvanceStations()
+        {
+            var stations = _definition.Stations;
+            if (StationIndex < 0 || stations.Count == 0)
+            {
+                return;
+            }
+
+            var healthFraction = Health / (float)_definition.MaxHealth;
+            var next = StationIndex;
+            while (next + 1 < stations.Count && healthFraction <= stations[next + 1].EnterAtHealthFraction)
+            {
+                next++;
+            }
+
+            if (next == StationIndex || !TryEnterStation(next))
+            {
+                return;
+            }
+
+            StationIndex = next;
+            _events.Add(new BossRelocated(
+                Id, next, stations[next].AnchorIndex, Position, PositionHeight));
+        }
+
+        /// <summary>
+        /// Stand the boss at the station's anchor. Fails — leaving the boss where it is — when the boss has no
+        /// itinerary or the room authored no anchor for that station: a fight in a room that does not have the
+        /// places this boss expects is worth continuing where it stands, not worth teleporting into nowhere.
+        /// </summary>
+        private bool TryEnterStation(int stationIndex)
+        {
+            var stations = _definition.Stations;
+            if (stationIndex < 0 || stationIndex >= stations.Count)
+            {
+                return false;
+            }
+
+            var anchorIndex = stations[stationIndex].AnchorIndex;
+            if (anchorIndex < 0 || anchorIndex >= _anchors.Count)
+            {
+                return false;
+            }
+
+            var anchor = _anchors[anchorIndex];
+            Position = anchor.Ground;
+            PositionHeight = anchor.Height;
+            return true;
         }
 
         private void SelectAttack(float now, SimVector2 targetPosition)

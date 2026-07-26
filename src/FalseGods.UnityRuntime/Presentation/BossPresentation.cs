@@ -123,17 +123,21 @@ namespace FalseGods.UnityRuntime.Presentation
 
         /// <param name="logger">Optional diagnostics sink; when null, the renderer logs nothing (logging is a pure
         /// diagnostic concern, never required for correct behaviour).</param>
-        /// <param name="origin">World position of the boss's feet; its Y is the arena floor level.</param>
-        public BossPresentation(ILogger logger, Vector3 origin)
+        /// <param name="origin">World position of the boss's feet — which is not necessarily on the ground: a boss
+        /// standing at an authored anchor stands at that anchor's height.</param>
+        /// <param name="arenaFloorY">The arena's ground level, where attack telegraphs and impacts are drawn. Kept
+        /// apart from <paramref name="origin"/> because a boss on a terrace aims at players on the floor, and a
+        /// telegraph drawn at the boss's own height would hang in the air.</param>
+        public BossPresentation(ILogger logger, Vector3 origin, float arenaFloorY)
         {
             _logger = logger;
-            _floorY = origin.y;
+            _floorY = arenaFloorY;
             _shader = ResolveShader(logger, out _shaderName);
             _bodyTexture = LoadEmbeddedBodyTexture(logger);
             _bodyTextured = _bodyTexture != null;
 
             _root = new GameObject("FalseGodsBoss");
-            _root.transform.position = new Vector3(origin.x, _floorY, origin.z);
+            _root.transform.position = origin;
 
             _fixedForward = ComputeSpawnFacing(_root.transform.position);
 
@@ -328,6 +332,9 @@ namespace FalseGods.UnityRuntime.Presentation
                     _flashTimer = 0.12f;
                     _flashWeakPoint = e.WeakPointHit;
                     break;
+                case BossMoved e:
+                    _logger?.Log($"[cue] BossMoved to ({e.Position.X:0.0}, {e.PositionHeight:0.0}, {e.Position.Z:0.0})");
+                    break;
                 case BossDefeated _:
                     _dead = true;
                     // Death can arrive mid-telegraph (the sim just stops; it emits no attack-cancel event), so clear
@@ -364,7 +371,10 @@ namespace FalseGods.UnityRuntime.Presentation
 
             if (_hasState)
             {
-                _root.transform.position = new Vector3(_state.Position.X, _floorY, _state.Position.Z);
+                // The boss stands at the height its authored anchor puts it at, which the state carries; _floorY
+                // stays the arena's ground, where telegraphs and impacts are drawn.
+                _root.transform.position =
+                    new Vector3(_state.Position.X, _state.PositionHeight, _state.Position.Z);
 
                 // Aim pivot yaws toward the boss's facing so the muzzle points at the target (gameplay space).
                 if (Math.Abs(_state.Facing.X) > 1e-4f || Math.Abs(_state.Facing.Z) > 1e-4f)

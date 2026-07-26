@@ -39,6 +39,7 @@ namespace FalseGods.Application.Presentation
             return new PresentationState(
                 snapshot.Boss,
                 snapshot.Position,
+                snapshot.PositionHeight,
                 snapshot.Facing,
                 snapshot.PhaseId,
                 ToVisualActivity(snapshot.StateId),
@@ -62,6 +63,8 @@ namespace FalseGods.Application.Presentation
                     return new WeakPointVisibilityChanged(boss, e.Exposed);
                 case BossDamagedEvent e:
                     return new BossHit(boss, e.Amount, e.WeakPointHit);
+                case BossRelocatedEvent e:
+                    return new BossMoved(boss, e.Position, e.Height);
                 case BossDefeatedEvent _:
                     return new BossDefeated(boss);
                 case null:

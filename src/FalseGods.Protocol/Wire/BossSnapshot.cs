@@ -32,6 +32,7 @@ namespace FalseGods.Protocol.Wire
         int? ActiveAttackDefinitionId,
         ParticipantId? Target,
         SimVector2 Position,
+        float PositionHeight,
         SimVector2 Facing,
         int Health,
         int MaxHealth,

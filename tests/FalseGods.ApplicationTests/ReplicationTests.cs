@@ -20,7 +20,7 @@ namespace FalseGods.ApplicationTests
             Enc, new BossInstanceId(7), new DefinitionId(1), ProtocolVersion.Current, new SimulationTick(tick),
             PhaseId: 1, StateId: 0, StateStartTick: new SimulationTick(tick), ActiveAttack: null,
             ActiveAttackDefinitionId: null, Target: null, Position: new SimVector2(1f, 2f),
-            Facing: SimVector2.Zero, Health: 100, MaxHealth: 100, WeakPointExposed: false,
+            PositionHeight: 0f, Facing: SimVector2.Zero, Health: 100, MaxHealth: 100, WeakPointExposed: false,
             LastProcessedBossEventSequence: new Sequence(lastSeq));
 
         private static ArenaSnapshot ArenaSnap(long tick, long lastSeq = 0) => new ArenaSnapshot(

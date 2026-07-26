@@ -28,9 +28,9 @@ namespace FalseGods.Plugin
     /// presentation entry points the host uses (Architecture §4.3/§7).
     /// </summary>
     /// <remarks>
-    /// No <c>BossSimulation</c>, no authoritative decision. The boss puppet stands on the <b>arena's</b> floor —
-    /// the authored enemy-spawn height of the locally realized arena at the host's origin — replacing the old
-    /// local-camera-height guess. A late joiner that never saw <c>EnterArena</c> realizes the arena from the
+    /// No <c>BossSimulation</c>, no authoritative decision. The boss puppet stands exactly where the host says,
+    /// height included — the host's boss may be standing on a terrace — while the locally realized arena supplies
+    /// the floor that telegraphs and impacts are drawn on. A late joiner that never saw <c>EnterArena</c> realizes the arena from the
     /// baseline's origin and verifies its own content hash against the baseline's before showing anything
     /// (fail-visible: mismatched content logs and shows no arena). <c>EncounterAborted</c> tears the arena down;
     /// <c>EncounterEnded</c> discards the whole encounter — puppet, arena, and stream state.
@@ -115,9 +115,9 @@ namespace FalseGods.Plugin
         public bool IsUp => _presentation != null;
 
         /// <summary>
-        /// Advance one frame: realize the arena from the baseline when this is a late join, raise the puppet on
-        /// the arena floor when the host's state first arrives, replay newly-applied wire events as presentation
-        /// cues, apply the latest snapshot state, and render.
+        /// Advance one frame: realize the arena from the baseline when this is a late join, raise the puppet where
+        /// the host's first state says it stands, replay newly-applied wire events as presentation cues, apply the
+        /// latest snapshot state, and render.
         /// </summary>
         public void Tick(float deltaSeconds)
         {
@@ -135,7 +135,9 @@ namespace FalseGods.Plugin
                 return; // the fresh receiver repopulates from the host's next messages
             }
 
-            if (_presentation is null && !TryRaisePresentation(snapshot.Position.X, snapshot.Position.Z, snapshot.Encounter))
+            if (_presentation is null
+                && !TryRaisePresentation(
+                    snapshot.Position.X, snapshot.PositionHeight, snapshot.Position.Z, snapshot.Encounter))
             {
                 return;
             }
@@ -353,11 +355,12 @@ namespace FalseGods.Plugin
             }
         }
 
-        private bool TryRaisePresentation(float x, float z, EncounterId encounter)
+        private bool TryRaisePresentation(float x, float height, float z, EncounterId encounter)
         {
-            // The authoritative floor: the locally realized arena's authored boss-spawn height at the host's
-            // origin. Without an arena (load failed / not yet announced) there is nothing correct to stand the
-            // puppet on — show nothing rather than guess.
+            // The arena is what makes a puppet placeable at all: the host's position is world-space, and the
+            // arena's own authored floor is where this peer draws telegraphs and impacts. Without an arena (load
+            // failed / not yet announced) there is nothing correct to stand the puppet on — show nothing rather
+            // than guess.
             if (_loadedArena is null || _arenaEncounter != encounter)
             {
                 if (!_waitingForCameraLogged)
@@ -369,8 +372,10 @@ namespace FalseGods.Plugin
                 return false;
             }
 
-            var floorY = _loadedArena.BossSpawn.Y;
-            _presentation = new BossPresentation(_logger, new Vector3(x, floorY, z));
+            // The puppet stands exactly where the host says, height included — the host's boss may be on a
+            // terrace. The arena's authored floor is a separate fact, and stays the ground for telegraphs.
+            _presentation = new BossPresentation(
+                _logger, new Vector3(x, height, z), _loadedArena.BossSpawn.Y);
 
             // The puppet takes its size from the same authored room the host's boss takes it from, so the two
             // agree without the size ever going on the wire.
@@ -390,7 +395,8 @@ namespace FalseGods.Plugin
             _hitBinding = BossWeaponDamage.Bind(
                 _presentation.HitCollider.gameObject, new HitReportSink(_hitReporter, encounter), _logger);
 
-            _logger?.Log($"Client boss puppet raised for {encounter} at ({x:0.0}, {floorY:0.0}, {z:0.0}) on the arena floor; host-driven. Your weapons report hits to the host.");
+            _logger?.Log($"Client boss puppet raised for {encounter} at ({x:0.0}, {height:0.0}, {z:0.0}), "
+                + "where the host says it stands; host-driven. Your weapons report hits to the host.");
             return true;
         }
 
