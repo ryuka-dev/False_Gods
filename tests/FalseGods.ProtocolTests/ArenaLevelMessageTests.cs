@@ -6,6 +6,72 @@ using Xunit;
 namespace FalseGods.ProtocolTests
 {
     /// <summary>
+    /// Round-trip and untrusted-input tests for the destructible commands. The crates themselves never cross the
+    /// wire — these inputs are what every peer rebuilds them from, so a field lost or mangled here is a volley the
+    /// two players are not dodging together.
+    /// </summary>
+    public sealed class CrateMessageTests
+    {
+        [Fact]
+        public void A_drop_round_trips()
+        {
+            var original = new CrateDropped(new WorldPosition(1.5f, 2.5f, -3.5f));
+
+            Assert.Equal(original, WireCodec.DeserializeCrateDropped(WireCodec.Serialize(original)));
+        }
+
+        [Fact]
+        public void A_throw_round_trips()
+        {
+            var original = new CrateThrown(
+                new WorldPosition(1f, 2f, 3f), new WorldPosition(-4f, 0f, 5f), 1.6f, 3f);
+
+            Assert.Equal(original, WireCodec.DeserializeCrateThrown(WireCodec.Serialize(original)));
+        }
+
+        [Fact]
+        public void A_volley_round_trips_every_input_it_is_rebuilt_from()
+        {
+            var original = new CrateVolleyFired(
+                new WorldPosition(1f, 2f, 3f),
+                new WorldPosition(4f, 5f, 6f),
+                Seed: 12345,
+                Count: 6,
+                SpreadMinRadius: 1.4f,
+                SpreadMaxRadius: 4.2f,
+                LiftHeight: 5f,
+                LiftSeconds: 0.5f,
+                HoldSeconds: 0.83f,
+                FlightSeconds: 1.2f,
+                ApexHeight: 4f,
+                LeadShare: 0.5f);
+
+            Assert.Equal(original, WireCodec.DeserializeCrateVolleyFired(WireCodec.Serialize(original)));
+        }
+
+        [Fact]
+        public void Trailing_bytes_throw_not_ignored()
+        {
+            var payload = WireCodec.Serialize(new CrateDropped(new WorldPosition(0f, 0f, 0f)));
+            var padded = new byte[payload.Length + 1];
+            Array.Copy(payload, padded, payload.Length);
+
+            Assert.Throws<InvalidDataException>(() => WireCodec.DeserializeCrateDropped(padded));
+        }
+
+        [Fact]
+        public void Truncated_payload_throws_not_misreads()
+        {
+            var payload = WireCodec.Serialize(new CrateThrown(
+                new WorldPosition(1f, 2f, 3f), new WorldPosition(4f, 5f, 6f), 1f, 1f));
+            var truncated = new byte[payload.Length - 3];
+            Array.Copy(payload, truncated, truncated.Length);
+
+            Assert.ThrowsAny<Exception>(() => WireCodec.DeserializeCrateThrown(truncated));
+        }
+    }
+
+    /// <summary>
     /// Round-trip and untrusted-input tests for the session's boss-arena declaration: the host says which level
     /// is a boss arena, and a peer asks the host to take everyone there.
     /// </summary>

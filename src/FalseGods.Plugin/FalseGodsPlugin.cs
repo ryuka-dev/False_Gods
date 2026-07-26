@@ -142,6 +142,8 @@ namespace FalseGods.Plugin
         private IFalseGodsIntegration? _levelFlowIntegration; // the integration _levelFlow was composed on
         private IDisposable? _spawnOwnership;                 // held while an integration carries our spawns
         private IFalseGodsIntegration? _spawnOwnershipIntegration;
+        private CrateCommandFlow? _crateFlow;
+        private IFalseGodsIntegration? _crateFlowIntegration;  // the integration _crateFlow was composed on
         private HijackedArenaContent _levelArena = null!;
         private LocalEncounterController _boss = null!;
         private ClientBossController? _client;
@@ -261,6 +263,7 @@ namespace FalseGods.Plugin
             // there, so it is maintained every frame rather than only while an encounter is up.
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
             MaintainSpawnOwnership(FalseGodsIntegrations.Current);
+            MaintainCrateFlow(FalseGodsIntegrations.Current);
 
             // DEV (Strategy A bring-up): take the session to the arena. Role-independent for the player - one
             // press on either machine gets everyone there - but not role-independent underneath: the host
@@ -285,17 +288,20 @@ namespace FalseGods.Plugin
                 _playerVelocity.Reset();
             }
 
-            if (KeyPressed(_throwCrateKey.Value))
+            // The destructibles are host-authoritative like everything else that changes the world: the host does
+            // the thing and tells everyone, and a client's key does nothing rather than producing a second set of
+            // crates only it can see.
+            if (KeyPressed(_throwCrateKey.Value) && CrateKeysActHere())
             {
                 ThrowOneCrateAtThePlayer();
             }
 
-            if (KeyPressed(_dropCrateKey.Value))
+            if (KeyPressed(_dropCrateKey.Value) && CrateKeysActHere())
             {
                 DropOneCrateNearThePlayer();
             }
 
-            if (KeyPressed(_volleyCrateKey.Value))
+            if (KeyPressed(_volleyCrateKey.Value) && CrateKeysActHere())
             {
                 LaunchCrateVolleyAtThePlayer();
             }
@@ -314,6 +320,84 @@ namespace FalseGods.Plugin
 
             TearDownClientComposition();
             RunLocalComposition(integration, role);
+        }
+
+        /// <summary>
+        /// Whether this peer's destructible keys do anything. A client's do not: the host owns what happens to
+        /// the world, and a client that made its own crates would be dodging a different volley from everyone
+        /// else's. Without a session there is only this peer, so they work.
+        /// </summary>
+        private bool CrateKeysActHere()
+        {
+            var integration = FalseGodsIntegrations.Current;
+            if (integration is null || !integration.Session.IsActive)
+            {
+                return true;
+            }
+
+            if (integration.Session.Role == RuntimeContracts.Multiplayer.SessionRole.Host)
+            {
+                return true;
+            }
+
+            Logger.LogMessage("Multiplayer client: the host throws the crates; this key is inert here.");
+            return false;
+        }
+
+        /// <summary>
+        /// Keep the destructible-command flow composed on whatever integration is live, so a client can build the
+        /// host's crates. Torn down with the session — without one there is nobody to tell.
+        /// </summary>
+        private void MaintainCrateFlow(IFalseGodsIntegration? integration)
+        {
+            if (integration is null || !integration.Session.IsActive)
+            {
+                if (_crateFlow != null)
+                {
+                    _crateFlow.Dispose();
+                    _crateFlow = null;
+                    _crateFlowIntegration = null;
+                }
+
+                return;
+            }
+
+            if (_crateFlow != null && !ReferenceEquals(_crateFlowIntegration, integration))
+            {
+                _crateFlow.Dispose();
+                _crateFlow = null;
+                _crateFlowIntegration = null;
+            }
+
+            if (_crateFlow is null)
+            {
+                // Each applied command is logged the way the host logs the one it made, so the two sides can be
+                // compared. A volley that scattered differently would otherwise be invisible in the logs, and the
+                // whole point of sending a seed instead of positions is that it must not.
+                _crateFlow = new CrateCommandFlow(integration.Channel, integration.Session)
+                {
+                    OnDropped = at =>
+                    {
+                        _crates.Drop(at);
+                        _log.Log($"[crate] host dropped one at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
+                            + $"{_crates.Resting} resting here.");
+                    },
+                    OnThrown = (from, to, seconds, apex) =>
+                    {
+                        _crates.Throw(from, to, seconds, apex);
+                        _log.Log($"[crate] host threw one from ({from.X:0.0}, {from.Y:0.0}, {from.Z:0.0}) to "
+                            + $"({to.X:0.0}, {to.Y:0.0}, {to.Z:0.0}); {_crates.InFlight} in the air here.");
+                    },
+                    OnVolleyFired = (current, lead, shape) =>
+                    {
+                        var launched = _crates.LaunchVolley(current, lead, shape);
+                        _log.Log($"[crate] host fired a volley of {shape.Count} (seed {shape.Seed}); "
+                            + $"{launched} lifted here, aimed at ({current.X:0.0}, {current.Z:0.0}) / led to "
+                            + $"({lead.X:0.0}, {lead.Z:0.0}).");
+                    },
+                };
+                _crateFlowIntegration = integration;
+            }
         }
 
         /// <summary>
@@ -512,6 +596,7 @@ namespace FalseGods.Plugin
 
             if (_crates.Throw(from, foot, ThrowSeconds, ThrowApex))
             {
+                _crateFlow?.BroadcastThrown(from, foot, ThrowSeconds, ThrowApex);
                 _log.Log($"[crate] crate thrown from ({from.X:0.0}, {from.Y:0.0}, {from.Z:0.0}); "
                     + $"{_crates.InFlight} in the air. Shoot it for loot, or let it land for none.");
             }
@@ -545,6 +630,7 @@ namespace FalseGods.Plugin
 
             if (_crates.Drop(at))
             {
+                _crateFlow?.BroadcastDropped(at);
                 _log.Log($"[crate] crate dropped at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
                     + $"{_crates.Resting} resting. Tap again to stack a pile.");
             }
@@ -604,6 +690,9 @@ namespace FalseGods.Plugin
             var launched = _crates.LaunchVolley(currentCenter, leadCenter, shape);
             if (launched > 0)
             {
+                // The shape is the volley: every client computes the same crates from these inputs, so what the
+                // players dodge is the same volley rather than a description of one.
+                _crateFlow?.BroadcastVolley(currentCenter, leadCenter, shape);
                 _log.Log($"[crate] volley of {launched} lifted; {_crates.Resting} still resting. "
                     + $"Hold {hold:0.00}s; some aimed here ({current.X:0.0}, {current.Z:0.0}), "
                     + $"some led {airtime:0.00}s to ({lead.X:0.0}, {lead.Z:0.0}). Shoot them for loot.");
@@ -656,6 +745,9 @@ namespace FalseGods.Plugin
             _spawnOwnership?.Dispose();
             _spawnOwnership = null;
             _spawnOwnershipIntegration = null;
+            _crateFlow?.Dispose();
+            _crateFlow = null;
+            _crateFlowIntegration = null;
         }
 
         private enum CompositionRole

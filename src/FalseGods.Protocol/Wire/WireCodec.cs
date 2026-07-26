@@ -239,6 +239,80 @@ namespace FalseGods.Protocol.Wire
             return message;
         }
 
+        // ---------------------------------------------------------------- destructible commands
+
+        public static byte[] Serialize(CrateDropped message)
+        {
+            var w = new WireWriter();
+            WriteWorldPosition(w, message.At);
+            return w.ToArray();
+        }
+
+        public static CrateDropped DeserializeCrateDropped(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new CrateDropped(ReadWorldPosition(r));
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(CrateThrown message)
+        {
+            var w = new WireWriter();
+            WriteWorldPosition(w, message.From);
+            WriteWorldPosition(w, message.To);
+            w.WriteSingle(message.FlightSeconds);
+            w.WriteSingle(message.ApexHeight);
+            return w.ToArray();
+        }
+
+        public static CrateThrown DeserializeCrateThrown(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new CrateThrown(
+                ReadWorldPosition(r), ReadWorldPosition(r), r.ReadSingle(), r.ReadSingle());
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(CrateVolleyFired message)
+        {
+            var w = new WireWriter();
+            WriteWorldPosition(w, message.CurrentCenter);
+            WriteWorldPosition(w, message.LeadCenter);
+            WriteInt(w, message.Seed);
+            WriteInt(w, message.Count);
+            w.WriteSingle(message.SpreadMinRadius);
+            w.WriteSingle(message.SpreadMaxRadius);
+            w.WriteSingle(message.LiftHeight);
+            w.WriteSingle(message.LiftSeconds);
+            w.WriteSingle(message.HoldSeconds);
+            w.WriteSingle(message.FlightSeconds);
+            w.WriteSingle(message.ApexHeight);
+            w.WriteSingle(message.LeadShare);
+            return w.ToArray();
+        }
+
+        public static CrateVolleyFired DeserializeCrateVolleyFired(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new CrateVolleyFired(
+                ReadWorldPosition(r),
+                ReadWorldPosition(r),
+                r.ReadInt32(),
+                r.ReadInt32(),
+                r.ReadSingle(),
+                r.ReadSingle(),
+                r.ReadSingle(),
+                r.ReadSingle(),
+                r.ReadSingle(),
+                r.ReadSingle(),
+                r.ReadSingle(),
+                r.ReadSingle());
+            RequireEnd(r);
+            return message;
+        }
+
         // ---------------------------------------------------------------- arena level declaration
 
         public static byte[] Serialize(ArenaLevelDeclared message)

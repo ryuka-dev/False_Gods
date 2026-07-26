@@ -22,6 +22,9 @@ namespace FalseGods.Application.Replication
         BossHitPlayer = 12,
         ArenaLevelDeclared = 13,
         ArenaLevelRequested = 14,
+        CrateDropped = 15,
+        CrateThrown = 16,
+        CrateVolleyFired = 17,
     }
 
     /// <summary>One decoded replication message: its <see cref="Kind"/> and the deserialized DTO as <see cref="Value"/>.</summary>
@@ -83,6 +86,12 @@ namespace FalseGods.Application.Replication
 
         public static EncodedPayload Encode(ArenaLevelRequested message) => Wrap(ReplicationKind.ArenaLevelRequested, WireCodec.Serialize(message));
 
+        public static EncodedPayload Encode(CrateDropped message) => Wrap(ReplicationKind.CrateDropped, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(CrateThrown message) => Wrap(ReplicationKind.CrateThrown, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(CrateVolleyFired message) => Wrap(ReplicationKind.CrateVolleyFired, WireCodec.Serialize(message));
+
         /// <summary>Decode an opaque payload back into its DTO. Treats the payload as untrusted input.</summary>
         public static DecodedMessage Decode(EncodedPayload payload)
         {
@@ -126,6 +135,12 @@ namespace FalseGods.Application.Replication
                     return new DecodedMessage(kind, WireCodec.DeserializeArenaLevelDeclared(body));
                 case ReplicationKind.ArenaLevelRequested:
                     return new DecodedMessage(kind, WireCodec.DeserializeArenaLevelRequested(body));
+                case ReplicationKind.CrateDropped:
+                    return new DecodedMessage(kind, WireCodec.DeserializeCrateDropped(body));
+                case ReplicationKind.CrateThrown:
+                    return new DecodedMessage(kind, WireCodec.DeserializeCrateThrown(body));
+                case ReplicationKind.CrateVolleyFired:
+                    return new DecodedMessage(kind, WireCodec.DeserializeCrateVolleyFired(body));
                 default:
                     throw new InvalidDataException($"Unknown replication kind tag {bytes[0]}.");
             }
