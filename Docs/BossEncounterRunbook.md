@@ -125,9 +125,24 @@ the log shows the arena bundle loading exactly once.
 **Entry:** the encounter is complete in single-player.
 **Do:** see [MultiplayerLoadingContract.md](MultiplayerLoadingContract.md) for the ready gate and the content
 hash, and [OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitecture.md) for the replication
-model. **This step is not finished for the first encounter** — the client path still uses the additive arena
-load from before the level hijack, and re-attaching it is open work.
+model. Two things are specific to an arena that is the level, and both were measured with two peers
+(2026-07-26):
+
+- **Every peer generates the level itself, so every peer must know it is the arena.** The multiplayer layer does
+  not auto-follow the host into a level, and a *client*-initiated level load is intercepted and relayed so the
+  **host** leads the transition and the client then re-loads under the host's seed. One request therefore
+  produces up to three generation runs across two peers. Deciding "this is the arena" per load request covers
+  exactly one of them; the standing declaration (arena mode, §2.6) covers all of them. **Order matters at the
+  seam:** a peer that asks for the level before the other peer has declared arena mode makes that other peer
+  regenerate an ordinary level. Put the host in arena mode first.
+- **A client standing in the arena must adopt it, not realize its own.** The level realized it through the same
+  load flow — same parity check, same recomputed hash — so its manifest is what the client would report anyway,
+  and a second realization cannot even load (§3.12). Adoption also fixes ownership: the arena outlives the
+  encounter, because it belongs to the level.
+
 **Closes when:** two instances run the fight with both-way damage, identical arenas, and a clean teardown.
+**Done for the first encounter** (2026-07-26): both peers in one cave, client-reported hits applied by the host,
+one bundle load per peer.
 
 ---
 
@@ -222,6 +237,13 @@ A runtime-assembled `Room` must initialise **every** baked array to empty (the g
 without null checks), carry a `RoomLODBase` before `Room.Awake` runs, and use **zero navigation anchors** — the
 `NavMeshCleaner` marks everything outside its valid points unwalkable, and stays inert only while it has none.
 
+**Decide "this run builds the arena" at the run, not at the request.** `MakerGraphContext.StartMaking` is called
+once per whole generation graph and is reached by every path that generates a level — our own request, a peer
+following the host, the host leading a peer's transition. `GameManager.currentEnvironment` and
+`currentLevelIndex` are both already set when it is called, so the run can be identified there. What a peer
+declares is standing ("this level is the arena until I say otherwise"); what a run gets is per-run and released
+in a `finally`. See §1.5 for why the request is the wrong place.
+
 ### 2.7 Borrowed cave materials
 
 *How to re-take: read the `.mat` YAML out of an AssetRipper export, or the live materials through a probe.*
@@ -297,6 +319,12 @@ operator hands back the missing one. Use an explicit `== null` check.
 **Symptom:** the build fails with a cluster of file-lock errors. The running game holds the plugin DLLs open.
 Content (bundle and artifact) can be redeployed with the game running — only a level reload is needed to pick it
 up — but DLLs cannot.
+
+### 3.12 Loading the arena a second time on a peer that already stands in it
+**Symptom:** on a multiplayer client only, the whole encounter fails closed at the ready gate with "arena bundle
+failed to load". A standing arena holds its AssetBundle open, and `AssetBundle.LoadFromFile` of a file already
+loaded returns null rather than a second handle. A peer that is already in the arena must adopt the standing one
+(§1.5), not realize its own copy of it.
 
 ---
 
