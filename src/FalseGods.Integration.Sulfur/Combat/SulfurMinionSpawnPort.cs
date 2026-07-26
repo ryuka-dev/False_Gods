@@ -125,7 +125,95 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return;
             }
 
+            SendItAfterThePlayers(unit);
             _spawned.Add(unit);
+        }
+
+        /// <summary>
+        /// Point a freshly summoned minion at the fight. A goblin that walked into the room on its own has to
+        /// notice someone first, which is right for a wandering enemy and wrong for one that was <i>called</i>:
+        /// summoned on a terrace forty metres away and across a corner, it would stand there.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>One call, and deliberately nothing else.</b> Reporting a sighting is what the game does to a
+        /// unit that should already know where someone is: it hands the agent a target if it has none and records
+        /// the position in its memory, so the minion sets off instead of waiting to notice somebody. Everything
+        /// after that — who it actually chases once it arrives, and re-targeting — stays with the game's own
+        /// detection, which reads the whole player roster and is therefore multiplayer-aware.</para>
+        /// <para><b>The two flags the vanilla summon sites set alongside this are a trap and are not set here.</b>
+        /// <c>onlyTargetPlayer</c> does not mean "only interested in players": <c>AiAgent.GetTarget</c> reads it as
+        /// "the target is <c>GameManager.PlayerUnit</c>", the <i>local</i> player singleton, hardcoded. With
+        /// <c>useLineOfSight = false</c> beside it that becomes unconditional, so on a host every minion charges
+        /// the host's own player forever and no one else's — measured, after this code did exactly that.
+        /// <c>useLineOfSight</c> is also what gates the sighting being propagated to the rest of the group, so
+        /// clearing it quietly costs that too.</para>
+        /// <para>Host-only, like the spawn itself: a client's minions are puppets whose AI the session layer
+        /// disables, so nothing here would mean anything there.</para>
+        /// </remarks>
+        private void SendItAfterThePlayers(Unit unit)
+        {
+            try
+            {
+                var npc = unit as Npc;
+                var agent = npc != null ? npc.AiAgent : null;
+                if (agent == null)
+                {
+                    return; // not a unit that chases anything
+                }
+
+                var nearest = NearestPlayerUnitTo(unit.transform.position);
+                if (nearest != null)
+                {
+                    agent.ReportLastSeen(nearest, nearest.transform.position, unit.transform.position, true);
+                }
+            }
+            catch (Exception exception)
+            {
+                // A minion that has to notice the players by itself is a worse fight, not a broken one.
+                _logger?.LogWarning($"[minion] a minion could not be pointed at the fight ({exception.Message}); "
+                    + "it will have to notice the players on its own.");
+            }
+        }
+
+        /// <summary>
+        /// The player unit closest to <paramref name="from"/>, or null when the game lists none. Read from the
+        /// game's own player roster rather than its local-player singleton, because that roster is what a session
+        /// registers its remote players into — so "nearest player" means nearest of <i>everyone</i>.
+        /// </summary>
+        private static Unit? NearestPlayerUnitTo(Vector3 from)
+        {
+            var gameManager = StaticInstance<GameManager>.Instance;
+            if (gameManager == null)
+            {
+                return null;
+            }
+
+            var players = gameManager.Players;
+            if (players == null)
+            {
+                return null;
+            }
+
+            Unit? nearest = null;
+            var nearestDistance = float.MaxValue;
+            for (var i = 0; i < players.Count; i++)
+            {
+                var player = players[i];
+                var playerUnit = player != null ? player.playerUnit : null;
+                if (playerUnit == null)
+                {
+                    continue;
+                }
+
+                var distance = (playerUnit.transform.position - from).sqrMagnitude;
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = playerUnit;
+                }
+            }
+
+            return nearest;
         }
 
         /// <summary>Drop the entries whose units have gone — destroyed by us, killed by a player, or taken with a
