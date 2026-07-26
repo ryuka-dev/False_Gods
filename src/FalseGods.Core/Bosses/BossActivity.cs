@@ -26,5 +26,14 @@ namespace FalseGods.Core.Bosses
 
         /// <summary>The boss is dead. Terminal — it neither moves nor attacks.</summary>
         Dead = 4,
+
+        /// <summary>Leaving: still where it was, still visible, already invulnerable.</summary>
+        Vanishing = 5,
+
+        /// <summary>Gone from view. The move to the next station happens on entering this state.</summary>
+        Hidden = 6,
+
+        /// <summary>Arriving at the new station, visible again but invulnerable until this window ends.</summary>
+        Appearing = 7,
     }
 }

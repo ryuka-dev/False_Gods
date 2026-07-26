@@ -14,6 +14,14 @@ namespace FalseGods.Core.Bosses
     /// </remarks>
     public sealed record BossDefinition
     {
+        // The relocation shape, taken from the vanilla cave boss's own submerge/reappear clips (measured on
+        // v0.18.5): its root sinks about three metres in 0.42 s, waits underground, then rises in 0.33 s, and its
+        // invulnerability is dropped 0.60 s into the reappearance — while it is still visibly settling. The hold
+        // is shorter here than vanilla's ~1.8 s, which it spends spawning an arm we have no equivalent of.
+        private const float DefaultVanishSeconds = 0.45f;
+        private const float DefaultHiddenSeconds = 0.6f;
+        private const float DefaultAppearSeconds = 0.6f;
+
         public BossDefinition(
             int maxHealth,
             float phaseTwoHealthFraction,
@@ -26,7 +34,10 @@ namespace FalseGods.Core.Bosses
             int attackDamage,
             float aimedHitRadius,
             float areaHitRadius,
-            IReadOnlyList<BossStation>? stations = null)
+            IReadOnlyList<BossStation>? stations = null,
+            float vanishSeconds = DefaultVanishSeconds,
+            float hiddenSeconds = DefaultHiddenSeconds,
+            float appearSeconds = DefaultAppearSeconds)
         {
             if (maxHealth <= 0)
             {
@@ -67,7 +78,14 @@ namespace FalseGods.Core.Bosses
             RequirePositive(aimedHitRadius, nameof(aimedHitRadius));
             RequirePositive(areaHitRadius, nameof(areaHitRadius));
 
+            RequirePositive(vanishSeconds, nameof(vanishSeconds));
+            RequirePositive(hiddenSeconds, nameof(hiddenSeconds));
+            RequirePositive(appearSeconds, nameof(appearSeconds));
+
             Stations = ValidateItinerary(stations, moveSpeed);
+            VanishSeconds = vanishSeconds;
+            HiddenSeconds = hiddenSeconds;
+            AppearSeconds = appearSeconds;
 
             MaxHealth = maxHealth;
             PhaseTwoHealthFraction = phaseTwoHealthFraction;
@@ -132,6 +150,18 @@ namespace FalseGods.Core.Bosses
 
         /// <summary>Whether this boss's position is decided by its itinerary rather than by moving.</summary>
         public bool HasItinerary => Stations.Count > 0;
+
+        /// <summary>How long the boss takes to leave, still visible and already invulnerable.</summary>
+        public float VanishSeconds { get; }
+
+        /// <summary>How long it stays out of sight. The move to the next station happens as this begins.</summary>
+        public float HiddenSeconds { get; }
+
+        /// <summary>How long it is arriving — visible again, and invulnerable until this window ends.</summary>
+        public float AppearSeconds { get; }
+
+        /// <summary>The whole relocation, end to end.</summary>
+        public float RelocationSeconds => VanishSeconds + HiddenSeconds + AppearSeconds;
 
         /// <summary>
         /// An itinerary must start at full health and descend strictly: each station is entered at a lower health

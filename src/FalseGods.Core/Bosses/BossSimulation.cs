@@ -41,6 +41,7 @@ namespace FalseGods.Core.Bosses
         private readonly IReadOnlyList<BossAnchor> _anchors;
 
         private bool _spawned;
+        private int _pendingStation = -1; // a station reached but not yet moved to; see AdvanceStations
         private float _activityEnteredTime;
         private float _lastAdvanceTime;
         private AttackInstanceId _lastAttackId;
@@ -103,6 +104,23 @@ namespace FalseGods.Core.Bosses
 
         /// <summary>Which step of its itinerary the boss is at, or -1 when it has none (or has not spawned).</summary>
         public int StationIndex { get; private set; }
+
+        /// <summary>
+        /// A station health has already reached but the boss has not moved to yet, or -1 when there is none. It
+        /// leaves between actions, so this is set the moment the threshold is crossed and consumed when the boss
+        /// next goes idle — the gap between the two is where "why has it not moved?" is answered.
+        /// </summary>
+        public int PendingStationIndex => _pendingStation;
+
+        /// <summary>
+        /// Whether the boss is in the middle of changing where it stands — leaving, gone, or arriving. It takes
+        /// no damage for the whole of it, exactly as the vanilla cave boss is invulnerable from the start of its
+        /// submerge until its reappearance finishes.
+        /// </summary>
+        public bool IsRelocating =>
+            Activity == BossActivity.Vanishing
+            || Activity == BossActivity.Hidden
+            || Activity == BossActivity.Appearing;
 
         /// <summary>The unit direction the boss faces — toward its current target, or <see cref="SimVector2.Zero"/>.</summary>
         public SimVector2 Facing { get; private set; }
@@ -168,7 +186,7 @@ namespace FalseGods.Core.Bosses
             _lastAdvanceTime = now;
 
             var hasTarget = TryGetNearestTarget(out _, out var targetPosition);
-            if (hasTarget)
+            if (hasTarget && !IsRelocating)
             {
                 Facing = Position.DirectionTo(targetPosition);
             }
@@ -183,6 +201,30 @@ namespace FalseGods.Core.Bosses
             var elapsed = Math.Max(0f, now - _activityEnteredTime);
             switch (Activity)
             {
+                case BossActivity.Vanishing:
+                    if (elapsed >= _definition.VanishSeconds)
+                    {
+                        EnterHidden(now);
+                    }
+
+                    return; // a relocation suspends the attack cycle entirely
+
+                case BossActivity.Hidden:
+                    if (elapsed >= _definition.HiddenSeconds)
+                    {
+                        EnterAppearing(now);
+                    }
+
+                    return;
+
+                case BossActivity.Appearing:
+                    if (elapsed >= _definition.AppearSeconds)
+                    {
+                        FinishRelocation(now);
+                    }
+
+                    return;
+
                 case BossActivity.Idle:
                     // Idle time only accrues while there is someone to attack; an empty arena pauses the cycle
                     // rather than firing an attack at nothing (Docs/DependencyRules.md §3 — observe the roster).
@@ -231,7 +273,7 @@ namespace FalseGods.Core.Bosses
         /// </summary>
         public void ApplyDamage(int rawAmount)
         {
-            if (!_spawned || IsDead || rawAmount <= 0)
+            if (!_spawned || IsDead || rawAmount <= 0 || IsRelocating)
             {
                 return;
             }
@@ -293,33 +335,96 @@ namespace FalseGods.Core.Bosses
         }
 
         /// <summary>
-        /// Walk the itinerary forward to the last station this health level has reached, and put the boss there.
-        /// One hit big enough to cross several stations lands at the last of them and reports once — a boss does
-        /// not visit places the players never saw it in.
+        /// Take the itinerary's next step if health has reached it, and leave <b>now</b>.
         /// </summary>
+        /// <remarks>
+        /// <para><b>One station at a time.</b> A burst that crosses three thresholds at once does not skip to the
+        /// last of them: the boss goes to the next one, and the step after that is taken when it arrives
+        /// (<see cref="FinishRelocation"/> asks again). Otherwise a strong enough weapon deletes the whole
+        /// itinerary and the fight never has the shape it was designed with — measured in game, where a fast
+        /// weapon crossed every remaining threshold inside a single attack cycle.</para>
+        /// <para><b>And immediately.</b> An earlier version waited for the boss to be idle, so that it would not
+        /// vanish out of its own telegraph. The same measurement showed why that cannot work: under real damage
+        /// the boss is almost never idle, so it simply never moved. It now interrupts whatever it was doing — an
+        /// attack that never commits also never lands, which is the boss paying for its retreat.</para>
+        /// </remarks>
         private void AdvanceStations()
         {
             var stations = _definition.Stations;
-            if (StationIndex < 0 || stations.Count == 0)
+            if (StationIndex < 0 || IsRelocating || _pendingStation >= 0)
+            {
+                return;
+            }
+
+            var next = StationIndex + 1;
+            if (next >= stations.Count)
             {
                 return;
             }
 
             var healthFraction = Health / (float)_definition.MaxHealth;
-            var next = StationIndex;
-            while (next + 1 < stations.Count && healthFraction <= stations[next + 1].EnterAtHealthFraction)
-            {
-                next++;
-            }
-
-            if (next == StationIndex || !TryEnterStation(next))
+            if (healthFraction > stations[next].EnterAtHealthFraction)
             {
                 return;
             }
 
-            StationIndex = next;
+            _pendingStation = next;
+            BeginRelocation(_clock.Time);
+        }
+
+        /// <summary>Start leaving: invulnerable and still in place, the way the vanilla cave boss is already
+        /// invulnerable as it begins to submerge.</summary>
+        private void BeginRelocation(float now)
+        {
+            // Interrupting the weak-point window closes it, and that has to be said: the flag is derived from the
+            // activity, so a client left holding the last "exposed" event would keep the weak point lit on a boss
+            // that no longer has one.
+            if (Activity == BossActivity.Recovering)
+            {
+                _events.Add(new WeakPointExposed(Id, false));
+            }
+
+            CurrentAttack = null;
+            Facing = SimVector2.Zero;
+            Activity = BossActivity.Vanishing;
+            _activityEnteredTime = now;
+        }
+
+        /// <summary>
+        /// Out of sight — and therefore the moment to move. Doing it here is the whole point of the sequence:
+        /// nobody sees the boss cross the room, they see it leave one place and arrive at another.
+        /// </summary>
+        private void EnterHidden(float now)
+        {
+            Activity = BossActivity.Hidden;
+            _activityEnteredTime = now;
+
+            var target = _pendingStation;
+            _pendingStation = -1;
+            if (target < 0 || !TryEnterStation(target))
+            {
+                return; // no anchor authored for it: stay where we are, and simply come back up
+            }
+
+            StationIndex = target;
             _events.Add(new BossRelocated(
-                Id, next, stations[next].AnchorIndex, Position, PositionHeight));
+                Id, target, _definition.Stations[target].AnchorIndex, Position, PositionHeight));
+        }
+
+        /// <summary>Arriving: visible again at the new station, still invulnerable until the window ends.</summary>
+        private void EnterAppearing(float now)
+        {
+            Activity = BossActivity.Appearing;
+            _activityEnteredTime = now;
+        }
+
+        /// <summary>Back in the fight — and straight out again if health has already reached the station after
+        /// this one, which is how a burst gets walked one station at a time instead of skipping them.</summary>
+        private void FinishRelocation(float now)
+        {
+            Activity = BossActivity.Idle;
+            _activityEnteredTime = now;
+            AdvanceStations();
         }
 
         /// <summary>

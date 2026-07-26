@@ -130,6 +130,12 @@ namespace FalseGods.Application.Presentation
                     return BossVisualActivity.Recovering;
                 case (int)BossActivity.Dead:
                     return BossVisualActivity.Dead;
+                case (int)BossActivity.Vanishing:
+                    return BossVisualActivity.Vanishing;
+                case (int)BossActivity.Hidden:
+                    return BossVisualActivity.Hidden;
+                case (int)BossActivity.Appearing:
+                    return BossVisualActivity.Appearing;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(stateId), stateId, "Unknown wire boss state id.");
             }

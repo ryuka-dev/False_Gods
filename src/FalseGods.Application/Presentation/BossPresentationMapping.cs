@@ -98,6 +98,12 @@ namespace FalseGods.Application.Presentation
                     return BossVisualActivity.Recovering;
                 case BossActivity.Dead:
                     return BossVisualActivity.Dead;
+                case BossActivity.Vanishing:
+                    return BossVisualActivity.Vanishing;
+                case BossActivity.Hidden:
+                    return BossVisualActivity.Hidden;
+                case BossActivity.Appearing:
+                    return BossVisualActivity.Appearing;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(activity), activity, "Unknown boss activity.");
             }

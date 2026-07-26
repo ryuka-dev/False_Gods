@@ -52,6 +52,22 @@ namespace FalseGods.CoreTests
             return boss;
         }
 
+        /// <summary>
+        /// Drive a whole relocation and hand back everything it emitted. A relocation only begins once the boss
+        /// is idle and then takes real time — leaving, hidden, arriving — so a test that only applies damage sees
+        /// nothing, which is the point.
+        /// </summary>
+        private static IReadOnlyList<IBossDomainEvent> RunRelocation(BossTestHarness harness)
+        {
+            var collected = new List<IBossDomainEvent>();
+            for (var i = 0; i < 6; i++)
+            {
+                collected.AddRange(harness.Step(0.7f));
+            }
+
+            return collected;
+        }
+
         [Fact]
         public void Spawns_at_its_first_station_not_at_the_fallback()
         {
@@ -69,7 +85,8 @@ namespace FalseGods.CoreTests
             var boss = Spawned(harness);
 
             boss.ApplyDamage(21); // 100 -> 79, at or below the 80% station
-            var events = boss.DrainEvents();
+            Assert.Empty(boss.DrainEvents().OfType<BossRelocated>()); // not yet: it leaves between actions
+            var events = RunRelocation(harness);
 
             var moved = events.OfType<BossRelocated>().Single();
             Assert.Equal(1, moved.StationIndex);
@@ -81,10 +98,12 @@ namespace FalseGods.CoreTests
         [Fact]
         public void Damage_that_does_not_reach_the_next_threshold_leaves_it_where_it_stands()
         {
-            var boss = Spawned(new BossTestHarness());
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness);
 
             boss.ApplyDamage(19); // 100 -> 81, still above 80%
-            var events = boss.DrainEvents();
+            boss.DrainEvents();
+            var events = RunRelocation(harness);
 
             Assert.Empty(events.OfType<BossRelocated>());
             Assert.Equal(0, boss.StationIndex);
@@ -92,29 +111,38 @@ namespace FalseGods.CoreTests
         }
 
         [Fact]
-        public void One_hit_crossing_several_stations_lands_at_the_last_and_reports_once()
+        public void One_hit_crossing_several_stations_walks_them_one_at_a_time()
         {
-            var boss = Spawned(new BossTestHarness());
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness);
 
-            boss.ApplyDamage(85); // 100 -> 15: past the 80, 60, 40 and 20 per-cent stations
-            var events = boss.DrainEvents();
+            boss.ApplyDamage(85); // 100 -> 15: past the 80, 60, 40 and 20 per-cent stations at once
+            boss.DrainEvents();
 
-            var moved = events.OfType<BossRelocated>().Single();
-            Assert.Equal(4, moved.StationIndex);
-            Assert.Equal(0, moved.AnchorIndex);
+            var visited = new List<int>();
+            for (var i = 0; i < 30; i++)
+            {
+                visited.AddRange(harness.Step(0.3f).OfType<BossRelocated>().Select(e => e.AnchorIndex));
+            }
+
+            // Not a jump to the last one: a weapon strong enough to cross the whole itinerary at once does not
+            // get to delete the fight's shape.
+            Assert.Equal(new[] { 1, 0, 1, 0 }, visited);
             Assert.Equal(4, boss.StationIndex);
         }
 
         [Fact]
         public void The_whole_itinerary_is_walked_in_order_as_health_falls()
         {
-            var boss = Spawned(new BossTestHarness());
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness);
             var visited = new List<int>();
 
             for (var i = 0; i < 10; i++)
             {
                 boss.ApplyDamage(10);
-                visited.AddRange(boss.DrainEvents().OfType<BossRelocated>().Select(e => e.AnchorIndex));
+                boss.DrainEvents();
+                visited.AddRange(RunRelocation(harness).OfType<BossRelocated>().Select(e => e.AnchorIndex));
             }
 
             Assert.Equal(new[] { 1, 0, 1, 0 }, visited);
@@ -134,10 +162,12 @@ namespace FalseGods.CoreTests
         [Fact]
         public void Death_is_not_a_relocation()
         {
-            var boss = Spawned(new BossTestHarness());
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness);
 
             boss.ApplyDamage(1000);
-            var events = boss.DrainEvents();
+            boss.DrainEvents();
+            var events = RunRelocation(harness);
 
             Assert.True(boss.IsDead);
             Assert.Empty(events.OfType<BossRelocated>());
@@ -152,10 +182,11 @@ namespace FalseGods.CoreTests
             boss.DrainEvents();
 
             boss.ApplyDamage(50);
+            var events = RunRelocation(harness);
 
             Assert.Equal(new SimVector2(3f, 4f), boss.Position);
             Assert.Equal(5f, boss.PositionHeight);
-            Assert.Empty(boss.DrainEvents().OfType<BossRelocated>());
+            Assert.Empty(events.OfType<BossRelocated>());
         }
 
         [Fact]
@@ -168,6 +199,117 @@ namespace FalseGods.CoreTests
             Assert.Equal(-1, boss.StationIndex);
             Assert.Equal(new SimVector2(3f, 4f), boss.Position);
             Assert.Equal(5f, boss.PositionHeight);
+        }
+
+        // ---------------------------------------------------------------- the relocation itself
+
+        [Fact]
+        public void It_leaves_is_gone_and_arrives_in_that_order()
+        {
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness);
+            boss.ApplyDamage(21);
+
+            harness.Step(0.01f);
+            Assert.Equal(BossActivity.Vanishing, boss.Activity);
+            Assert.Equal(Anchors[0].Ground, boss.Position); // still where it was: it has not gone yet
+
+            harness.Step(0.5f);
+            Assert.Equal(BossActivity.Hidden, boss.Activity);
+            Assert.Equal(Anchors[1].Ground, boss.Position); // moved out of sight
+
+            harness.Step(0.7f);
+            Assert.Equal(BossActivity.Appearing, boss.Activity);
+
+            harness.Step(0.7f);
+            Assert.Equal(BossActivity.Idle, boss.Activity);
+        }
+
+        [Fact]
+        public void It_takes_no_damage_for_the_whole_relocation()
+        {
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness);
+            boss.ApplyDamage(21); // 100 -> 79
+            harness.Step(0.01f);
+            var healthOnLeaving = boss.Health;
+
+            // Fire at it through leaving, gone, and arriving.
+            for (var i = 0; i < 3; i++)
+            {
+                boss.ApplyDamage(50);
+                Assert.True(boss.IsRelocating);
+                Assert.Equal(healthOnLeaving, boss.Health);
+                harness.Step(0.7f);
+            }
+
+            // And it is hittable again the moment it is back.
+            Assert.Equal(BossActivity.Idle, boss.Activity);
+            boss.ApplyDamage(5);
+            Assert.Equal(healthOnLeaving - 5, boss.Health);
+        }
+
+        [Fact]
+        public void A_boss_mid_attack_leaves_at_once_and_that_attack_never_lands()
+        {
+            var harness = new BossTestHarness().WithParticipantAt(1, 5f, 5f).WithRandom(0);
+            var boss = Spawned(harness);
+
+            harness.Step(1.1f); // idle elapses: it telegraphs
+            Assert.Equal(BossActivity.Telegraphing, boss.Activity);
+            boss.DrainEvents();
+
+            boss.ApplyDamage(21); // reaches the next station mid-telegraph
+
+            // Waiting for a clean moment sounds polite and does not survive contact: measured in game, a fast
+            // weapon crossed every threshold inside one attack cycle and the boss never moved at all.
+            Assert.Equal(BossActivity.Vanishing, boss.Activity);
+
+            var events = new List<IBossDomainEvent>();
+            for (var i = 0; i < 6; i++)
+            {
+                events.AddRange(harness.Step(0.3f));
+            }
+
+            Assert.Single(events.OfType<BossRelocated>());
+            Assert.Empty(events.OfType<AttackCommitted>()); // the interrupted attack pays for the retreat
+        }
+
+        [Fact]
+        public void Interrupting_the_weak_point_window_closes_it()
+        {
+            var harness = new BossTestHarness().WithParticipantAt(1, 5f, 5f).WithRandom(0);
+            var boss = Spawned(harness);
+            harness.Step(1.1f); // telegraph
+            harness.Step(1.1f); // commit
+            harness.Step(0.6f); // recovery: the weak point is open
+            Assert.True(boss.IsWeakPointExposed);
+            boss.DrainEvents();
+
+            boss.ApplyDamage(21);
+
+            // The flag is derived from the activity, so without this event a client would keep the weak point lit
+            // on a boss that no longer has one.
+            var closed = boss.DrainEvents().OfType<WeakPointExposed>().Single();
+            Assert.False(closed.Exposed);
+            Assert.False(boss.IsWeakPointExposed);
+        }
+
+        [Fact]
+        public void A_station_reached_while_it_is_away_is_taken_on_the_next_leaving()
+        {
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness);
+            boss.ApplyDamage(21); // -> station 1
+            harness.Step(0.01f);
+            Assert.Equal(BossActivity.Vanishing, boss.Activity);
+
+            // A hit landing here is refused, so the itinerary cannot be skipped past by shooting during a move.
+            boss.ApplyDamage(60);
+            var events = RunRelocation(harness);
+
+            Assert.Equal(1, boss.StationIndex);
+            Assert.Single(events.OfType<BossRelocated>());
         }
 
         // ---------------------------------------------------------------- definition validation

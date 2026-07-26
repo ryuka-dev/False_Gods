@@ -3,11 +3,61 @@ using FalseGods.Application.Presentation;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Events;
 using FalseGods.Core.Simulation;
+using FalseGods.Protocol.Wire;
 using FalseGods.RuntimeContracts.Presentation;
 using Xunit;
 
 namespace FalseGods.ApplicationTests
 {
+    /// <summary>
+    /// Every authoritative boss activity must reach presentation, on both the host's path and a client's. A new
+    /// activity that only one of them knows about is a boss that animates on one machine and not the other, and
+    /// the wire carries the activity as a bare integer, so nothing else would catch it.
+    /// </summary>
+    public sealed class BossActivityMappingCoverageTests
+    {
+        [Fact]
+        public void Every_activity_maps_on_the_wire_path()
+        {
+            foreach (BossActivity activity in System.Enum.GetValues(typeof(BossActivity)))
+            {
+                var snapshot = SnapshotWithState((int)activity);
+
+                var state = WirePresentationMapping.ToState(snapshot);
+
+                Assert.Equal(activity.ToString(), state.Activity.ToString());
+            }
+        }
+
+        [Fact]
+        public void An_activity_the_build_does_not_know_is_refused_rather_than_guessed()
+        {
+            var snapshot = SnapshotWithState(999);
+
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => WirePresentationMapping.ToState(snapshot));
+        }
+
+        private static BossSnapshot SnapshotWithState(int stateId) => new BossSnapshot(
+            new EncounterId(1),
+            new BossInstanceId(1),
+            new DefinitionId(1),
+            ProtocolVersion.Current,
+            new SimulationTick(0),
+            PhaseId: 0,
+            StateId: stateId,
+            StateStartTick: new SimulationTick(0),
+            ActiveAttack: null,
+            ActiveAttackDefinitionId: null,
+            Target: null,
+            Position: SimVector2.Zero,
+            PositionHeight: 0f,
+            Facing: SimVector2.Zero,
+            Health: 1,
+            MaxHealth: 1,
+            WeakPointExposed: false,
+            LastProcessedBossEventSequence: new Sequence(0));
+    }
+
     public sealed class BossPresentationMappingTests
     {
         private static readonly BossInstanceId Boss = new BossInstanceId(7);

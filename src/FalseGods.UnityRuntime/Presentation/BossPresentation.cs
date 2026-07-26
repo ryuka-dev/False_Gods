@@ -60,6 +60,17 @@ namespace FalseGods.UnityRuntime.Presentation
         // vanilla cave boss measures ≈ 4.9 world units, so the rig defaults to about twice size. Tunable live.
         private const float DefaultSpriteScale = 2.0f;
 
+        // Relocation visuals, from the vanilla cave boss's own submerge/reappear clips (measured on v0.18.5): the
+        // rig's root sinks ~3 m in 0.42 s with a Z lurch of about -13°/+23°, waits below, then rises in 0.33 s and
+        // settles through a damped wobble. Vanilla swaps between five drawings on the way; ours has one, and the
+        // read is carried by the sink, the rise and the wobble — which need no art at all.
+        private const float SinkDepth = 3.2f;         // metres below the standing height, deep enough to be gone
+        private const float SinkSeconds = 0.42f;      // vanilla's own sink time
+        private const float RiseSeconds = 0.33f;      // vanilla's own rise time
+        private const float LurchDegrees = 23f;       // the peak of vanilla's Z wobble
+        private const float SettleSeconds = 1.6f;     // how long the arrival wobble takes to die away
+        private const float SettleFrequency = 3.2f;   // wobbles per second while settling
+
         // The embedded boss body sprite is loaded by this resource-name suffix (EmbeddedArt/README.md); absent → a
         // flat coloured quad, so the art is never required for correct behaviour.
         private const string BodyTextureResourceSuffix = "boss-body.png";
@@ -120,6 +131,11 @@ namespace FalseGods.UnityRuntime.Presentation
         private Vector3 _telegraphAim;
         private float _telegraphStart;
         private float _telegraphSeconds;
+
+        // Relocation animation: when the current visual activity began, so the sink/rise can be driven off it.
+        private BossVisualActivity _lastActivity = BossVisualActivity.Idle;
+        private float _activityStart;
+        private float _relocationTilt;   // degrees of roll applied on top of the body's facing
 
         /// <param name="logger">Optional diagnostics sink; when null, the renderer logs nothing (logging is a pure
         /// diagnostic concern, never required for correct behaviour).</param>
@@ -371,10 +387,39 @@ namespace FalseGods.UnityRuntime.Presentation
 
             if (_hasState)
             {
+                if (_state.Activity != _lastActivity)
+                {
+                    _lastActivity = _state.Activity;
+                    _activityStart = _time;
+
+                    // A telegraph belongs to the attack that is running. Clearing it whenever the boss is no
+                    // longer telegraphing or committing means an attack that never lands — interrupted by a
+                    // relocation, or whose landing cue was lost — cannot leave its circle burning on the ground.
+                    if (_state.Activity != BossVisualActivity.Telegraphing
+                        && _state.Activity != BossVisualActivity.Committing)
+                    {
+                        _telegraphActive = false;
+                    }
+                }
+
                 // The boss stands at the height its authored anchor puts it at, which the state carries; _floorY
-                // stays the arena's ground, where telegraphs and impacts are drawn.
+                // stays the arena's ground, where telegraphs and impacts are drawn. A relocation offsets it below
+                // that: it leaves by sinking into whatever it is standing on and arrives by rising back out.
+                float sink, tilt;
+                RelocationOffset(out sink, out tilt);
+
+                // Nothing to shoot while it is underground, the way the vanilla boss switches its main collider
+                // off for the same window. The simulation refuses the damage regardless; this is so a shot passes
+                // through the ground rather than stopping on a boss nobody can see.
+                var reachable = _state.Activity != BossVisualActivity.Hidden;
+                if (_collisionBody.activeSelf != reachable)
+                {
+                    _collisionBody.SetActive(reachable);
+                    _hitBody.SetActive(reachable);
+                }
                 _root.transform.position =
-                    new Vector3(_state.Position.X, _state.PositionHeight, _state.Position.Z);
+                    new Vector3(_state.Position.X, _state.PositionHeight + sink, _state.Position.Z);
+                _relocationTilt = tilt;
 
                 // Aim pivot yaws toward the boss's facing so the muzzle points at the target (gameplay space).
                 if (Math.Abs(_state.Facing.X) > 1e-4f || Math.Abs(_state.Facing.Z) > 1e-4f)
@@ -432,6 +477,18 @@ namespace FalseGods.UnityRuntime.Presentation
 
         private void OrientBody(Camera camera)
         {
+            OrientBodyFacing(camera);
+
+            // The lurch rides on top of whatever facing was chosen: the boss rolls as it goes down and as it
+            // comes back up, which is what sells a sink rather than a slide.
+            if (Math.Abs(_relocationTilt) > 0.01f)
+            {
+                _bodyBillboard.rotation *= Quaternion.Euler(0f, 0f, _relocationTilt);
+            }
+        }
+
+        private void OrientBodyFacing(Camera camera)
+        {
             switch (FacingMode)
             {
                 case BossFacingMode.Fixed:
@@ -464,6 +521,47 @@ namespace FalseGods.UnityRuntime.Presentation
                     }
 
                     break;
+            }
+        }
+
+        /// <summary>
+        /// How far below its standing height the boss currently sits, and how far it is rolled, for the leaving /
+        /// gone / arriving states. Vanilla's shape: sink in 0.42 s with a lurch, wait below, rise in 0.33 s and
+        /// wobble out. Every other state is upright and at rest.
+        /// </summary>
+        private void RelocationOffset(out float sink, out float tilt)
+        {
+            var elapsed = Math.Max(0f, _time - _activityStart);
+            switch (_state.Activity)
+            {
+                case BossVisualActivity.Vanishing:
+                {
+                    var t = Mathf.Clamp01(elapsed / SinkSeconds);
+                    sink = -SinkDepth * t * t;                       // accelerating, as if pulled under
+                    tilt = LurchDegrees * Mathf.Sin(t * Mathf.PI * 2f);
+                    return;
+                }
+
+                case BossVisualActivity.Hidden:
+                    sink = -SinkDepth;
+                    tilt = 0f;
+                    return;
+
+                case BossVisualActivity.Appearing:
+                {
+                    var t = Mathf.Clamp01(elapsed / RiseSeconds);
+                    sink = -SinkDepth * (1f - t) * (1f - t);         // decelerating into place
+                    // The wobble outlives the rise and dies away, so the boss is still settling when it becomes
+                    // vulnerable again — vanilla drops its invulnerability mid-settle too.
+                    var decay = Mathf.Clamp01(1f - (elapsed / SettleSeconds));
+                    tilt = LurchDegrees * decay * decay * Mathf.Sin(elapsed * SettleFrequency * Mathf.PI * 2f);
+                    return;
+                }
+
+                default:
+                    sink = 0f;
+                    tilt = 0f;
+                    return;
             }
         }
 

@@ -18,5 +18,8 @@ namespace FalseGods.RuntimeContracts.Presentation
         Committing = 2,
         Recovering = 3,
         Dead = 4,
+        Vanishing = 5,
+        Hidden = 6,
+        Appearing = 7,
     }
 }

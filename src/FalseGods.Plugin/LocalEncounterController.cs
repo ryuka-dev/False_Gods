@@ -120,6 +120,8 @@ namespace FalseGods.Plugin
 
         private EncounterId _encounter;
         private WorldPosition _originWire;
+        private BossActivity _lastReportedActivity = BossActivity.Dead; // forces the first real activity to report
+        private int _lastReportedPending = -1;
 
         public LocalEncounterController(ILogger logger, float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
@@ -342,6 +344,7 @@ namespace FalseGods.Plugin
             }
 
             _boss.Advance();
+            ReportActivityChange();
             Present();
             _presentation.Render(deltaSeconds);
         }
@@ -480,6 +483,40 @@ namespace FalseGods.Plugin
             ReportAuthoredBossContent(arena);
         }
 
+        /// <summary>Report every activity transition while a boss is up, so a relocation that does not happen is
+        /// as visible in the log as one that does. Diagnostics only.</summary>
+        private void ReportActivityChange()
+        {
+            if (_boss is null)
+            {
+                return;
+            }
+
+            // A station becoming pending is the other half of the story: it says the threshold WAS noticed, so a
+            // boss that then fails to move is a different bug from one that never noticed.
+            if (_boss.PendingStationIndex != _lastReportedPending)
+            {
+                _lastReportedPending = _boss.PendingStationIndex;
+                if (_lastReportedPending >= 0)
+                {
+                    _logger?.Log($"[boss-activity] station {_lastReportedPending} reached at {_boss.Health}/"
+                        + $"{_boss.MaxHealth} hp; leaving now (was {_boss.Activity}).");
+                }
+            }
+
+            if (_boss.Activity == _lastReportedActivity)
+            {
+                return;
+            }
+
+            _lastReportedActivity = _boss.Activity;
+            var pending = _boss.PendingStationIndex >= 0
+                ? $", waiting to move to station {_boss.PendingStationIndex}"
+                : string.Empty;
+            _logger?.Log($"[boss-activity] {_boss.Activity} at station {_boss.StationIndex} "
+                + $"({_boss.Health}/{_boss.MaxHealth} hp){pending}");
+        }
+
         /// <summary>Turn the room's authored anchor world positions into the simulation's ground-plus-height form:
         /// the fight is reasoned about on the ground plane, and the height rides along as placement.</summary>
         private static IReadOnlyList<BossAnchor> ToBossAnchors(IReadOnlyList<ArenaWorldPoint> authored)
@@ -532,6 +569,15 @@ namespace FalseGods.Plugin
         {
             if (_boss is null || _boss.IsDead)
             {
+                return;
+            }
+
+            // Say so out loud: a refused hit otherwise looks exactly like a hit that never arrived, which makes
+            // "is it invulnerable?" unanswerable from the log.
+            if (_boss.IsRelocating)
+            {
+                _logger?.Log($"[weapon-damage] refused: the boss is {_boss.Activity} (invulnerable while it moves); "
+                    + $"health stays {_boss.Health}.");
                 return;
             }
 
