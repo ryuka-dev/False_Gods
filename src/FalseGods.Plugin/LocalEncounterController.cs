@@ -587,16 +587,38 @@ namespace FalseGods.Plugin
                 return;
             }
 
-            var places = new System.Text.StringBuilder();
-            for (var i = 0; i < arena.BossAnchors.Count; i++)
+            _logger?.Log($"[boss-content] {size}; {arena.BossAnchors.Count} authored anchor(s): "
+                + $"{Describe(arena.BossAnchors)}; {arena.MinionSpawns.Count} minion spawn point(s)");
+
+            // The supply line the carriers work: where destructibles are produced, and where they are delivered.
+            // Reported apart from the anchors because a room can author a boss without authoring a supply line.
+            _logger?.Log($"[supply-content] {arena.CrateSources.Count} crate source(s): "
+                + $"{Describe(arena.CrateSources)}; {arena.CratePiles.Count} delivery pile(s): "
+                + $"{Describe(arena.CratePiles)}");
+
+            if (arena.CratePiles.Count > 0 && arena.CratePiles.Count < arena.BossAnchors.Count)
             {
-                var anchor = arena.BossAnchors[i];
-                places.Append(i == 0 ? string.Empty : ", ")
-                    .Append($"#{i} ({anchor.X:0.0}, {anchor.Y:0.0}, {anchor.Z:0.0})");
+                _logger?.LogWarning($"[supply-content] the room authored {arena.CratePiles.Count} pile(s) for "
+                    + $"{arena.BossAnchors.Count} anchor(s); anchors past the last pile are supplied by it.");
+            }
+        }
+
+        /// <summary>One line of authored world points, numbered as the code indexes them. Diagnostics only.</summary>
+        private static string Describe(IReadOnlyList<ArenaWorldPoint> points)
+        {
+            if (points.Count == 0)
+            {
+                return "none";
             }
 
-            _logger?.Log($"[boss-content] {size}; {arena.BossAnchors.Count} authored anchor(s): {places}; "
-                + $"{arena.MinionSpawns.Count} minion spawn point(s)");
+            var text = new System.Text.StringBuilder();
+            for (var i = 0; i < points.Count; i++)
+            {
+                text.Append(i == 0 ? string.Empty : ", ")
+                    .Append($"#{i} ({points[i].X:0.0}, {points[i].Y:0.0}, {points[i].Z:0.0})");
+            }
+
+            return text.ToString();
         }
 
         /// <summary>

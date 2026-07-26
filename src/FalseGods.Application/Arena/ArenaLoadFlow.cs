@@ -37,6 +37,17 @@ namespace FalseGods.Application.Arena
         /// <summary>Every child is a place the boss's minions can be summoned to. Put them where the room's shape
         /// is worth using — a terrace an enemy has to come down from is a different fight than the floor.</summary>
         public const string MinionSpawnGroupPath = "GameplayRoot/MinionSpawns";
+
+        /// <summary>Every child is a place the room produces destructibles: where the boss's ammunition enters the
+        /// world before anyone carries it anywhere. Put them somewhere a player can reach and interfere with — the
+        /// supply line is only interesting if it can be cut.</summary>
+        public const string CrateSourceGroupPath = "GameplayRoot/CrateSources";
+
+        /// <summary>Every child is where carriers set destructibles down for the boss, <b>index-aligned with
+        /// <see cref="AnchorGroupPath"/></b>: the boss standing at anchor <i>n</i> is supplied by pile <i>n</i>. A
+        /// room that authors fewer piles than anchors reuses the last one, and a room that authors none has no
+        /// supply line at all.</summary>
+        public const string CratePileGroupPath = "GameplayRoot/CratePiles";
     }
 
     /// <summary>The hand-authored decoration rocks are excluded from the content hash (like the lighting), so they
@@ -106,6 +117,10 @@ namespace FalseGods.Application.Arena
     /// its own default rather than shrinking the boss to nothing.</param>
     /// <param name="MinionSpawns">The authored places minions are summoned to, in authored order; empty when the
     /// room authored none, in which case a boss that summons simply has nowhere to put them.</param>
+    /// <param name="CrateSources">The authored places destructibles are produced, in authored order; empty when the
+    /// room authored none, in which case nothing is produced and the boss has no supply line.</param>
+    /// <param name="CratePiles">The authored places carriers deliver to, index-aligned with
+    /// <paramref name="BossAnchors"/>; empty when the room authored none.</param>
     public sealed record LoadedArena(
         ArenaWorldPoint Origin,
         ArenaWorldPoint PlayerSpawn,
@@ -113,7 +128,9 @@ namespace FalseGods.Application.Arena
         int NavWalkableNodes,
         IReadOnlyList<ArenaWorldPoint> BossAnchors,
         float BossSize,
-        IReadOnlyList<ArenaWorldPoint> MinionSpawns);
+        IReadOnlyList<ArenaWorldPoint> MinionSpawns,
+        IReadOnlyList<ArenaWorldPoint> CrateSources,
+        IReadOnlyList<ArenaWorldPoint> CratePiles);
 
     /// <summary>The outcome of <see cref="ArenaLoadFlow.Realize"/>: the peer's own validated
     /// <see cref="ArenaManifest"/> (the <c>ArenaReady</c> payload) and the realized arena, or the fail-closed
@@ -250,7 +267,13 @@ namespace FalseGods.Application.Arena
                 origin,
                 parityPaths,
                 new[] { playerPath, bossPath, BossRoomContent.BodyPath },
-                new[] { BossRoomContent.AnchorGroupPath, BossRoomContent.MinionSpawnGroupPath });
+                new[]
+                {
+                    BossRoomContent.AnchorGroupPath,
+                    BossRoomContent.MinionSpawnGroupPath,
+                    BossRoomContent.CrateSourceGroupPath,
+                    BossRoomContent.CratePileGroupPath,
+                });
             if (!realized.Success)
             {
                 return Fail($"arena realization failed: {realized.Error ?? "unknown"}");
@@ -313,7 +336,9 @@ namespace FalseGods.Application.Arena
                 nav.WalkableNodesApplied,
                 CollectGroup(realized.Markers, BossRoomContent.AnchorGroupPath),
                 ReadBossSize(realized.Markers),
-                CollectGroup(realized.Markers, BossRoomContent.MinionSpawnGroupPath));
+                CollectGroup(realized.Markers, BossRoomContent.MinionSpawnGroupPath),
+                CollectGroup(realized.Markers, BossRoomContent.CrateSourceGroupPath),
+                CollectGroup(realized.Markers, BossRoomContent.CratePileGroupPath));
             Stage = ArenaLoadStage.Realized;
             return new ArenaRealizeResult(true, null, Manifest, Arena);
         }
