@@ -66,9 +66,8 @@ namespace FalseGods.Plugin
         private const float ThrowSeconds = 1.6f;
         private const float ThrowApex = 3f;
 
-        // Drop shape: a short reach ahead of the player and a few metres up, so a dropped crate visibly falls and
-        // piles at a consistent spot when the key is tapped repeatedly.
-        private const float DropDistance = 6f;
+        // How high above a delivery pile a hand-placed crate appears, so it visibly falls onto whatever is already
+        // stacked there rather than being born inside it.
         private const float DropHeight = 4f;
 
         // Volley shape: lift a handful of crates off the pile, hold them a beat to telegraph, then scatter them
