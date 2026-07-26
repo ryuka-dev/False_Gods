@@ -20,6 +20,8 @@ namespace FalseGods.Application.Replication
         EncounterEnded = 10,
         ClientHitRequest = 11,
         BossHitPlayer = 12,
+        ArenaLevelDeclared = 13,
+        ArenaLevelRequested = 14,
     }
 
     /// <summary>One decoded replication message: its <see cref="Kind"/> and the deserialized DTO as <see cref="Value"/>.</summary>
@@ -36,7 +38,7 @@ namespace FalseGods.Application.Replication
         /// <summary>The DTO — a <c>BossSnapshot</c>, <c>ArenaSnapshot</c>, <c>IBossWireEvent</c>, <c>IArenaWireEvent</c>,
         /// <c>EncounterBaseline</c>, or an encounter control message (<c>EnterArena</c>, <c>ArenaReady</c>,
         /// <c>ArenaLoadFailed</c>, <c>EncounterAborted</c>, <c>EncounterEnded</c>, <c>ClientHitRequest</c>,
-        /// <c>BossHitPlayer</c>).</summary>
+        /// <c>BossHitPlayer</c>, <c>ArenaLevelDeclared</c>, <c>ArenaLevelRequested</c>).</summary>
         public object Value { get; }
     }
 
@@ -77,6 +79,10 @@ namespace FalseGods.Application.Replication
 
         public static EncodedPayload Encode(BossHitPlayer message) => Wrap(ReplicationKind.BossHitPlayer, WireCodec.Serialize(message));
 
+        public static EncodedPayload Encode(ArenaLevelDeclared message) => Wrap(ReplicationKind.ArenaLevelDeclared, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(ArenaLevelRequested message) => Wrap(ReplicationKind.ArenaLevelRequested, WireCodec.Serialize(message));
+
         /// <summary>Decode an opaque payload back into its DTO. Treats the payload as untrusted input.</summary>
         public static DecodedMessage Decode(EncodedPayload payload)
         {
@@ -116,6 +122,10 @@ namespace FalseGods.Application.Replication
                     return new DecodedMessage(kind, WireCodec.DeserializeClientHitRequest(body));
                 case ReplicationKind.BossHitPlayer:
                     return new DecodedMessage(kind, WireCodec.DeserializeBossHitPlayer(body));
+                case ReplicationKind.ArenaLevelDeclared:
+                    return new DecodedMessage(kind, WireCodec.DeserializeArenaLevelDeclared(body));
+                case ReplicationKind.ArenaLevelRequested:
+                    return new DecodedMessage(kind, WireCodec.DeserializeArenaLevelRequested(body));
                 default:
                     throw new InvalidDataException($"Unknown replication kind tag {bytes[0]}.");
             }

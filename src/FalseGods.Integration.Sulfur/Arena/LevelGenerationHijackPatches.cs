@@ -153,8 +153,18 @@ namespace FalseGods.Integration.Sulfur.Arena
             try
             {
                 var generating = CurrentlyGeneratingLevel();
-                if (generating == null || !LevelGenerationHijack.TryArmForRun(generating.Value))
+                if (generating == null)
                 {
+                    return;
+                }
+
+                if (!LevelGenerationHijack.TryArmForRun(generating.Value))
+                {
+                    // Generating a different level is the game telling us the players have left the arena, so the
+                    // declaration has served its visit and is withdrawn here. Without that it would stand for the
+                    // rest of the process and the level it names could never be played normally again.
+                    LevelGenerationHijack.LeaveArenaMode(
+                        $"the players moved on to {generating.Value}");
                     return;
                 }
             }

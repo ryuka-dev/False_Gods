@@ -238,6 +238,39 @@ namespace FalseGods.Protocol.Wire
             return message;
         }
 
+        // ---------------------------------------------------------------- arena level declaration
+
+        public static byte[] Serialize(ArenaLevelDeclared message)
+        {
+            var w = new WireWriter();
+            WriteArenaLevelId(w, message.Level);
+            w.WriteBool(message.IsBossArena);
+            return w.ToArray();
+        }
+
+        public static ArenaLevelDeclared DeserializeArenaLevelDeclared(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new ArenaLevelDeclared(ReadArenaLevelId(r), r.ReadBool());
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(ArenaLevelRequested message)
+        {
+            var w = new WireWriter();
+            WriteArenaLevelId(w, message.Level);
+            return w.ToArray();
+        }
+
+        public static ArenaLevelRequested DeserializeArenaLevelRequested(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new ArenaLevelRequested(ReadArenaLevelId(r));
+            RequireEnd(r);
+            return message;
+        }
+
         // ---------------------------------------------------------------- event streams
 
         public static byte[] Serialize(IBossWireEvent bossEvent)
@@ -550,6 +583,15 @@ namespace FalseGods.Protocol.Wire
 
         private static WorldPosition ReadWorldPosition(WireReader r) =>
             new WorldPosition(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
+
+        private static void WriteArenaLevelId(WireWriter w, ArenaLevelId level)
+        {
+            WriteInt(w, level.Environment);
+            WriteInt(w, level.LevelIndex);
+        }
+
+        private static ArenaLevelId ReadArenaLevelId(WireReader r) =>
+            new ArenaLevelId(r.ReadInt32(), r.ReadInt32());
 
         private static void WriteContentHash(WireWriter w, ContentHash hash)
         {

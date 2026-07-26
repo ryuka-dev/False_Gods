@@ -66,6 +66,11 @@ namespace FalseGods.Integration.Sulfur.Arena
     /// is per-run. It happens at the canonical boundary — the start of <c>MakerGraphContext.StartMaking</c>,
     /// which is one whole level-generation graph — and is released when that run ends, including on failure
     /// (the wrapper disarms in a <c>finally</c>). A generation of any other level, mode or not, is untouched.</para>
+    /// <para><b>The mode lasts one visit, not forever.</b> The same boundary withdraws it: generating a
+    /// <i>different</i> level is the game saying the players have left, and a declaration that outlived that
+    /// would make the level it names unplayable in its ordinary form for the rest of the process. Every peer
+    /// generates the same levels, so every peer withdraws at the same point; the host additionally broadcasts
+    /// the withdrawal so a peer that was not generating cannot be left holding it.</para>
     /// <para><b>Neutered nodes.</b> Our arena is a single sealed room: the level must not grow a main path, side
     /// rooms, wandering enemies, or events around it. Those four generation steps are skipped while armed; every
     /// other step — notably navigation building and player spawning — runs natively, which is the entire point of
@@ -118,22 +123,28 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// generation of that level from now on builds the arena, whoever asked for it.</summary>
         public static void EnterArenaMode(ArenaLevel level)
         {
+            if (ArenaMode != null && ArenaMode.Value.Equals(level))
+            {
+                return; // already declared; re-declaring says nothing new
+            }
+
             ArenaMode = level;
             Logger?.Log($"[levelgen] arena mode ON for {level}; every generation of that level on this peer "
-                + "builds the boss arena.");
+                + "builds the boss arena, whoever asked for it.");
         }
 
         /// <summary>Stop declaring any level to be the arena. A level already standing is left alone — it is the
         /// next generation that goes back to being an ordinary one.</summary>
-        public static void LeaveArenaMode()
+        /// <param name="because">Why, for the log; omitted when it was simply asked for.</param>
+        public static void LeaveArenaMode(string? because = null)
         {
             if (ArenaMode == null)
             {
                 return;
             }
 
-            Logger?.Log($"[levelgen] arena mode OFF (was {ArenaMode}); the next generation of that level is an "
-                + "ordinary one.");
+            Logger?.Log($"[levelgen] arena mode OFF (was {ArenaMode}"
+                + $"{(because == null ? string.Empty : $"; {because}")}); that level generates normally again.");
             ArenaMode = null;
         }
 

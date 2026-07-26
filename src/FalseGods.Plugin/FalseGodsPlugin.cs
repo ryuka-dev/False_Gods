@@ -141,6 +141,8 @@ namespace FalseGods.Plugin
 
         private BepInExLogger _log = null!;
         private IArenaHijackPort _hijack = null!;
+        private ArenaLevelFlow? _levelFlow;
+        private IFalseGodsIntegration? _levelFlowIntegration; // the integration _levelFlow was composed on
         private HijackedArenaContent _levelArena = null!;
         private LocalEncounterController _boss = null!;
         private ClientBossController? _client;
@@ -188,12 +190,12 @@ namespace FalseGods.Plugin
             // cave level to prove the entry point; substituting our arena for the generated content follows. Not a
             // shipping control - a developer-menu entry replaces the keybind later.
             _hijackKey = Config.Bind("Boss", "HijackArenaKey", Key.H,
-                "[DEV/TEMPORARY - removed before release] Enter arena mode and load the boss arena as the first "
-                + "cave level through the game's native level generation (native navigation and player spawn); "
-                + "press it again to reload the arena after re-authoring its content. While in arena mode EVERY "
-                + "generation of that level on this machine builds the arena - press it on BOTH machines of a "
-                + "multiplayer session, or the one that did not press it ends up in an ordinary cave. The game "
-                + "uses the new Input System.");
+                "[DEV/TEMPORARY - removed before release] Take the session to the boss arena, which replaces the "
+                + "first cave level and is generated natively (native navigation and player spawn); press it "
+                + "again to pick up re-authored arena content. ONE press on EITHER machine is enough - the host "
+                + "declares the level a boss arena for everyone and leads the transition, and a client's press is "
+                + "a request to the host. Without a session it just goes there. The game uses the new Input "
+                + "System.");
 
             // TEMPORARY dev affordance: the cave environment's fog cutoff is tuned for corridor-sized rooms, which
             // leaves a 60-unit boss arena's walls invisible from the middle of it. Tunable live so the look can be
@@ -266,15 +268,16 @@ namespace FalseGods.Plugin
 
         private void Update()
         {
-            // DEV (Strategy A bring-up): put this peer into arena mode and load our arena as the native cave
-            // level. Role-independent - it drives the game's own level load, not our additive raise - and BOTH
-            // peers of a session must be in arena mode for both to end up in the arena, because a level load on
-            // either peer regenerates the level on both. Temporary, like the whole "Boss" dev config section.
+            // The session's agreement on which level is the boss arena has to exist before anyone asks to go
+            // there, so it is maintained every frame rather than only while an encounter is up.
+            MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
+
+            // DEV (Strategy A bring-up): take the session to the arena. Role-independent for the player - one
+            // press on either machine gets everyone there - but not role-independent underneath: the host
+            // declares and leads, a client asks. Temporary, like the whole "Boss" dev config section.
             if (KeyPressed(_hijackKey.Value))
             {
-                // Pressing it again reloads the arena rather than leaving arena mode: re-authored content is
-                // picked up by a level reload, which is the thing this key is actually used for during bring-up.
-                _hijack.LoadHijackedArena();
+                GoToArenaLevel();
                 return;
             }
 
@@ -321,6 +324,153 @@ namespace FalseGods.Plugin
 
             TearDownClientComposition();
             RunLocalComposition(integration, role);
+        }
+
+        /// <summary>
+        /// Keep the session-wide arena-level agreement composed on whatever integration is live, and let the host
+        /// tell peers that joined since it declared. Without a session there is nobody to agree with and the local
+        /// declaration is the whole truth.
+        /// </summary>
+        private void MaintainArenaLevelFlow(IFalseGodsIntegration? integration)
+        {
+            if (integration is null || !integration.Session.IsActive)
+            {
+                if (_levelFlow != null)
+                {
+                    TearDownArenaLevelFlow();
+                }
+
+                return;
+            }
+
+            if (_levelFlow != null && !ReferenceEquals(_levelFlowIntegration, integration))
+            {
+                TearDownArenaLevelFlow(); // a different integration registered; recompose on its channel
+            }
+
+            if (_levelFlow is null)
+            {
+                _levelFlow = new ArenaLevelFlow(integration.Channel, integration.Session, integration.Roster)
+                {
+                    OnDeclared = ApplyArenaLevelDeclaration,
+                    OnRequested = HandleArenaLevelRequest,
+                };
+                _levelFlowIntegration = integration;
+                ReconcileArenaLevelOnJoiningSession(integration);
+            }
+
+            // The declaration lasts one visit: the generation hooks withdraw it locally the moment the players
+            // generate a different level. On the host that local truth is the session's, so the withdrawal is
+            // published — a peer that happened not to be generating must not be left holding it.
+            var declaration = _levelFlow.Declaration;
+            if (declaration != null
+                && declaration.IsBossArena
+                && !_hijack.IsArenaModeOn
+                && integration.Session.Role == RuntimeContracts.Multiplayer.SessionRole.Host)
+            {
+                _levelFlow.Declare(declaration.Level, isBossArena: false);
+            }
+
+            _levelFlow.Tick();
+        }
+
+        /// <summary>
+        /// A declaration made while alone is not automatically the session's. Joining as the <b>host</b> makes
+        /// this peer's standing declaration the session's, so it is announced; joining as a <b>client</b> hands
+        /// the question to the host, so a local declaration is dropped until the host makes one. Without this, a
+        /// peer that used the dev key in single-player would keep hijacking a level the rest of the session
+        /// generates normally, and the players would stand in different rooms.
+        /// </summary>
+        private void ReconcileArenaLevelOnJoiningSession(IFalseGodsIntegration integration)
+        {
+            if (integration.Session.Role == RuntimeContracts.Multiplayer.SessionRole.Host)
+            {
+                if (_hijack.IsArenaModeOn)
+                {
+                    _levelFlow?.Declare(_hijack.ArenaLevel);
+                }
+
+                return;
+            }
+
+            if (_hijack.IsArenaModeOn)
+            {
+                Logger.LogMessage("Joined a session: the host decides which level is the boss arena, so the local "
+                    + "declaration is dropped until it says so.");
+                _hijack.LeaveArenaMode();
+            }
+        }
+
+        private void TearDownArenaLevelFlow()
+        {
+            _levelFlow?.Dispose();
+            _levelFlow = null;
+            _levelFlowIntegration = null;
+        }
+
+        /// <summary>
+        /// The dev entry to the boss arena. In single-player, and on a host, this peer decides and goes; on a
+        /// client it is a request, because the host owns level transitions (invariant 1) and going alone would
+        /// only make the session's own transition logic drag everyone back through an undeclared level.
+        /// </summary>
+        private void GoToArenaLevel()
+        {
+            var flow = _levelFlow;
+            if (flow is null)
+            {
+                _hijack.LoadHijackedArena(); // no session: declare locally and go
+                return;
+            }
+
+            if (FalseGodsIntegrations.Current?.Session.Role == RuntimeContracts.Multiplayer.SessionRole.Host)
+            {
+                // Declare first so every client knows what the level is BEFORE the transition messages that make
+                // them generate it; both travel the same reliable-ordered channel, so the order is kept.
+                flow.Declare(_hijack.ArenaLevel);
+                _hijack.LoadHijackedArena();
+                return;
+            }
+
+            flow.Request(_hijack.ArenaLevel);
+            Logger.LogMessage("Asked the host to take the session to the boss arena; the host leads the transition.");
+        }
+
+        /// <summary>Apply a host declaration locally: from now on that level builds our arena instead of the
+        /// game's own content, on this peer, however the generation was asked for.</summary>
+        private void ApplyArenaLevelDeclaration(Protocol.Wire.ArenaLevelDeclared declaration)
+        {
+            if (!declaration.IsBossArena)
+            {
+                _hijack.LeaveArenaMode();
+                return;
+            }
+
+            if (!_hijack.DeclareArenaLevel(declaration.Level))
+            {
+                Logger.LogWarning($"The host declared {declaration.Level} a boss arena, but this build does not "
+                    + "recognise that level; it will generate normally here.");
+            }
+        }
+
+        /// <summary>
+        /// Host: a peer asked for the boss arena. The host decides and leads — it declares the level to everyone
+        /// and makes the transition, exactly as if it had pressed the key itself. The request names the level it
+        /// means, but what gets declared is <b>this build's own</b> arena: a request is a trigger, not a way for
+        /// a peer to choose which level the host hijacks.
+        /// </summary>
+        private void HandleArenaLevelRequest(Protocol.Wire.ArenaLevelRequested request)
+        {
+            var ours = _hijack.ArenaLevel;
+            if (request.Level != ours)
+            {
+                Logger.LogWarning($"A session peer asked for a boss arena at {request.Level}, but this build's "
+                    + $"arena is {ours}; ignoring the request.");
+                return;
+            }
+
+            Logger.LogMessage("A session peer asked for the boss arena; declaring it and leading the transition.");
+            _levelFlow?.Declare(ours);
+            _hijack.LoadHijackedArena();
         }
 
         /// <summary>
@@ -489,6 +639,7 @@ namespace FalseGods.Plugin
             }
 
             TearDownClientComposition();
+            TearDownArenaLevelFlow();
         }
 
         private enum CompositionRole
