@@ -117,8 +117,20 @@ namespace FalseGods.ApplicationTests
 
             public ArenaWorldPoint? CapturedOrigin { get; private set; }
 
+            /// <summary>Members this fake reports for each requested marker group, keyed by group path.</summary>
+            public Dictionary<string, IReadOnlyList<ArenaWorldPoint>> GroupMembers { get; } =
+                new Dictionary<string, IReadOnlyList<ArenaWorldPoint>>(StringComparer.Ordinal);
+
+            /// <summary>The local scale this fake reports for a named marker, keyed by path; markers not listed
+            /// report unit scale.</summary>
+            public Dictionary<string, ArenaWorldPoint> MarkerScales { get; } =
+                new Dictionary<string, ArenaWorldPoint>(StringComparer.Ordinal);
+
             public ArenaRealizationResult Realize(
-                ArenaWorldPoint origin, IReadOnlyList<string> parityPaths, IReadOnlyList<string> markerPaths)
+                ArenaWorldPoint origin,
+                IReadOnlyList<string> parityPaths,
+                IReadOnlyList<string> markerPaths,
+                IReadOnlyList<string> markerGroupPaths)
             {
                 _journal.Add("realize");
                 CapturedOrigin = origin;
@@ -145,9 +157,33 @@ namespace FalseGods.ApplicationTests
                         new ArenaWorldPoint(t.Scale.X, t.Scale.Y, t.Scale.Z)));
                 }
 
-                var markers = OmitMarkers
-                    ? (IReadOnlyList<RealizedMarker>)Array.Empty<RealizedMarker>()
-                    : markerPaths.Select((p, i) => new RealizedMarker(p, new ArenaWorldPoint(100f + i, 5f, 200f + i))).ToList();
+                var markers = new List<RealizedMarker>();
+                if (!OmitMarkers)
+                {
+                    for (var i = 0; i < markerPaths.Count; i++)
+                    {
+                        var path = markerPaths[i];
+                        var scale = MarkerScales.TryGetValue(path, out var authored)
+                            ? authored
+                            : new ArenaWorldPoint(1f, 1f, 1f);
+                        markers.Add(new RealizedMarker(path, new ArenaWorldPoint(100f + i, 5f, 200f + i), scale));
+                    }
+                }
+
+                foreach (var groupPath in markerGroupPaths)
+                {
+                    if (!GroupMembers.TryGetValue(groupPath, out var members))
+                    {
+                        continue; // an absent group reports nothing, as the real one does
+                    }
+
+                    for (var i = 0; i < members.Count; i++)
+                    {
+                        markers.Add(new RealizedMarker(
+                            groupPath + "/Member_" + i, members[i], new ArenaWorldPoint(1f, 1f, 1f)));
+                    }
+                }
+
                 return new ArenaRealizationResult(true, null, nodes, markers);
             }
 
@@ -275,6 +311,68 @@ namespace FalseGods.ApplicationTests
             Assert.Equal(new ArenaWorldPoint(101f, 5f, 201f), arena.BossSpawn);
             Assert.Equal(16, arena.NavWalkableNodes);
             Assert.Equal(Origin, arena.Origin);
+        }
+
+        // ---------------------------------------------------------------- authored boss content
+
+        [Fact]
+        public void Boss_anchors_come_from_the_authored_group_in_authored_order()
+        {
+            var rig = new Rig();
+            rig.Realization.GroupMembers[BossRoomContent.AnchorGroupPath] = new[]
+            {
+                new ArenaWorldPoint(-8.18f, 8.1f, 25.97f),
+                new ArenaWorldPoint(0.24f, 0.1f, -7.69f),
+            };
+            rig.Flow.Prepare();
+
+            var arena = rig.Flow.Realize(Origin).Arena;
+
+            Assert.NotNull(arena);
+            Assert.Equal(2, arena!.BossAnchors.Count);
+            Assert.Equal(new ArenaWorldPoint(-8.18f, 8.1f, 25.97f), arena.BossAnchors[0]);
+            Assert.Equal(new ArenaWorldPoint(0.24f, 0.1f, -7.69f), arena.BossAnchors[1]);
+        }
+
+        [Fact]
+        public void A_room_that_authored_no_anchors_loads_with_none()
+        {
+            var rig = new Rig();
+            rig.Flow.Prepare();
+
+            var arena = rig.Flow.Realize(Origin).Arena;
+
+            Assert.NotNull(arena);
+            Assert.Empty(arena!.BossAnchors);
+        }
+
+        [Fact]
+        public void Boss_size_is_the_body_markers_uniform_scale()
+        {
+            var rig = new Rig();
+            rig.Realization.MarkerScales[BossRoomContent.BodyPath] = new ArenaWorldPoint(2.5f, 2.5f, 2.5f);
+            rig.Flow.Prepare();
+
+            var arena = rig.Flow.Realize(Origin).Arena;
+
+            Assert.NotNull(arena);
+            Assert.Equal(2.5f, arena!.BossSize);
+        }
+
+        [Theory]
+        [InlineData(2f, 1f, 2f)] // non-uniform: not a size
+        [InlineData(0f, 0f, 0f)] // degenerate: would collapse the boss to a point
+        [InlineData(-2f, -2f, -2f)] // negative: would mirror the rig
+        public void An_unusable_authored_scale_reads_as_no_size_rather_than_a_broken_boss(float x, float y, float z)
+        {
+            var rig = new Rig();
+            rig.Realization.MarkerScales[BossRoomContent.BodyPath] = new ArenaWorldPoint(x, y, z);
+            rig.Flow.Prepare();
+
+            var arena = rig.Flow.Realize(Origin).Arena;
+
+            Assert.NotNull(arena);
+            Assert.Equal(0f, arena!.BossSize);
         }
 
         // ---------------------------------------------------------------- fail-closed paths

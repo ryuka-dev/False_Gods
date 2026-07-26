@@ -252,15 +252,21 @@ namespace FalseGods.UnityRuntime.Presentation
                 + $"'{(hitboxLayer >= 0 ? "Hitbox" : "Default")}' (trigger)");
         }
 
-        /// <summary>The sprite orientation strategy (see <see cref="BossFacingMode"/>). Settable live.</summary>
+        /// <summary>
+        /// The sprite orientation strategy (see <see cref="BossFacingMode"/>), chosen by the boss's content and
+        /// not by the player. The default is the vanilla cave boss's behaviour — face the local player's camera,
+        /// yaw and elevation — which is what the first boss uses; a boss the size of the room will want
+        /// <see cref="BossFacingMode.Fixed"/> instead.
+        /// </summary>
         public BossFacingMode FacingMode { get; set; } = BossFacingMode.LocalBillboard;
 
-        /// <summary>In <see cref="BossFacingMode.LocalBillboard"/>: true = yaw only, false = yaw + elevation pitch.</summary>
+        /// <summary>In <see cref="BossFacingMode.LocalBillboard"/>: true = yaw only, false = yaw + elevation pitch
+        /// (the vanilla behaviour, and the default).</summary>
         public bool LockPitch { get; set; }
 
         /// <summary>Uniform visual scale of the whole boss rig (body, hitboxes, health bar), applied to the root the
-        /// way SULFUR scales its own single Sprite object. Settable live; positive values only (a non-positive value
-        /// is ignored). Defaults so the boss reads at roughly the vanilla cave boss's size.</summary>
+        /// way SULFUR scales its own single Sprite object. Set from the arena's authored boss size; positive values
+        /// only (a non-positive value is ignored). The default stands in for a room that authored no size.</summary>
         public float SpriteScale { get; set; } = DefaultSpriteScale;
 
         /// <summary>The boss body's world collider — an aim ray tests it to place a hit where you aim.</summary>
@@ -349,8 +355,8 @@ namespace FalseGods.UnityRuntime.Presentation
 
             var camera = Camera.main;
 
-            // Uniform rig scale, applied live so a config change takes effect without a re-raise. Non-positive is
-            // ignored (a bad config value must not collapse the boss to a point).
+            // Uniform rig scale, applied every frame so the authored size can be re-read without a re-raise.
+            // Non-positive is ignored (a bad authored value must not collapse the boss to a point).
             if (SpriteScale > 0f)
             {
                 _root.transform.localScale = new Vector3(SpriteScale, SpriteScale, SpriteScale);

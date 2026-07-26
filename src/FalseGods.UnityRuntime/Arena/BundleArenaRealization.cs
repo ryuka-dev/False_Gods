@@ -110,7 +110,10 @@ namespace FalseGods.UnityRuntime.Arena
         }
 
         public ArenaRealizationResult Realize(
-            ArenaWorldPoint origin, IReadOnlyList<string> parityPaths, IReadOnlyList<string> markerPaths)
+            ArenaWorldPoint origin,
+            IReadOnlyList<string> parityPaths,
+            IReadOnlyList<string> markerPaths,
+            IReadOnlyList<string> markerGroupPaths)
         {
             if (_prefab == null)
             {
@@ -148,12 +151,33 @@ namespace FalseGods.UnityRuntime.Arena
                 var marker = _root.transform.Find(path);
                 if (marker != null)
                 {
-                    markers.Add(new RealizedMarker(path, ToPoint(marker.position)));
+                    markers.Add(new RealizedMarker(path, ToPoint(marker.position), ToPoint(marker.localScale)));
+                }
+            }
+
+            // Group members are reported under their own full path, so a caller reads them exactly like a named
+            // marker; the order is the authored sibling order, which is what the hierarchy shows the author.
+            var grouped = 0;
+            foreach (var groupPath in markerGroupPaths)
+            {
+                var group = _root.transform.Find(groupPath);
+                if (group == null)
+                {
+                    continue; // an absent group is an empty one; the caller decides whether that is a failure
+                }
+
+                for (var i = 0; i < group.childCount; i++)
+                {
+                    var child = group.GetChild(i);
+                    markers.Add(new RealizedMarker(
+                        groupPath + "/" + child.name, ToPoint(child.position), ToPoint(child.localScale)));
+                    grouped++;
                 }
             }
 
             _logger?.Log($"[arena] realized at ({origin.X:0.0}, {origin.Y:0.0}, {origin.Z:0.0}); "
-                + $"{parityNodes.Count}/{parityPaths.Count} parity nodes, {markers.Count}/{markerPaths.Count} markers");
+                + $"{parityNodes.Count}/{parityPaths.Count} parity nodes, "
+                + $"{markers.Count - grouped}/{markerPaths.Count} markers, {grouped} grouped marker(s)");
             return new ArenaRealizationResult(true, null, parityNodes, markers);
         }
 

@@ -100,7 +100,6 @@ namespace FalseGods.Plugin
 
         private EncounterId _encounter;
         private WorldPosition _originWire;
-        private float _spriteScale; // 0 = leave the presentation's own default; a live config value overrides it
 
         public LocalEncounterController(ILogger logger, float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
@@ -147,27 +146,6 @@ namespace FalseGods.Plugin
                 _logger?.Log(replication != null
                     ? "Host replication attached: encounter state and events now broadcast to the session."
                     : "Host replication detached: encounter continues locally only.");
-            }
-        }
-
-        /// <summary>Push the live sprite-facing choice to the renderer (changeable in-game via config).</summary>
-        public void SetFacing(BossFacingMode mode, bool lockPitch)
-        {
-            if (_presentation != null)
-            {
-                _presentation.FacingMode = mode;
-                _presentation.LockPitch = lockPitch;
-            }
-        }
-
-        /// <summary>Push the live boss visual scale to the renderer (changeable in-game via config); also applied to
-        /// a boss started later from the host gate.</summary>
-        public void SetSpriteScale(float scale)
-        {
-            _spriteScale = scale;
-            if (_presentation != null && scale > 0f)
-            {
-                _presentation.SpriteScale = scale;
             }
         }
 
@@ -408,9 +386,12 @@ namespace FalseGods.Plugin
 
             var bossSpawn = arena.BossSpawn;
             _presentation = new BossPresentation(_logger, new Vector3(bossSpawn.X, bossSpawn.Y, bossSpawn.Z));
-            if (_spriteScale > 0f)
+
+            // Size is authored in the room, not chosen by the player: a room that authored none leaves the
+            // presentation's own default standing.
+            if (arena.BossSize > 0f)
             {
-                _presentation.SpriteScale = _spriteScale;
+                _presentation.SpriteScale = arena.BossSize;
             }
 
             _presenter = new BossPresenter(_presentation);
@@ -461,6 +442,36 @@ namespace FalseGods.Plugin
                 + $"({_originWire.X:0.0}, {_originWire.Y:0.0}, {_originWire.Z:0.0}), {navigation}, "
                 + $"boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on "
                 + "the arena floor. Shoot or melee it; weak-window hits are amplified.");
+
+            ReportAuthoredBossContent(arena);
+        }
+
+        /// <summary>
+        /// Report the boss content the room authored, so it can be checked against the prefab without guessing at
+        /// it from how the boss looks. Diagnostics only — nothing here decides anything.
+        /// </summary>
+        private void ReportAuthoredBossContent(LoadedArena arena)
+        {
+            var size = arena.BossSize > 0f
+                ? $"size {arena.BossSize:0.##} (authored)"
+                : "size: none authored, presentation default in use";
+
+            if (arena.BossAnchors.Count == 0)
+            {
+                _logger?.Log($"[boss-content] {size}; no authored anchors — the boss has no room-authored places "
+                    + "to stand.");
+                return;
+            }
+
+            var places = new System.Text.StringBuilder();
+            for (var i = 0; i < arena.BossAnchors.Count; i++)
+            {
+                var anchor = arena.BossAnchors[i];
+                places.Append(i == 0 ? string.Empty : ", ")
+                    .Append($"#{i} ({anchor.X:0.0}, {anchor.Y:0.0}, {anchor.Z:0.0})");
+            }
+
+            _logger?.Log($"[boss-content] {size}; {arena.BossAnchors.Count} authored anchor(s): {places}");
         }
 
         /// <summary>

@@ -117,9 +117,6 @@ namespace FalseGods.Plugin
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<Key> _raiseKey = null!;
-        private ConfigEntry<BossFacingMode> _facingMode = null!;
-        private ConfigEntry<bool> _lockPitch = null!;
-        private ConfigEntry<float> _spriteScale = null!;
         private ConfigEntry<float> _maxClientHitDamage = null!;
         private ConfigEntry<Key> _hijackKey = null!;
         private ConfigEntry<float> _fogStartDistance = null!;
@@ -159,23 +156,10 @@ namespace FalseGods.Plugin
                 + "Damage the boss with your real weapons (bullets and melee); hits during the weak-point window "
                 + "are amplified. The game uses the new Input System.");
 
-            _facingMode = Config.Bind("Boss", "FacingMode", BossFacingMode.LocalBillboard,
-                "Sprite facing: Fixed = a static/scripted world facing (for a very large boss); LocalBillboard = "
-                + "face the local player's camera position (the vanilla NPC default; honours LockPitch); "
-                + "NearestPlayer = face the authoritative nearest-player direction, shared by every viewer.");
-
-            _lockPitch = Config.Bind("Boss", "LockPitch", false,
-                "In LocalBillboard facing, false = yaw + natural elevation pitch toward the camera (vanilla), "
-                + "true = yaw only (upright). Ignored by the Fixed and NearestPlayer modes.");
-
-            // TEMPORARY dev affordance — like the whole "Boss" config section, this exists only to tune the boss
-            // in-engine during development. A shipping build fixes the boss size in authored content; players must
-            // not be able to change it. Remove before release (do not let it ossify into shipped config).
-            _spriteScale = Config.Bind("Boss", "SpriteScale", 2.0f,
-                "[DEV/TEMPORARY - removed before release] Uniform visual size of the boss (body sprite, hitboxes, "
-                + "and health bar scale together, the way the vanilla boss is one scaled sprite). 1.0 is the base "
-                + "size; the default is tuned so the boss reads at roughly the vanilla cave boss's size. Changeable "
-                + "live; non-positive values are ignored.");
+            // The boss's size and facing used to be config here. They are not player choices: the size is
+            // authored in the arena (GameplayRoot/BossBody's scale) and read at load, and this boss faces the
+            // local player the way the vanilla cave boss does, which is the presentation's default. Both are
+            // properties of the boss, so neither belongs in a file a player can edit.
 
             _maxClientHitDamage = Config.Bind("Multiplayer", "MaxClientHitDamage",
                 LocalEncounterController.DefaultMaxClientHitDamage,
@@ -262,7 +246,7 @@ namespace FalseGods.Plugin
             FalseGodsIntegrations.Changed += OnIntegrationChanged;
 
             Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Raise/drop the boss: {_raiseKey.Value}; "
-                + $"damage it with real weapons. Facing: {_facingMode.Value}, lockPitch: {_lockPitch.Value}. "
+                + "damage it with real weapons. "
                 + $"Multiplayer integration: {(FalseGodsIntegrations.Current != null ? "registered" : "none (single-player)")}.");
         }
 
@@ -691,8 +675,6 @@ namespace FalseGods.Plugin
                 _boss.SetReplication(null);
             }
 
-            _boss.SetFacing(_facingMode.Value, _lockPitch.Value);
-            _boss.SetSpriteScale(_spriteScale.Value);
             _boss.Tick(UnityEngine.Time.deltaTime); // also drives a waiting host gate; a no-op when idle
         }
 
@@ -723,8 +705,6 @@ namespace FalseGods.Plugin
                 Logger.LogMessage("Multiplayer client: the host drives the boss; the raise key is inert here.");
             }
 
-            _client.SetFacing(_facingMode.Value, _lockPitch.Value);
-            _client.SetSpriteScale(_spriteScale.Value);
             _client.Tick(UnityEngine.Time.deltaTime);
         }
 

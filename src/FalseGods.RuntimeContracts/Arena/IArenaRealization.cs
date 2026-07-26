@@ -12,8 +12,14 @@ namespace FalseGods.RuntimeContracts.Arena
         ArenaRotation LocalRotation,
         ArenaWorldPoint LocalScale);
 
-    /// <summary>A gameplay marker resolved to its realized <b>world</b> position (spawn points, exits).</summary>
-    public sealed record RealizedMarker(string Path, ArenaWorldPoint WorldPosition);
+    /// <summary>
+    /// A gameplay marker resolved to its realized <b>world</b> position (spawn points, exits, the places a boss
+    /// stands), with its authored local scale — some markers carry a size rather than only a place.
+    /// </summary>
+    public sealed record RealizedMarker(
+        string Path,
+        ArenaWorldPoint WorldPosition,
+        ArenaWorldPoint LocalScale);
 
     /// <summary>The outcome of realizing the arena: the parity nodes and markers that were found, or a
     /// diagnostic error. A requested path that was not found is simply absent from the lists — the flow treats
@@ -46,10 +52,16 @@ namespace FalseGods.RuntimeContracts.Arena
     /// </remarks>
     public interface IArenaRealization
     {
+        /// <param name="markerGroupPaths">
+        /// Paths whose <b>children</b> are all reported as markers, in authored sibling order. For authored sets
+        /// whose size is the author's choice rather than the code's — the places a boss may stand, and later the
+        /// points its minions come from — where naming each one in code would make adding one a code change.
+        /// </param>
         ArenaRealizationResult Realize(
             ArenaWorldPoint origin,
             IReadOnlyList<string> parityPaths,
-            IReadOnlyList<string> markerPaths);
+            IReadOnlyList<string> markerPaths,
+            IReadOnlyList<string> markerGroupPaths);
 
         void Teardown();
     }

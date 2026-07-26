@@ -15,6 +15,26 @@ namespace FalseGods.Application.Arena
         public const string Boss = "Enemy";
     }
 
+    /// <summary>
+    /// The boss's authored content inside the arena prefab: the places it may stand, and how big it is. Like the
+    /// décor and the navigation links, these are read from the realized hierarchy and carry no artifact rows — a
+    /// hash-relevant fact is one two peers must agree on independently, and these are not: the boss's position
+    /// and size reach a client through the host's replication, not through its own copy of the room.
+    /// <para>Both are optional. Without <see cref="AnchorGroupPath"/> the boss simply has no authored places to
+    /// stand; without <see cref="BodyPath"/> it keeps the presentation's own default size.</para>
+    /// PoC-arena content constants, grouped here like <see cref="ArenaMarkerKinds"/>.
+    /// </summary>
+    public static class BossRoomContent
+    {
+        /// <summary>Every child is one place the boss may stand, in authored order; its position is the boss's
+        /// feet. Which one it uses when is the boss's script, not the room's business.</summary>
+        public const string AnchorGroupPath = "GameplayRoot/BossAnchors";
+
+        /// <summary>A marker whose <b>scale</b> is the boss's authored size. Its position is not used — the boss
+        /// stands at an anchor, not here.</summary>
+        public const string BodyPath = "GameplayRoot/BossBody";
+    }
+
     /// <summary>The hand-authored decoration rocks are excluded from the content hash (like the lighting), so they
     /// carry no artifact rows and their count/placement change freely without a rehash. At load they are painted by
     /// naming convention with the cave rock material, reusing the same donor carrier the surfaces borrow from —
@@ -74,13 +94,19 @@ namespace FalseGods.Application.Arena
         public static ArenaPrepareResult Failed(string reason) => new ArenaPrepareResult(false, reason, null);
     }
 
-    /// <summary>The realized arena's load-flow outputs: where it stands and the resolved spawn markers, in
-    /// world space.</summary>
+    /// <summary>The realized arena's load-flow outputs: where it stands, the resolved spawn markers in world
+    /// space, and the boss content the room authored (<see cref="BossRoomContent"/>).</summary>
+    /// <param name="BossAnchors">The authored places the boss may stand, in authored order; empty when the room
+    /// authored none.</param>
+    /// <param name="BossSize">The authored boss size, or 0 when the room authored none — the presentation keeps
+    /// its own default rather than shrinking the boss to nothing.</param>
     public sealed record LoadedArena(
         ArenaWorldPoint Origin,
         ArenaWorldPoint PlayerSpawn,
         ArenaWorldPoint BossSpawn,
-        int NavWalkableNodes);
+        int NavWalkableNodes,
+        IReadOnlyList<ArenaWorldPoint> BossAnchors,
+        float BossSize);
 
     /// <summary>The outcome of <see cref="ArenaLoadFlow.Realize"/>: the peer's own validated
     /// <see cref="ArenaManifest"/> (the <c>ArenaReady</c> payload) and the realized arena, or the fail-closed
@@ -213,7 +239,11 @@ namespace FalseGods.Application.Arena
                 parityPaths.Add(node.Path);
             }
 
-            var realized = _realization.Realize(origin, parityPaths, new[] { playerPath, bossPath });
+            var realized = _realization.Realize(
+                origin,
+                parityPaths,
+                new[] { playerPath, bossPath, BossRoomContent.BodyPath },
+                new[] { BossRoomContent.AnchorGroupPath });
             if (!realized.Success)
             {
                 return Fail($"arena realization failed: {realized.Error ?? "unknown"}");
@@ -269,7 +299,13 @@ namespace FalseGods.Application.Arena
                 _contentHash,
                 ProtocolVersion.Current.Value,
                 artifact.BundleVersion);
-            Arena = new LoadedArena(origin, player.WorldPosition, boss.WorldPosition, nav.WalkableNodesApplied);
+            Arena = new LoadedArena(
+                origin,
+                player.WorldPosition,
+                boss.WorldPosition,
+                nav.WalkableNodesApplied,
+                CollectBossAnchors(realized.Markers),
+                ReadBossSize(realized.Markers));
             Stage = ArenaLoadStage.Realized;
             return new ArenaRealizeResult(true, null, Manifest, Arena);
         }
@@ -378,6 +414,46 @@ namespace FalseGods.Application.Arena
 
             error = null;
             return requests;
+        }
+
+        /// <summary>The authored places the boss may stand, in authored order — the members of the anchor group,
+        /// which the realization reports under paths prefixed by the group's own.</summary>
+        private static IReadOnlyList<ArenaWorldPoint> CollectBossAnchors(IReadOnlyList<RealizedMarker> markers)
+        {
+            var prefix = BossRoomContent.AnchorGroupPath + "/";
+            var anchors = new List<ArenaWorldPoint>();
+            for (var i = 0; i < markers.Count; i++)
+            {
+                if (markers[i].Path.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    anchors.Add(markers[i].WorldPosition);
+                }
+            }
+
+            return anchors;
+        }
+
+        /// <summary>The authored boss size: the uniform scale of the body marker. A non-uniform or non-positive
+        /// authored scale is not a size, so it reads as "none authored" and the presentation keeps its default
+        /// rather than rendering a boss squashed along one axis.</summary>
+        private static float ReadBossSize(IReadOnlyList<RealizedMarker> markers)
+        {
+            var body = FindMarker(markers, BossRoomContent.BodyPath);
+            if (body is null)
+            {
+                return 0f;
+            }
+
+            var scale = body.LocalScale;
+            const float tolerance = 1e-3f;
+            if (scale.X <= 0f
+                || Math.Abs(scale.X - scale.Y) > tolerance
+                || Math.Abs(scale.X - scale.Z) > tolerance)
+            {
+                return 0f;
+            }
+
+            return scale.X;
         }
 
         private static string? FindMarkerPath(ArenaContentArtifact artifact, string kind)

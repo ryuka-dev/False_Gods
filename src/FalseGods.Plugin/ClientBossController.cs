@@ -60,7 +60,6 @@ namespace FalseGods.Plugin
         private IDisposable? _hitBinding;
         private BossPresentation? _presentation;
         private EncounterId? _encounter;
-        private float _spriteScale; // 0 = leave the presentation's own default; a live config value overrides it
         private int _presentedEvents;
         private int _presentedArenaEvents;
         private bool _waitingForCameraLogged;
@@ -114,27 +113,6 @@ namespace FalseGods.Plugin
         public HijackedArenaContent? LevelArena { get; set; }
 
         public bool IsUp => _presentation != null;
-
-        /// <summary>Push the live sprite-facing choice to the renderer (changeable in-game via config).</summary>
-        public void SetFacing(BossFacingMode mode, bool lockPitch)
-        {
-            if (_presentation != null)
-            {
-                _presentation.FacingMode = mode;
-                _presentation.LockPitch = lockPitch;
-            }
-        }
-
-        /// <summary>Push the live boss visual scale to the renderer (changeable in-game via config), so the client
-        /// puppet matches the host's boss size; also applied to a puppet raised later.</summary>
-        public void SetSpriteScale(float scale)
-        {
-            _spriteScale = scale;
-            if (_presentation != null && scale > 0f)
-            {
-                _presentation.SpriteScale = scale;
-            }
-        }
 
         /// <summary>
         /// Advance one frame: realize the arena from the baseline when this is a late join, raise the puppet on
@@ -393,9 +371,12 @@ namespace FalseGods.Plugin
 
             var floorY = _loadedArena.BossSpawn.Y;
             _presentation = new BossPresentation(_logger, new Vector3(x, floorY, z));
-            if (_spriteScale > 0f)
+
+            // The puppet takes its size from the same authored room the host's boss takes it from, so the two
+            // agree without the size ever going on the wire.
+            if (_loadedArena.BossSize > 0f)
             {
-                _presentation.SpriteScale = _spriteScale;
+                _presentation.SpriteScale = _loadedArena.BossSize;
             }
 
             _encounter = encounter;
