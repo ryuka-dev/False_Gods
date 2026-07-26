@@ -4,6 +4,7 @@ using HarmonyLib;
 using LevelGeneration;
 using MakerGraphTool;
 using MakerGraphTool.Nodes;
+using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.LevelGeneration;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 
@@ -22,10 +23,11 @@ namespace FalseGods.Integration.Sulfur.Arena
     /// wholesale without ever touching a compiler-generated state machine. The game already does exactly this for
     /// a step switched off in the editor (<c>if (Run.Disabled) return DummyRunner();</c>); a skip here takes the
     /// same path, including its bookkeeping, so the loading progress count stays honest.</para>
-    /// <para><b>Scope.</b> Both hooks do nothing at all unless <see cref="LevelGenerationHijack.IsArmed"/> — an
-    /// ordinary level the player loads generates completely untouched. The arming is closed out by wrapping
-    /// <c>MakerGraphContext.StartMaking</c>, whose completion <i>is</i> "one whole generation run"; the wrapper
-    /// disarms in a <c>finally</c>, so a run that throws or is abandoned still releases the hooks.</para>
+    /// <para><b>Scope.</b> Both step hooks do nothing at all unless <see cref="LevelGenerationHijack.IsArmed"/> —
+    /// an ordinary level generates completely untouched. Arming and disarming both happen at the same canonical
+    /// boundary: <c>MakerGraphContext.StartMaking</c>, whose one call <i>is</i> one whole generation run. The
+    /// wrapper arms when the level being generated is the one this peer declared to be the arena, and disarms in
+    /// a <c>finally</c>, so a run that throws or is abandoned still releases the hooks.</para>
     /// <para><b>Failure is open, deliberately.</b> If a hook throws, the original step runs. For a development
     /// bring-up the safe failure is an ordinary cave level, not a wedged load.</para>
     /// </remarks>
@@ -131,16 +133,53 @@ namespace FalseGods.Integration.Sulfur.Arena
         }
 
         /// <summary>
-        /// Wraps one whole generation run so the hijack releases when it ends, however it ends.
+        /// The start of one whole generation run: decide here whether this run builds the arena, and wrap it so
+        /// the hijack releases when it ends, however it ends.
         /// </summary>
+        /// <remarks>
+        /// This — not the level-load request — is where arming belongs, because it is the one point every path
+        /// that generates a level passes through: our own developer key, a session peer following the host, and
+        /// the host being asked to lead a client's transition (see <see cref="LevelGenerationHijack"/> on why
+        /// that matters). <c>GameManager</c> has already resolved the environment and level index by the time
+        /// <c>StartMaking</c> is called, so the run can be identified from them.
+        /// </remarks>
         private static void ScopeToOneGenerationRun(ref IEnumerator __result)
         {
-            if (!LevelGenerationHijack.IsArmed || __result == null)
+            if (__result == null || !LevelGenerationHijack.IsArenaModeOn)
             {
                 return;
             }
 
+            try
+            {
+                var generating = CurrentlyGeneratingLevel();
+                if (generating == null || !LevelGenerationHijack.TryArmForRun(generating.Value))
+                {
+                    return;
+                }
+            }
+            catch (Exception exception)
+            {
+                LevelGenerationHijack.Logger?.LogWarning(
+                    $"[levelgen] could not identify the generating level, leaving it ordinary: {exception}");
+                return;
+            }
+
             __result = DisarmWhenFinished(__result);
+        }
+
+        /// <summary>Which level the game is generating, from the manager that has already switched to it, or null
+        /// when that cannot be read.</summary>
+        private static ArenaLevel? CurrentlyGeneratingLevel()
+        {
+            var gameManager = StaticInstance<GameManager>.Instance;
+            if (gameManager == null || gameManager.currentEnvironment == null)
+            {
+                return null;
+            }
+
+            return new ArenaLevel(
+                gameManager.currentEnvironment.id, gameManager.currentLevelIndex);
         }
 
         /// <summary>

@@ -20,20 +20,52 @@ namespace FalseGods.Integration.Sulfur.Arena
         public float EndDistance { get; }
     }
 
+    /// <summary>One level of one environment — the granularity at which a level either is our arena or is an
+    /// ordinary level. A struct so "no arena mode" can be an honest <c>null</c>.</summary>
+    public readonly struct ArenaLevel : IEquatable<ArenaLevel>
+    {
+        public ArenaLevel(WorldEnvironmentIds environment, int levelIndex)
+        {
+            Environment = environment;
+            LevelIndex = levelIndex;
+        }
+
+        public WorldEnvironmentIds Environment { get; }
+
+        public int LevelIndex { get; }
+
+        public bool Equals(ArenaLevel other) =>
+            Environment == other.Environment && LevelIndex == other.LevelIndex;
+
+        public override bool Equals(object obj) => obj is ArenaLevel other && Equals(other);
+
+        public override int GetHashCode() => ((int)Environment * 397) ^ LevelIndex;
+
+        public override string ToString() => $"{Environment} level {LevelIndex}";
+    }
+
     /// <summary>
-    /// The single owner of "a hijacked level load is in progress" — the flag that scopes every Strategy A
-    /// level-generation hook to exactly the load we asked for, and to nothing else the player does.
+    /// The single owner of the two Strategy A states: <b>which level this peer wants to be the arena</b>
+    /// (<see cref="ArenaMode"/>), and <b>whether the generation run happening right now is building it</b>
+    /// (<see cref="IsArmed"/>).
     /// </summary>
     /// <remarks>
     /// <para><b>Why a static.</b> Harmony patch methods are static, so the state they consult has to be reachable
-    /// statically. Keeping it in one place with an explicit <see cref="Arm"/>/<see cref="Disarm"/> pair — rather
-    /// than a bare mutable field next to the patches — keeps the ownership question answerable: the arena hijack
-    /// port arms it immediately before asking the game to load the level, and the generation run itself disarms
-    /// it when the run ends. Nothing else writes it.</para>
-    /// <para><b>Scoped to one generation run.</b> Disarming is driven by the canonical boundary — the completion
-    /// of <c>MakerGraphContext.StartMaking</c>, which is one whole level-generation graph — not by a timer or by
-    /// guessing at the last node. A load that throws still disarms, because the wrapper disarms in a
-    /// <c>finally</c>. So a subsequent ordinary level load generates completely untouched.</para>
+    /// statically. Keeping it in one place with explicit transitions — rather than a bare mutable field next to
+    /// the patches — keeps the ownership question answerable. Nothing else writes it.</para>
+    /// <para><b>Why a mode rather than a one-shot arm.</b> Arming immediately before <i>our own</i> level-load
+    /// request only covers the loads this peer initiates, and in a session that is not the interesting set.
+    /// Measured 2026-07-26 with two peers: SULFUR Together does not auto-follow the host's level, and a
+    /// <i>client</i>-initiated level load is intercepted and relayed so the <b>host</b> leads the transition and
+    /// the client then re-loads under the host's seed. So one press of the developer key produces up to three
+    /// generation runs across the two peers, and a one-shot arm covered exactly one of them — whichever peer
+    /// pressed the key got the arena and the other got an ordinary cave. The mode is a standing declaration
+    /// ("while I am in arena mode, that level IS the arena on this peer"), so every path that generates it —
+    /// our key, a peer following the host, the host leading a client's transition — builds the same arena.</para>
+    /// <para><b>Still scoped to one generation run.</b> The mode decides <i>whether</i> to arm; the arming itself
+    /// is per-run. It happens at the canonical boundary — the start of <c>MakerGraphContext.StartMaking</c>,
+    /// which is one whole level-generation graph — and is released when that run ends, including on failure
+    /// (the wrapper disarms in a <c>finally</c>). A generation of any other level, mode or not, is untouched.</para>
     /// <para><b>Neutered nodes.</b> Our arena is a single sealed room: the level must not grow a main path, side
     /// rooms, wandering enemies, or events around it. Those four generation steps are skipped while armed; every
     /// other step — notably navigation building and player spawning — runs natively, which is the entire point of
@@ -53,8 +85,18 @@ namespace FalseGods.Integration.Sulfur.Arena
             typeof(SpawnEventsNode),
         };
 
-        /// <summary>True while a level load we asked for is generating. Read by the generation hooks.</summary>
+        /// <summary>True while the generation run happening right now is building our arena. Read by the
+        /// generation hooks; set per run by <see cref="TryArmForRun"/>.</summary>
         public static bool IsArmed { get; private set; }
+
+        /// <summary>
+        /// The level this peer currently wants to be the arena, or null when the peer is playing the game
+        /// normally. A standing declaration, deliberately not tied to any one load request.
+        /// </summary>
+        public static ArenaLevel? ArenaMode { get; private set; }
+
+        /// <summary>Whether this peer is currently declaring a level to be the arena.</summary>
+        public static bool IsArenaModeOn => ArenaMode != null;
 
         /// <summary>
         /// Where a hijacked load gets its arena room. Installed once by the Composition Root; when absent, a
@@ -72,13 +114,47 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// <summary>Diagnostics only — never required for correct behaviour.</summary>
         public static ILogger? Logger { get; set; }
 
-        /// <summary>Arm the hooks for the level load that is about to be requested.</summary>
-        public static void Arm()
+        /// <summary>Declare <paramref name="level"/> to be the arena on this peer until further notice. Every
+        /// generation of that level from now on builds the arena, whoever asked for it.</summary>
+        public static void EnterArenaMode(ArenaLevel level)
         {
-            IsArmed = true;
+            ArenaMode = level;
+            Logger?.Log($"[levelgen] arena mode ON for {level}; every generation of that level on this peer "
+                + "builds the boss arena.");
         }
 
-        /// <summary>Disarm, whether the generation run completed, failed, or was abandoned. Idempotent.</summary>
+        /// <summary>Stop declaring any level to be the arena. A level already standing is left alone — it is the
+        /// next generation that goes back to being an ordinary one.</summary>
+        public static void LeaveArenaMode()
+        {
+            if (ArenaMode == null)
+            {
+                return;
+            }
+
+            Logger?.Log($"[levelgen] arena mode OFF (was {ArenaMode}); the next generation of that level is an "
+                + "ordinary one.");
+            ArenaMode = null;
+        }
+
+        /// <summary>
+        /// Decide whether the generation run that is starting builds the arena: it does exactly when this peer is
+        /// in arena mode for the level being generated. Returns whether it armed.
+        /// </summary>
+        public static bool TryArmForRun(ArenaLevel generating)
+        {
+            var mode = ArenaMode;
+            if (mode == null || !mode.Value.Equals(generating))
+            {
+                return false;
+            }
+
+            IsArmed = true;
+            return true;
+        }
+
+        /// <summary>Disarm, whether the generation run completed, failed, or was abandoned. Idempotent. The arena
+        /// <i>mode</i> is untouched — it outlives any one run, which is the whole point of it.</summary>
         public static void Disarm()
         {
             IsArmed = false;

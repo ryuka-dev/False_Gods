@@ -188,9 +188,12 @@ namespace FalseGods.Plugin
             // cave level to prove the entry point; substituting our arena for the generated content follows. Not a
             // shipping control - a developer-menu entry replaces the keybind later.
             _hijackKey = Config.Bind("Boss", "HijackArenaKey", Key.H,
-                "[DEV/TEMPORARY - removed before release] Load the boss arena as the first cave level through the "
-                + "game's native level generation (native navigation and player spawn). The game uses the new Input "
-                + "System.");
+                "[DEV/TEMPORARY - removed before release] Enter arena mode and load the boss arena as the first "
+                + "cave level through the game's native level generation (native navigation and player spawn); "
+                + "press it again to reload the arena after re-authoring its content. While in arena mode EVERY "
+                + "generation of that level on this machine builds the arena - press it on BOTH machines of a "
+                + "multiplayer session, or the one that did not press it ends up in an ordinary cave. The game "
+                + "uses the new Input System.");
 
             // TEMPORARY dev affordance: the cave environment's fog cutoff is tuned for corridor-sized rooms, which
             // leaves a 60-unit boss arena's walls invisible from the middle of it. Tunable live so the look can be
@@ -263,10 +266,14 @@ namespace FalseGods.Plugin
 
         private void Update()
         {
-            // DEV (Strategy A bring-up): load our arena as the native cave level. Role-independent - it drives the
-            // game's own level load, not our additive raise. Temporary, like the whole "Boss" dev config section.
+            // DEV (Strategy A bring-up): put this peer into arena mode and load our arena as the native cave
+            // level. Role-independent - it drives the game's own level load, not our additive raise - and BOTH
+            // peers of a session must be in arena mode for both to end up in the arena, because a level load on
+            // either peer regenerates the level on both. Temporary, like the whole "Boss" dev config section.
             if (KeyPressed(_hijackKey.Value))
             {
+                // Pressing it again reloads the arena rather than leaving arena mode: re-authored content is
+                // picked up by a level reload, which is the thing this key is actually used for during bring-up.
                 _hijack.LoadHijackedArena();
                 return;
             }
@@ -470,6 +477,10 @@ namespace FalseGods.Plugin
         private void OnDestroy()
         {
             FalseGodsIntegrations.Changed -= OnIntegrationChanged;
+
+            // Arena mode lives in a static the generation hooks can reach, so it outlives this component unless
+            // it is released here: a plugin that goes away must not leave the game's next cave load hijacked.
+            _hijack?.LeaveArenaMode();
 
             // Never leave a boss behind if the plugin unloads while one is up.
             if (_boss != null && _boss.IsActiveEncounter)
