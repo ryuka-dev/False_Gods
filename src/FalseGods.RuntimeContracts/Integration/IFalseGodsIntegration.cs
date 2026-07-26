@@ -33,5 +33,8 @@ namespace FalseGods.RuntimeContracts.Integration
         /// <summary>Maps a boss participant (game player index) to its owning session peer, so the host can address
         /// a per-player decision to the right client.</summary>
         IParticipantPeerMap Players { get; }
+
+        /// <summary>Declaring which of this peer's runtime spawns are the host's to make.</summary>
+        ISpawnOwnership Spawns { get; }
     }
 }

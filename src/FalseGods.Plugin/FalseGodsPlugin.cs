@@ -140,6 +140,8 @@ namespace FalseGods.Plugin
         private IArenaHijackPort _hijack = null!;
         private ArenaLevelFlow? _levelFlow;
         private IFalseGodsIntegration? _levelFlowIntegration; // the integration _levelFlow was composed on
+        private IDisposable? _spawnOwnership;                 // held while an integration carries our spawns
+        private IFalseGodsIntegration? _spawnOwnershipIntegration;
         private HijackedArenaContent _levelArena = null!;
         private LocalEncounterController _boss = null!;
         private ClientBossController? _client;
@@ -258,6 +260,7 @@ namespace FalseGods.Plugin
             // The session's agreement on which level is the boss arena has to exist before anyone asks to go
             // there, so it is maintained every frame rather than only while an encounter is up.
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
+            MaintainSpawnOwnership(FalseGodsIntegrations.Current);
 
             // DEV (Strategy A bring-up): take the session to the arena. Role-independent for the player - one
             // press on either machine gets everyone there - but not role-independent underneath: the host
@@ -311,6 +314,29 @@ namespace FalseGods.Plugin
 
             TearDownClientComposition();
             RunLocalComposition(integration, role);
+        }
+
+        /// <summary>
+        /// Declare this plugin a host-authoritative spawner for as long as an integration is live. The boss's
+        /// minions are spawned with this component as their owner, on the host only; without the declaration the
+        /// session layer has no reason to think they should travel, and a client's room stays empty.
+        /// </summary>
+        private void MaintainSpawnOwnership(IFalseGodsIntegration? integration)
+        {
+            if (ReferenceEquals(integration, _spawnOwnershipIntegration))
+            {
+                return;
+            }
+
+            _spawnOwnership?.Dispose();
+            _spawnOwnership = integration?.Spawns.DeclareHostAuthoritative(this);
+            _spawnOwnershipIntegration = integration;
+
+            if (integration != null && _spawnOwnership == null)
+            {
+                Logger.LogWarning("The session layer would not carry our runtime spawns; the boss's minions will "
+                    + "appear on the host only.");
+            }
         }
 
         /// <summary>
@@ -627,6 +653,9 @@ namespace FalseGods.Plugin
 
             TearDownClientComposition();
             TearDownArenaLevelFlow();
+            _spawnOwnership?.Dispose();
+            _spawnOwnership = null;
+            _spawnOwnershipIntegration = null;
         }
 
         private enum CompositionRole

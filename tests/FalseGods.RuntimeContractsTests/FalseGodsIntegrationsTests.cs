@@ -170,6 +170,8 @@ namespace FalseGods.RuntimeContractsTests
             public IPlayerRoster Roster { get; } = new FakeRoster();
 
             public IParticipantPeerMap Players { get; } = new FakeParticipantPeerMap();
+
+            public ISpawnOwnership Spawns { get; } = new FakeSpawnOwnership();
         }
 
         private sealed class FakeSession : IMultiplayerSession
@@ -199,6 +201,11 @@ namespace FalseGods.RuntimeContractsTests
         private sealed class FakeRoster : IPlayerRoster
         {
             public IReadOnlyList<SessionPeerId> Members { get; } = Array.Empty<SessionPeerId>();
+        }
+
+        private sealed class FakeSpawnOwnership : ISpawnOwnership
+        {
+            public IDisposable? DeclareHostAuthoritative(object spawnOwner) => null;
         }
 
         private sealed class FakeParticipantPeerMap : IParticipantPeerMap

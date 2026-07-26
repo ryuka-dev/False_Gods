@@ -156,7 +156,11 @@ namespace FalseGods.Integration.SulfurTogether
 
                 _channel = channel;
                 _integration = new SulfurTogetherIntegration(
-                    new StMultiplayerSession(peers), channel, new StPlayerRoster(peers), new StParticipantPeerMap(peers));
+                    new StMultiplayerSession(peers),
+                    channel,
+                    new StPlayerRoster(peers),
+                    new StParticipantPeerMap(peers),
+                    new StSpawnOwnership(_log));
                 _log.Log($"ST adapter composed over {bridgeVersion}.");
                 return true;
             }
