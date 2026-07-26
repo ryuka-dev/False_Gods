@@ -128,13 +128,18 @@ hash, and [OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitec
 model. Two things are specific to an arena that is the level, and both were measured with two peers
 (2026-07-26):
 
-- **Every peer generates the level itself, so every peer must know it is the arena.** The multiplayer layer does
-  not auto-follow the host into a level, and a *client*-initiated level load is intercepted and relayed so the
-  **host** leads the transition and the client then re-loads under the host's seed. One request therefore
-  produces up to three generation runs across two peers. Deciding "this is the arena" per load request covers
-  exactly one of them; the standing declaration (arena mode, §2.6) covers all of them. **Order matters at the
-  seam:** a peer that asks for the level before the other peer has declared arena mode makes that other peer
-  regenerate an ordinary level. Put the host in arena mode first.
+- **Every peer generates the level itself, so every peer must be told it is the arena.** The multiplayer layer
+  does not auto-follow the host into a level, and a *client*-initiated level load is intercepted and relayed so
+  the **host** leads the transition and the client then re-loads under the host's seed. One request therefore
+  produces up to three generation runs across two peers, most of them asked for by somebody else. So the fact is
+  **replicated, host-authoritative, and standing**: the host declares a level to be a boss arena, every peer
+  applies it, and a peer that wants to go there asks the host rather than transitioning alone — the same shape
+  the session layer uses for its own client-initiated transitions. Declared before the transition is requested
+  and carried on the same reliable-ordered channel, so it arrives ahead of the messages that make a peer
+  generate. The declaration lasts one **visit**, withdrawn when a peer generates a different level (§2.6);
+  otherwise the level it names could never be played in its ordinary form again.
+  **The session layer itself needs to know none of this** — with the peers on one seed it sees an ordinary level,
+  and its scene/seed checks pass (measured: matching `LevelTransition finalized` seeds, remote visuals shown).
 - **A client standing in the arena must adopt it, not realize its own.** The level realized it through the same
   load flow — same parity check, same recomputed hash — so its manifest is what the client would report anyway,
   and a second realization cannot even load (§3.12). Adoption also fixes ownership: the arena outlives the
@@ -240,9 +245,13 @@ without null checks), carry a `RoomLODBase` before `Room.Awake` runs, and use **
 **Decide "this run builds the arena" at the run, not at the request.** `MakerGraphContext.StartMaking` is called
 once per whole generation graph and is reached by every path that generates a level — our own request, a peer
 following the host, the host leading a peer's transition. `GameManager.currentEnvironment` and
-`currentLevelIndex` are both already set when it is called, so the run can be identified there. What a peer
-declares is standing ("this level is the arena until I say otherwise"); what a run gets is per-run and released
-in a `finally`. See §1.5 for why the request is the wrong place.
+`currentLevelIndex` are both already set when it is called, so the run can be identified there. What a peer holds
+is a standing declaration ("this level is the arena"); what a run gets is per-run and released in a `finally`.
+See §1.5 for why the request is the wrong place.
+
+The same boundary ends the declaration: `SwitchLevelRoutine` runs a generation graph for **every** level
+including the hub, so a run for a *different* level is the game saying the players have left, and is where the
+declaration is withdrawn.
 
 ### 2.7 Borrowed cave materials
 
