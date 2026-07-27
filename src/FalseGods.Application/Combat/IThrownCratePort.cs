@@ -80,6 +80,17 @@ namespace FalseGods.Application.Combat
         /// </remarks>
         int TakeFrom(CratePileId pile, int count);
 
+        /// <summary>
+        /// Where the nearest crate resting on <paramref name="pile"/> lies, measured on the ground plane from
+        /// <paramref name="near"/>. False when that pile is empty.
+        /// </summary>
+        /// <remarks>
+        /// What a carrier uses to notice the crates a dead colleague spilled: given the choice between walking to
+        /// a production point and picking up a load already lying closer, it takes the closer one. That is what
+        /// keeps a long fight from silting up with abandoned cargo without anything having to vanish.
+        /// </remarks>
+        bool TryFindNearestResting(CratePileId pile, ArenaWorldPoint near, out ArenaWorldPoint at);
+
         /// <summary>Move every crate still in the air, and resolve the ones that have arrived or been broken.</summary>
         void Advance(float deltaSeconds);
 

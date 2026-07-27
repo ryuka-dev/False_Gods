@@ -57,6 +57,13 @@ namespace FalseGods.Integration.Sulfur.Combat
         private const float StackSpacing = 0.55f;
         private const float StackBase = 1.9f;
 
+        /// <summary>How a set-down load is laid out on the ground: a ring around the spot, and a short drop onto
+        /// it. Crates are solid bodies, so a load released down one column interpenetrates and flings itself
+        /// apart; ringed, each lands on its own patch and settles.</summary>
+        private const float SetDownMinRadius = 1.2f;
+        private const float SetDownMaxRadius = 4f;
+        private const float SetDownHeight = 1.2f;
+
         /// <summary>The tallest a stack is drawn. A carrier hauling a dozen crates would otherwise wear a mast;
         /// beyond this the load is still carried, just not all of it drawn.</summary>
         private const int MaxDrawnStack = 5;
@@ -74,6 +81,8 @@ namespace FalseGods.Integration.Sulfur.Combat
         private Mesh _look;
         private Material _lookMaterial;
         private bool _lookResolved;
+        private int _nextSetDownSeed = 1;
+        private float _observedWalkSpeed;
 
         public SulfurCarrierPort(MonoBehaviour host, IThrownCratePort crates, ILogger logger = null)
         {
@@ -90,6 +99,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return _carriers.Count;
             }
         }
+
+        public float ObservedWalkSpeed => _observedWalkSpeed;
 
         public int Carried
         {
@@ -191,10 +202,18 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 case Leg.ToSource:
                 {
-                    var source = sources[carrier.SourceIndex % sources.Count];
-                    if (!HasArrived(carrier, source))
+                    if (!carrier.Aimed)
                     {
-                        RepeatIfStuck(carrier, source);
+                        // A carrier that has just arrived in the world has not been told where to fetch from yet.
+                        AimAtSomethingToFetch(carrier, sources);
+                        Begin(carrier, Leg.ToSource, carrier.Fetch);
+                        carrier.Aimed = true;
+                        return;
+                    }
+
+                    if (!HasArrived(carrier, carrier.Fetch))
+                    {
+                        RepeatIfStuck(carrier, carrier.Fetch);
                         return;
                     }
 
@@ -210,13 +229,24 @@ namespace FalseGods.Integration.Sulfur.Combat
                     var room = loadPerCarrier - carrier.Load;
                     if (room > 0)
                     {
-                        carrier.Load += _crates.TakeFrom(CratePileId.Source(carrier.SourceIndex % sources.Count), room);
+                        carrier.Load += _crates.TakeFrom(carrier.FetchPile, room);
                     }
 
                     if (carrier.Load <= 0)
                     {
                         carrier.Handling = 0f;
-                        return; // nothing to fetch yet; stand and wait
+
+                        // Nothing here after all — spilled cargo someone else already collected, or a point that
+                        // has not produced yet. Re-decide rather than standing at an empty spot forever, and walk
+                        // if that changed the answer.
+                        var was = carrier.Fetch;
+                        AimAtSomethingToFetch(carrier, sources);
+                        if (Flat(was, carrier.Fetch) > 1f)
+                        {
+                            Begin(carrier, Leg.ToSource, carrier.Fetch);
+                        }
+
+                        return;
                     }
 
                     if (carrier.Load < loadPerCarrier && carrier.Waited < HandlingSeconds * 4f)
@@ -248,11 +278,56 @@ namespace FalseGods.Integration.Sulfur.Combat
                     }
 
                     SetDown(carrier, deliverTo, deliverPile);
+
+                    // Next trip: rotate to the following production point, then decide whether anything spilled
+                    // is closer than it. Aiming has to happen BEFORE the leg begins, or the goblin sets off for
+                    // wherever it was going last time.
                     carrier.SourceIndex++;
-                    Begin(carrier, Leg.ToSource, sources[carrier.SourceIndex % sources.Count]);
+                    AimAtSomethingToFetch(carrier, sources);
+                    Begin(carrier, Leg.ToSource, carrier.Fetch);
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// Decide what this carrier walks to for its next load: its production point, or a heap of cargo somebody
+        /// spilled on the way — whichever is closer.
+        /// </summary>
+        /// <remarks>
+        /// This is what stops a long fight from silting up. Crates dropped by a carrier who died holding them
+        /// belong to nobody and the boss cannot fire them, so without this they would lie there for the rest of
+        /// the fight; with it, the village comes and collects, and killing a loaded carrier costs the boss the
+        /// walk rather than the cargo. A player who keeps killing carriers still wins the exchange — the goblins
+        /// spend their trips reclaiming instead of fetching.
+        /// </remarks>
+        private void AimAtSomethingToFetch(Carrier carrier, IReadOnlyList<ArenaWorldPoint> sources)
+        {
+            var source = sources[carrier.SourceIndex % sources.Count];
+            carrier.Fetch = source;
+            carrier.FetchPile = CratePileId.Source(carrier.SourceIndex % sources.Count);
+
+            var here = carrier.Unit != null ? carrier.Unit.transform.position : Vector3.zero;
+            var from = new ArenaWorldPoint(here.x, here.y, here.z);
+            if (!_crates.TryFindNearestResting(CratePileId.Loose, from, out var spilled))
+            {
+                return;
+            }
+
+            if (Flat(spilled, from) < Flat(source, from))
+            {
+                carrier.Fetch = spilled;
+                carrier.FetchPile = CratePileId.Loose;
+            }
+        }
+
+        /// <summary>Ground-plane distance, squared — heights differ across the room's terraces and would otherwise
+        /// make a pile one floor up look further away than it is to walk to.</summary>
+        private static float Flat(ArenaWorldPoint a, ArenaWorldPoint b)
+        {
+            var dx = a.X - b.X;
+            var dz = a.Z - b.Z;
+            return (dx * dx) + (dz * dz);
         }
 
         /// <summary>Put the load on the ground as real destructibles — this is the moment a carried stack becomes
@@ -260,10 +335,16 @@ namespace FalseGods.Integration.Sulfur.Combat
         private void SetDown(Carrier carrier, ArenaWorldPoint at, CratePileId pile)
         {
             var placed = 0;
-            for (var i = 0; i < carrier.Load; i++)
+            var load = carrier.Load;
+            var seed = _nextSetDownSeed++;
+            for (var i = 0; i < load; i++)
             {
-                // Stacked slightly above the pile so they settle onto what is already there instead of inside it.
-                var drop = new ArenaWorldPoint(at.X, at.Y + StackBase + i * StackSpacing, at.Z);
+                // Laid out around the pile rather than all on one spot. Dropping a load down a single column made
+                // the crates interpenetrate and fire each other across the room the moment physics resolved them;
+                // ringed, each one lands on its own patch of floor and settles. The volley does not care where on
+                // the pile a crate lies, only which pile it is on.
+                var ring = ShotgunSpread.Offset(seed, i, load, SetDownMinRadius, SetDownMaxRadius);
+                var drop = new ArenaWorldPoint(at.X + ring.X, at.Y + SetDownHeight, at.Z + ring.Z);
                 if (_crates.Drop(drop, pile))
                 {
                     placed++;
@@ -285,12 +366,16 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             var spilled = 0;
-            for (var i = 0; i < carrier.Load; i++)
+            var load = carrier.Load;
+            var seed = _nextSetDownSeed++;
+            for (var i = 0; i < load; i++)
             {
+                // Spread like a delivery, for the same reason: a column of crates dropped on one spot explodes.
+                var ring = ShotgunSpread.Offset(seed, i, load, SetDownMinRadius, SetDownMaxRadius);
                 var at = new ArenaWorldPoint(
-                    carrier.LastPosition.x,
-                    carrier.LastPosition.y + StackBase + i * StackSpacing,
-                    carrier.LastPosition.z);
+                    carrier.LastPosition.x + ring.X,
+                    carrier.LastPosition.y + SetDownHeight,
+                    carrier.LastPosition.z + ring.Z);
                 if (_crates.Drop(at, CratePileId.Loose))
                 {
                     spilled++;
@@ -519,6 +604,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var speed = unit is Npc npc && npc.AiAgent != null && npc.AiAgent.navMeshAgent != null
                     ? npc.AiAgent.navMeshAgent.maxSpeed
                     : 0f;
+                _observedWalkSpeed = speed;
 
                 _logger?.Log($"[carrier] {CarrierUnit.value}: canBeDeactivated={so.canBeDeactivated}, "
                     + $"canPanic={so.canPanic}, isCivilian={so.isCivilian}, walk speed={speed:0.00} m/s.");
@@ -570,6 +656,16 @@ namespace FalseGods.Integration.Sulfur.Combat
             public int SourceIndex { get; set; }
 
             public int Load { get; set; }
+
+            /// <summary>Where this carrier is going for its next load, and which heap it will take it from — a
+            /// production point, or spilled cargo it passed closer to.</summary>
+            public ArenaWorldPoint Fetch { get; set; }
+
+            public CratePileId FetchPile { get; set; }
+
+            /// <summary>Whether this carrier has been told where to fetch from at all. False for the frame after
+            /// it arrives in the world, when it has a leg but no destination yet.</summary>
+            public bool Aimed { get; set; }
 
             public float OnLeg { get; set; }
 

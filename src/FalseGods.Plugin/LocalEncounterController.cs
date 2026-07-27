@@ -90,17 +90,20 @@ namespace FalseGods.Plugin
         /// and it doubles across the fight — the last step supplies roughly twice the first.
         /// </summary>
         /// <remarks>
-        /// The rate these produce depends on how long a round trip takes, which depends on the room's authored
-        /// route and the goblins' own walking speed — neither of which this can know. Both are measured and
-        /// reported at the start of a fight so the ladder can be tuned against the real number rather than an
-        /// estimate.
+        /// <para>The rate these produce depends on how long a round trip takes, which depends on the room's
+        /// authored route and the goblins' own walking speed — neither of which this can know. Both are measured
+        /// and reported, so the ladder is tuned against the real number rather than an estimate.</para>
+        /// <para><b>Calibrated against a measured round trip of about 13.5 s</b> — the room's authored route at
+        /// the carriers' real 5.13 m/s, not the 3 m/s first guessed, which had the opening step supplying nearly
+        /// five a second instead of three. These numbers put the opening near three crates a second and the last
+        /// step at six, with both the headcount and the load climbing on the way.</para>
         /// </remarks>
         private static readonly SupplyEscalation Escalation = new SupplyEscalation(
-            new SupplyStep(0.80f, carriers: 8, loadPerCarrier: 8),
-            new SupplyStep(0.60f, carriers: 9, loadPerCarrier: 9),
-            new SupplyStep(0.40f, carriers: 10, loadPerCarrier: 10),
-            new SupplyStep(0.20f, carriers: 11, loadPerCarrier: 11),
-            new SupplyStep(0.00f, carriers: 12, loadPerCarrier: 12));
+            new SupplyStep(0.80f, carriers: 6, loadPerCarrier: 7),   // 42 -> ~3.1/s
+            new SupplyStep(0.60f, carriers: 6, loadPerCarrier: 8),   // 48 -> ~3.6/s
+            new SupplyStep(0.40f, carriers: 7, loadPerCarrier: 9),   // 63 -> ~4.7/s
+            new SupplyStep(0.20f, carriers: 7, loadPerCarrier: 10),  // 70 -> ~5.2/s
+            new SupplyStep(0.00f, carriers: 8, loadPerCarrier: 10)); // 80 -> ~6.0/s
 
         /// <summary>How high above a production point a destructible appears, so it falls into view and settles
         /// rather than being born inside whatever is already stacked there.</summary>
@@ -111,8 +114,9 @@ namespace FalseGods.Plugin
         private const float CarrierHandlingSeconds = 0.75f;
 
         /// <summary>The walking speed assumed for the round-trip estimate until a real carrier reports its own.
-        /// Only ever a placeholder for the first frames of a fight — the measured value replaces it.</summary>
-        private const float AssumedCarrierWalkSpeed = 3f;
+        /// Only ever a placeholder for the first frames of a fight — the measured value replaces it. Set to what
+        /// the goblins were measured at, so even the placeholder is not a guess.</summary>
+        private const float AssumedCarrierWalkSpeed = 5.13f;
 
         /// <summary>
         /// The first boss's itinerary: it holds its home anchor, drops to the second one to summon, returns, does
@@ -151,6 +155,7 @@ namespace FalseGods.Plugin
         private SupplyLine? _supply;
         private int[]? _restingAtSource; // reused each tick so counting the room costs no allocation
         private float _measuredRoundTripSeconds = 1f;
+        private float _walkSpeedInUse = AssumedCarrierWalkSpeed;
         private int _lastReportedThroughput = -1;
 
         private BossSimulation? _boss;
@@ -496,7 +501,31 @@ namespace FalseGods.Plugin
 
             var step = Escalation.At(_boss.HealthFraction);
             _carriers.Advance(deltaSeconds, step.Carriers, step.LoadPerCarrier, sources, at, pile);
+            AdoptMeasuredWalkSpeed();
             ReportSupplyStepChange(step);
+        }
+
+        /// <summary>
+        /// Replace the assumed walking speed with what a real carrier turned out to walk at, once one exists, and
+        /// re-derive the round trip from it. Reported when it changes the answer, because every supply rate in the
+        /// log is divided by this — a wrong speed makes all of them wrong by the same factor, silently.
+        /// </summary>
+        private void AdoptMeasuredWalkSpeed()
+        {
+            var measured = _carriers.ObservedWalkSpeed;
+            if (measured <= 0f || _arenaContent is null || Math.Abs(measured - _walkSpeedInUse) < 0.01f)
+            {
+                return;
+            }
+
+            var was = _measuredRoundTripSeconds;
+            _walkSpeedInUse = measured;
+            _measuredRoundTripSeconds = EstimateRoundTripSeconds(
+                _arenaContent.CrateSources, _arenaContent.CratePiles, measured);
+            _lastReportedThroughput = -1; // the current step re-reports itself against the true round trip
+
+            _logger?.Log($"[supply] carriers actually walk {measured:0.00} m/s, so a round trip is "
+                + $"{_measuredRoundTripSeconds:0.0}s, not {was:0.0}s.");
         }
 
         /// <summary>Report the ladder stepping up, once per step, with what it actually means in crates a second
@@ -721,8 +750,9 @@ namespace FalseGods.Plugin
                 ? new SupplyLine(Supply, arena.CrateSources.Count)
                 : null;
             _restingAtSource = arena.CrateSources.Count > 0 ? new int[arena.CrateSources.Count] : null;
+            _walkSpeedInUse = AssumedCarrierWalkSpeed;
             _measuredRoundTripSeconds = EstimateRoundTripSeconds(
-                arena.CrateSources, arena.CratePiles, AssumedCarrierWalkSpeed);
+                arena.CrateSources, arena.CratePiles, _walkSpeedInUse);
             _lastReportedThroughput = -1; // the opening step reports itself on the first tick
 
             ReportAuthoredBossContent(arena);
@@ -827,7 +857,7 @@ namespace FalseGods.Plugin
             _logger?.Log($"[supply-content] {arena.CrateSources.Count} crate source(s): "
                 + $"{Describe(arena.CrateSources)}; {arena.CratePiles.Count} delivery pile(s): "
                 + $"{Describe(arena.CratePiles)}; round trip about {_measuredRoundTripSeconds:0.0}s at "
-                + $"{AssumedCarrierWalkSpeed:0.#} m/s");
+                + $"{_walkSpeedInUse:0.##} m/s");
 
             if (arena.CratePiles.Count > 0 && arena.CratePiles.Count < arena.BossAnchors.Count)
             {

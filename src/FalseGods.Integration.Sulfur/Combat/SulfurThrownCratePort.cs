@@ -83,6 +83,11 @@ namespace FalseGods.Integration.Sulfur.Combat
         // The layer the vanilla destructibles sit on, so the game's weapon fire finds our body the same way.
         private const string BreakableLayerName = "Breakable";
 
+        /// <summary>Ceiling on crates lying on nobody's pile — cargo spilled by carriers who died holding it.
+        /// The carriers themselves are what normally keep this down; this only stops a level from silting up when
+        /// they are being killed faster than they can collect.</summary>
+        private const int MaxLooseCrates = 60;
+
         // The game's solid-geometry layers a flying crate should break on — walls and props, but NOT the walkable
         // floor (Geometry), whose contact is the crate's normal landing. The arena's boundary walls are colliders
         // on GeometryNoNavMesh; the rest are included defensively and skipped if absent.
@@ -419,6 +424,11 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // A new crate is resting by default — the game's physics owns it until it is lifted — and belongs
                 // to the pile it was dropped onto, which is what decides whether the boss may ever fire it.
                 _crates.Add(new ManagedCrate(unit, breakable) { Pile = pile });
+                if (pile.Kind == CratePileKind.Loose)
+                {
+                    CapLooseCrates();
+                }
+
                 return true;
             }
             catch (Exception exception)
@@ -1004,6 +1014,73 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             return taken;
+        }
+
+        public bool TryFindNearestResting(CratePileId pile, ArenaWorldPoint near, out ArenaWorldPoint at)
+        {
+            at = default(ArenaWorldPoint);
+            var from = new Vector3(near.X, 0f, near.Z);
+            var nearest = float.MaxValue;
+            var found = false;
+
+            for (var index = 0; index < _crates.Count; index++)
+            {
+                var crate = _crates[index];
+                if (crate.Phase != Phase.Resting || crate.Pile != pile || crate.Unit == null)
+                {
+                    continue;
+                }
+
+                var here = crate.Unit.transform.position;
+                var distance = (new Vector3(here.x, 0f, here.z) - from).sqrMagnitude;
+                if (distance >= nearest)
+                {
+                    continue;
+                }
+
+                nearest = distance;
+                at = ToPoint(here);
+                found = true;
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        /// Keep the abandoned cargo bounded. Carriers reclaim what they can reach, but a fight where they are
+        /// killed faster than they collect would still silt the level up with bodies, so the oldest loose crates
+        /// are quietly removed past a ceiling. A backstop, not the mechanism: at any sane rate the goblins get
+        /// there first and this never fires.
+        /// </summary>
+        private void CapLooseCrates()
+        {
+            var loose = RestingOn(CratePileId.Loose);
+            if (loose <= MaxLooseCrates)
+            {
+                return;
+            }
+
+            var over = loose - MaxLooseCrates;
+            for (var index = 0; index < _crates.Count && over > 0; index++)
+            {
+                var crate = _crates[index];
+                if (crate.Phase != Phase.Resting || crate.Pile != CratePileId.Loose)
+                {
+                    continue;
+                }
+
+                if (crate.Unit != null)
+                {
+                    UnityEngine.Object.Destroy(crate.Unit.gameObject);
+                }
+
+                _crates.RemoveAt(index);
+                index--;
+                over--;
+            }
+
+            _logger?.Log($"[crate] {loose - MaxLooseCrates} abandoned crate(s) cleared; the loose pile was over "
+                + $"its ceiling of {MaxLooseCrates}.");
         }
 
         private static ArenaWorldPoint ToPoint(Vector3 position) =>

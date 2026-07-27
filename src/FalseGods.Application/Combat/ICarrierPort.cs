@@ -29,6 +29,16 @@ namespace FalseGods.Application.Combat
         int Carried { get; }
 
         /// <summary>
+        /// How fast the carriers actually walk, in metres per second, or 0 before any has been seen.
+        /// </summary>
+        /// <remarks>
+        /// Reported rather than assumed because it is the divisor that turns carriers and loads into crates per
+        /// second: it belongs to the creature and the game's own tuning, so guessing it means every rate derived
+        /// from it is wrong by the same factor. Measured off the first carrier that exists.
+        /// </remarks>
+        float ObservedWalkSpeed { get; }
+
+        /// <summary>
         /// Run the supply route for one frame. <paramref name="wanted"/> carriers should be on it, each hauling
         /// <paramref name="loadPerCarrier"/>; carriers are put on and taken off the route as those change.
         /// <paramref name="sources"/> are the room's production points, and <paramref name="deliverTo"/> /
