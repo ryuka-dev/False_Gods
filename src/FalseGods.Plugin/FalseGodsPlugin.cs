@@ -270,6 +270,7 @@ namespace FalseGods.Plugin
                     (at, pile, count, radius) => _crateFlow?.BroadcastTaken(at, pile, count, radius),
                     (from, at, pile, count, seed) => _crateFlow?.BroadcastSetDown(from, at, pile, count, seed)),
                 (at, pile) => _crateFlow?.BroadcastDropped(at, pile),
+                LaunchCrateVolley,
                 _maxClientHitDamage.Value) { LevelArena = _levelArena };
 
             // Subscribe before any adapter can load (their hard BepInDependency on this GUID guarantees the order),
@@ -690,6 +691,27 @@ namespace FalseGods.Plugin
                 return;
             }
 
+            LaunchCrateVolley(pile, VolleyCount);
+        }
+
+        /// <summary>
+        /// Throw <paramref name="count"/> crates off <paramref name="pile"/> at the players: aim where they are and
+        /// where they are going, scatter the crates around those points, and tell every client the few numbers it
+        /// takes to build the same volley.
+        /// </summary>
+        /// <remarks>
+        /// Shared by the boss, which does this on its own clock as ammunition reaches it, and by the bring-up key,
+        /// which is only a way to make it happen on demand. The aiming lives here because this is where the
+        /// player's motion is tracked; the boss decides only when and how many.
+        /// </remarks>
+        private void LaunchCrateVolley(CratePileId pile, int count)
+        {
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                return;
+            }
+
             var seed = _nextVolleySeed++;
 
             // The telegraph length is part of the volley's seeded shape, so it is rolled here (where the seed is
@@ -724,7 +746,7 @@ namespace FalseGods.Plugin
             var leadCenter = new ArenaWorldPoint(lead.X, footY, lead.Z);
 
             var shape = new CrateVolleyShape(
-                seed, VolleyCount, VolleySpreadMin, VolleySpreadMax,
+                seed, count, VolleySpreadMin, VolleySpreadMax,
                 VolleyLiftHeight, VolleyLiftSeconds, hold, VolleyFlightSeconds, VolleyApex, VolleyLeadShare,
                 VolleyFireInterval);
 
@@ -742,7 +764,7 @@ namespace FalseGods.Plugin
             else
             {
                 _log.Log($"[crate] {pile} is empty - the boss has no ammunition. Nothing has been carried to it "
-                    + "yet; stock it with the delivery key.");
+                    + "yet.");
             }
         }
 

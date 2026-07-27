@@ -113,6 +113,15 @@ namespace FalseGods.Plugin
         /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
         private const float CarrierHandlingSeconds = 0.75f;
 
+        /// <summary>How often the boss reaches for its pile. Short enough that the barrage is continuous at any
+        /// supply worth the name, long enough that each throw reads as one gesture; the amount thrown is whatever
+        /// arrived in between, so this paces the <i>gesture</i>, never the volume.</summary>
+        private const float VolleyEverySeconds = 2f;
+
+        /// <summary>The most one throw takes off the pile. A player who lets a huge stock build should feel it,
+        /// but not as a single unreadable wall of crates.</summary>
+        private const int MaxCratesPerVolley = 16;
+
         /// <summary>The walking speed assumed for the round-trip estimate until a real carrier reports its own.
         /// Only ever a placeholder for the first frames of a fight — the measured value replaces it. Set to what
         /// the goblins were measured at, so even the placeholder is not a guess.</summary>
@@ -149,11 +158,13 @@ namespace FalseGods.Plugin
         private readonly IThrownCratePort _crates;
         private readonly ICarrierPort _carriers;
         private readonly Action<ArenaWorldPoint, CratePileId>? _announceProduced;
+        private readonly Action<CratePileId, int>? _throwVolley;
 
         // Live only while a fight is: the supply line is the encounter's, and a room with no production points
         // leaves it null so nothing is produced rather than producing nowhere.
         private SupplyLine? _supply;
         private int[]? _restingAtSource; // reused each tick so counting the room costs no allocation
+        private float _sinceVolley;
         private float _measuredRoundTripSeconds = 1f;
         private float _walkSpeedInUse = AssumedCarrierWalkSpeed;
         private int _lastReportedThroughput = -1;
@@ -194,14 +205,19 @@ namespace FalseGods.Plugin
         /// hear about it belongs to whoever owns the session, so it is handed out rather than reached for.</param>
         /// <param name="carriers">The goblins who walk the boss's ammunition across the room. Like the minions,
         /// they belong to the fight and leave with it.</param>
+        /// <param name="throwVolley">Asked to throw <c>count</c> crates off a pile. The aiming — where the players
+        /// are, where they are going, the seed the scatter comes from — belongs to whoever owns the crate
+        /// mechanic, so the encounter says only when and how many.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
             IThrownCratePort crates,
             ICarrierPort carriers,
             Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
+            Action<CratePileId, int>? throwVolley = null,
             float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
+            _throwVolley = throwVolley;
             _logger = logger;
             _minionSpawns = minions ?? throw new ArgumentNullException(nameof(minions));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
@@ -427,6 +443,7 @@ namespace FalseGods.Plugin
             _boss.Advance();
             ReportActivityChange();
             AdvanceSupplyLine(deltaSeconds);
+            FireWhateverWasBrought(deltaSeconds);
             Present();
             _presentation.Render(deltaSeconds);
         }
@@ -478,6 +495,50 @@ namespace FalseGods.Plugin
                 _logger?.Log($"[supply] source {source} produced one; {_crates.RestingOn(pile)} resting there.");
             }
         }
+
+        /// <summary>
+        /// Throw whatever the village has brought. The boss fires on its own clock now, not on a key.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>The pile is the pacing, not a cooldown.</b> The boss takes whatever is standing beside it every
+        /// few seconds, so what a player faces is however much got carried across the room in that time — which is
+        /// the whole point of the supply line. It is never the bottleneck itself: a boss with a full pile empties
+        /// it, and a boss whose carriers were killed stands there with nothing to throw.</para>
+        /// <para><b>Not while it is leaving.</b> A boss sinking, hidden or rising is between places and untouchable;
+        /// firing then would throw crates out of an empty floor. Its own attack cycle is left alone — the volley is
+        /// something the room does through it, not one of its swings.</para>
+        /// <para>Host-authoritative: the volley is broadcast as its inputs, and every peer builds the same crates
+        /// from them. A client never fires one of its own.</para>
+        /// </remarks>
+        private void FireWhateverWasBrought(float deltaSeconds)
+        {
+            _sinceVolley += deltaSeconds;
+            if (_boss is null || _sinceVolley < VolleyEverySeconds || !CanThrow(_boss.Activity))
+            {
+                return;
+            }
+
+            if (!TryGetSupplyPile(out var pile, out _))
+            {
+                return;
+            }
+
+            var stocked = _crates.RestingOn(pile);
+            if (stocked <= 0)
+            {
+                return; // unsupplied: nothing to throw, and nothing to reset — it fires the moment stock arrives
+            }
+
+            _sinceVolley = 0f;
+            _throwVolley?.Invoke(pile, Math.Min(stocked, MaxCratesPerVolley));
+        }
+
+        /// <summary>Whether the boss is in a state where it could throw at all. Anything mid-relocation is not.</summary>
+        private static bool CanThrow(BossActivity activity) =>
+            activity != BossActivity.Dead
+            && activity != BossActivity.Vanishing
+            && activity != BossActivity.Hidden
+            && activity != BossActivity.Appearing;
 
         /// <summary>
         /// Work the supply route for one frame: how many goblins are on it, and how much each hauls, is read from
@@ -750,6 +811,7 @@ namespace FalseGods.Plugin
                 ? new SupplyLine(Supply, arena.CrateSources.Count)
                 : null;
             _restingAtSource = arena.CrateSources.Count > 0 ? new int[arena.CrateSources.Count] : null;
+            _sinceVolley = 0f; // a fresh boss waits its first beat before reaching for a pile it has not been given
             _walkSpeedInUse = AssumedCarrierWalkSpeed;
             _measuredRoundTripSeconds = EstimateRoundTripSeconds(
                 arena.CrateSources, arena.CratePiles, _walkSpeedInUse);
