@@ -36,5 +36,8 @@ namespace FalseGods.RuntimeContracts.Integration
 
         /// <summary>Declaring which of this peer's runtime spawns are the host's to make.</summary>
         ISpawnOwnership Spawns { get; }
+
+        /// <summary>Whether a player is still in the fight, or down waiting to be rescued.</summary>
+        IPlayerLifeQuery Lives { get; }
     }
 }

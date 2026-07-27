@@ -69,7 +69,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var index = 0; index < players.Count; index++)
             {
                 var player = players[index];
-                if (player == null || player.playerUnit == null)
+                if (player == null || player.playerUnit == null || !FightingPlayers.IsFighting(player))
                 {
                     continue;
                 }
@@ -104,7 +104,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var index = 0; index < players.Count; index++)
             {
                 var player = players[index];
-                if (player == null || player.playerUnit == null)
+                if (player == null || player.playerUnit == null || !FightingPlayers.IsFighting(player))
                 {
                     continue;
                 }

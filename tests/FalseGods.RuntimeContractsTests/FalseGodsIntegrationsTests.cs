@@ -172,6 +172,13 @@ namespace FalseGods.RuntimeContractsTests
             public IParticipantPeerMap Players { get; } = new FakeParticipantPeerMap();
 
             public ISpawnOwnership Spawns { get; } = new FakeSpawnOwnership();
+
+            public IPlayerLifeQuery Lives { get; } = new FakePlayerLifeQuery();
+        }
+
+        private sealed class FakePlayerLifeQuery : IPlayerLifeQuery
+        {
+            public bool IsOutOfTheFight(object playerUnit) => false;
         }
 
         private sealed class FakeSession : IMultiplayerSession

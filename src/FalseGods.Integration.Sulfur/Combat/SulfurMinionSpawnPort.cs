@@ -200,9 +200,9 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 var player = players[i];
                 var playerUnit = player != null ? player.playerUnit : null;
-                if (playerUnit == null)
+                if (playerUnit == null || !FightingPlayers.IsFighting(player))
                 {
-                    continue;
+                    continue; // nobody sends minions after someone already lying on the floor
                 }
 
                 var distance = (playerUnit.transform.position - from).sqrMagnitude;

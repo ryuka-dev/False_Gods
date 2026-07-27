@@ -16,13 +16,15 @@ namespace FalseGods.Integration.SulfurTogether
             IEncounterChannel channel,
             IPlayerRoster roster,
             IParticipantPeerMap players,
-            ISpawnOwnership spawns)
+            ISpawnOwnership spawns,
+            IPlayerLifeQuery lives)
         {
             Session = session ?? throw new ArgumentNullException(nameof(session));
             Channel = channel ?? throw new ArgumentNullException(nameof(channel));
             Roster = roster ?? throw new ArgumentNullException(nameof(roster));
             Players = players ?? throw new ArgumentNullException(nameof(players));
             Spawns = spawns ?? throw new ArgumentNullException(nameof(spawns));
+            Lives = lives ?? throw new ArgumentNullException(nameof(lives));
         }
 
         public IMultiplayerSession Session { get; }
@@ -34,5 +36,7 @@ namespace FalseGods.Integration.SulfurTogether
         public IParticipantPeerMap Players { get; }
 
         public ISpawnOwnership Spawns { get; }
+
+        public IPlayerLifeQuery Lives { get; }
     }
 }

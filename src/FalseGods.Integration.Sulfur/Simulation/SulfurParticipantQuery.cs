@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using FalseGods.Core.Simulation;
+using FalseGods.Integration.Sulfur.Combat;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.Units;
 using UnityEngine;
@@ -53,8 +54,10 @@ namespace FalseGods.Integration.Sulfur.Simulation
 
                 for (var i = 0; i < players.Count; i++)
                 {
+                    // A player who is down is not a participant: leaving them in makes the boss pick them as a
+                    // target and spend its attacks on somebody who cannot answer.
                     var player = players[i];
-                    if (player != null)
+                    if (player != null && FightingPlayers.IsFighting(player))
                     {
                         _ids.Add(new ParticipantId(player.playerIndex));
                     }
@@ -72,7 +75,8 @@ namespace FalseGods.Integration.Sulfur.Simulation
                 for (var i = 0; i < players.Count; i++)
                 {
                     var player = players[i];
-                    if (player != null && player.playerIndex == participant.Value)
+                    if (player != null && player.playerIndex == participant.Value
+                        && FightingPlayers.IsFighting(player))
                     {
                         // The arena floor is the horizontal plane; the boss reasons in (X, Z) only (SimVector2).
                         var world = player.transform.position;

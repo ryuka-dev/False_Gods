@@ -459,6 +459,10 @@ namespace FalseGods.Plugin
             _spawnOwnership = integration?.Spawns.DeclareHostAuthoritative(this);
             _spawnOwnershipIntegration = integration;
 
+            // Who is still in the fight is a session fact, so the gate follows the session: with one, the boss and
+            // everything it aims stop attacking players who are down; without one, everybody is fighting.
+            FightingPlayers.AskedOf(integration?.Lives);
+
             if (integration != null && _spawnOwnership == null)
             {
                 Logger.LogWarning("The session layer would not carry our runtime spawns; the boss's minions will "

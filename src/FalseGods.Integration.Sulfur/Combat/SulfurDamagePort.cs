@@ -86,7 +86,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var i = 0; i < players.Count; i++)
             {
                 var player = players[i];
-                if (player != null && player.playerIndex == playerIndex)
+                if (player != null && player.playerIndex == playerIndex && FightingPlayers.IsFighting(player))
                 {
                     return player;
                 }
