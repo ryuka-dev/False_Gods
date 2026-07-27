@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FalseGods.Application.Combat;
 using FalseGods.Core.Simulation;
 using PerfectRandom.Sulfur.Core;
@@ -43,6 +44,44 @@ namespace FalseGods.Integration.Sulfur.Combat
             return new PlayerMotion(
                 new SimVector2(position.x, position.z),
                 new SimVector2(velocity.x, velocity.z));
+        }
+
+        public void ReadPlayersToThrowAt(IList<PlayerAim> into)
+        {
+            into.Clear();
+
+            var gameManager = StaticInstance<GameManager>.Instance;
+            var players = gameManager != null ? gameManager.Players : null;
+            if (players == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < players.Count; i++)
+            {
+                var player = players[i];
+                if (player == null || !FightingPlayers.IsFighting(player))
+                {
+                    continue;
+                }
+
+                var position = player.transform.position;
+                var ground = new SimVector2(position.x, position.z);
+
+                // Only a player with a live movement controller can be asked how fast it is going — which in a
+                // session means the one on this machine. The rest are figures the session keeps up to date, so
+                // their speed has to be worked out from how their position moves; that is the caller's to track.
+                var controller = player.movement;
+                if (controller == null)
+                {
+                    into.Add(new PlayerAim(player.playerIndex, ground, SimVector2.Zero, false));
+                    continue;
+                }
+
+                var velocity = controller.GetVelocity();
+                into.Add(new PlayerAim(
+                    player.playerIndex, ground, new SimVector2(velocity.x, velocity.z), true));
+            }
         }
     }
 }

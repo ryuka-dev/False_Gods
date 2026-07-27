@@ -541,12 +541,15 @@ namespace FalseGods.Integration.Sulfur.Combat
         // the choice is independent of where a crate lands within its slice.
         private const int LeadChoiceSalt = 40009;
 
-        public int LaunchVolley(
-            CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape)
+        /// <summary>Salt for the per-crate "which player is this one for" draw, kept clear of the scatter's salts
+        /// and the lead coin's so who a crate is aimed at is independent of where it lands and whether it leads.</summary>
+        private const int TargetChoiceSalt = 50021;
+
+        public int LaunchVolley(CratePileId pile, IReadOnlyList<CrateVolleyAim> aims, CrateVolleyShape shape)
         {
-            if (!Prepare())
+            if (aims == null || aims.Count == 0 || !Prepare())
             {
-                return 0;
+                return 0; // nobody to throw at
             }
 
             // Only crates already resting ON THIS PILE are lifted: a crate in the air stays there, and one still
@@ -569,10 +572,17 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 var crate = chosen[index];
 
-                // Each crate independently aims at where the player is now or where they are predicted to be, a
+                // Which player this crate is for. Per crate rather than per volley, so a barrage threatens the
+                // whole room at once instead of burying one player while the others walk through it.
+                var who = aims.Count == 1
+                    ? 0
+                    : (int)(SeededRandom.Unit01(shape.Seed, TargetChoiceSalt + index) * aims.Count) % aims.Count;
+                var aim = aims[who];
+
+                // Each crate independently aims at where that player is now or where they are predicted to be, a
                 // seeded coin so both spots are threatened in every volley — no single way of moving dodges it all.
                 var leads = SeededRandom.Unit01(shape.Seed, LeadChoiceSalt + index) < shape.LeadShare;
-                var center = leads ? leadCenter : currentCenter;
+                var center = leads ? aim.Lead : aim.Current;
 
                 // The scatter is seeded so every peer throwing this volley lands the crates the same way; the count
                 // handed to the pattern is what actually flew, so a short pile still rings the target evenly.

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FalseGods.Core.Bosses.Combat;
 using FalseGods.RuntimeContracts.Arena;
 
@@ -50,17 +51,18 @@ namespace FalseGods.Application.Combat
 
         /// <summary>
         /// Lift up to <see cref="CrateVolleyShape.Count"/> crates off <paramref name="pile"/> — floating them up
-        /// under our control rather than gravity — hold them a beat, then throw them as a shotgun spread. Each
-        /// crate is aimed either where the player is now (<paramref name="currentCenter"/>) or where they are
-        /// predicted to be (<paramref name="leadCenter"/>), split by <see cref="CrateVolleyShape.LeadShare"/>,
-        /// then scattered around that point. Both the scatter and the current-or-lead choice come from the shape's
-        /// seed, so every peer throwing the same volley lays the crates out identically.
+        /// under our control rather than gravity — hold them a beat, then throw them as a shotgun spread.
+        /// <para>Each crate picks one of <paramref name="aims"/> — one per player worth throwing at — and then
+        /// either where that player is now or where they are predicted to be, split by
+        /// <see cref="CrateVolleyShape.LeadShare"/>, before being scattered around that point. Every one of those
+        /// choices comes from the shape's seed, so each peer lays the same volley out identically. Aiming per
+        /// crate rather than per volley is what stops one player being safe while another is buried.</para>
         /// <para>Only crates resting <b>on that pile</b> are lifted, which is what makes the supply line a
         /// mechanic: a boss cannot fire the crates still standing at the production points, only what was carried
-        /// to it. Returns how many were launched, which is zero when the pile is empty — an unsupplied boss.</para>
+        /// to it. Returns how many were launched, which is zero when the pile is empty — an unsupplied boss — or
+        /// when there is nobody left to throw at.</para>
         /// </summary>
-        int LaunchVolley(
-            CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape);
+        int LaunchVolley(CratePileId pile, IReadOnlyList<CrateVolleyAim> aims, CrateVolleyShape shape);
 
         /// <summary>
         /// Toss <paramref name="count"/> crates from <paramref name="from"/> onto the ground in a ring around

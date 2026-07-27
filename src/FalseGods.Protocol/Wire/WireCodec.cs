@@ -22,6 +22,10 @@ namespace FalseGods.Protocol.Wire
     /// </remarks>
     public static class WireCodec
     {
+        /// <summary>A ceiling on how many players one volley can name, so a malformed length cannot make the
+        /// reader allocate its way out of memory. Far above any party the game supports.</summary>
+        private const int MaxVolleyTargets = 32;
+
         // Boss event stream tags. Never reused or reordered — a tag is part of the wire contract.
         private const byte BossAppearedTag = 1;
         private const byte BossTelegraphedTag = 2;
@@ -326,8 +330,13 @@ namespace FalseGods.Protocol.Wire
         public static byte[] Serialize(CrateVolleyFired message)
         {
             var w = new WireWriter();
-            WriteWorldPosition(w, message.CurrentCenter);
-            WriteWorldPosition(w, message.LeadCenter);
+            WriteInt(w, message.Targets.Count);
+            for (var i = 0; i < message.Targets.Count; i++)
+            {
+                WriteWorldPosition(w, message.Targets[i].Current);
+                WriteWorldPosition(w, message.Targets[i].Lead);
+            }
+
             WriteInt(w, message.PileKind);
             WriteInt(w, message.PileIndex);
             WriteInt(w, message.Seed);
@@ -347,9 +356,21 @@ namespace FalseGods.Protocol.Wire
         public static CrateVolleyFired DeserializeCrateVolleyFired(byte[] payload)
         {
             var r = new WireReader(payload);
+            var targetCount = r.ReadInt32();
+            if (targetCount < 0 || targetCount > MaxVolleyTargets)
+            {
+                throw new InvalidDataException(
+                    $"CrateVolleyFired target count {targetCount} is outside 0..{MaxVolleyTargets}.");
+            }
+
+            var targets = new List<CrateVolleyTarget>(targetCount);
+            for (var i = 0; i < targetCount; i++)
+            {
+                targets.Add(new CrateVolleyTarget(ReadWorldPosition(r), ReadWorldPosition(r)));
+            }
+
             var message = new CrateVolleyFired(
-                ReadWorldPosition(r),
-                ReadWorldPosition(r),
+                targets,
                 r.ReadInt32(),
                 r.ReadInt32(),
                 r.ReadInt32(),

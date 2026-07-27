@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace FalseGods.Protocol.Wire
 {
     /// <summary>
@@ -63,9 +65,16 @@ namespace FalseGods.Protocol.Wire
     /// <see cref="PileIndex"/>. Every field is an input to the shared computation — <see cref="Seed"/> above all —
     /// so this is the whole volley, not a description of one.
     /// </summary>
+    /// <summary>One player's pair of threatened spots inside a volley: where they stand, and where they are
+    /// predicted to be when the crates arrive.</summary>
+    /// <remarks>
+    /// Both travel rather than being recomputed per peer: a client cannot read another player's velocity, so the
+    /// prediction is the host's to make — like the seed.
+    /// </remarks>
+    public sealed record CrateVolleyTarget(WorldPosition Current, WorldPosition Lead);
+
     public sealed record CrateVolleyFired(
-        WorldPosition CurrentCenter,
-        WorldPosition LeadCenter,
+        IReadOnlyList<CrateVolleyTarget> Targets,
         int PileKind,
         int PileIndex,
         int Seed,

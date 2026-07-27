@@ -55,9 +55,14 @@ namespace FalseGods.ProtocolTests
         [Fact]
         public void A_volley_round_trips_every_input_it_is_rebuilt_from()
         {
+            // Two players, each with their own pair of threatened spots — the shape that stops a volley landing
+            // entirely on whoever happens to be hosting.
             var original = new CrateVolleyFired(
-                new WorldPosition(1f, 2f, 3f),
-                new WorldPosition(4f, 5f, 6f),
+                new[]
+                {
+                    new CrateVolleyTarget(new WorldPosition(1f, 2f, 3f), new WorldPosition(4f, 5f, 6f)),
+                    new CrateVolleyTarget(new WorldPosition(-7f, 2f, 8f), new WorldPosition(-9f, 2f, 10f)),
+                },
                 PileKind: 2,
                 PileIndex: 3,
                 Seed: 12345,
@@ -72,7 +77,25 @@ namespace FalseGods.ProtocolTests
                 LeadShare: 0.5f,
                 FireIntervalSeconds: 0.333f);
 
-            Assert.Equal(original, WireCodec.DeserializeCrateVolleyFired(WireCodec.Serialize(original)));
+            var rebuilt = WireCodec.DeserializeCrateVolleyFired(WireCodec.Serialize(original));
+
+            // The record holds a list, so its own equality is by reference; the targets are compared element-wise
+            // and the rest by rebuilding the record around them.
+            Assert.Equal(original.Targets, rebuilt.Targets);
+            Assert.Equal(original with { Targets = rebuilt.Targets }, rebuilt);
+        }
+
+        [Fact]
+        public void A_volley_naming_absurdly_many_players_is_refused_rather_than_allocated()
+        {
+            var payload = WireCodec.Serialize(new CrateVolleyFired(
+                new[] { new CrateVolleyTarget(new WorldPosition(0f, 0f, 0f), new WorldPosition(0f, 0f, 0f)) },
+                2, 0, 1, 1, 1f, 2f, 1f, 1f, 1f, 1f, 1f, 0.5f, 0f));
+
+            // Overwrite the leading target count with something no party could justify.
+            BitConverter.GetBytes(int.MaxValue).CopyTo(payload, 0);
+
+            Assert.Throws<InvalidDataException>(() => WireCodec.DeserializeCrateVolleyFired(payload));
         }
 
         [Fact]

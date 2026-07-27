@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
@@ -137,8 +138,14 @@ namespace FalseGods.Plugin
 
         private IThrownCratePort _crates = null!;
         private SulfurCarriedLoadMirror? _carriedLoads;
+
+        // Aiming state, reused every frame so tracking the room costs no allocation.
+        private readonly List<PlayerAim> _playersToThrowAt = new List<PlayerAim>();
+        private readonly List<CrateVolleyAim> _volleyAims = new List<CrateVolleyAim>();
+        private readonly Dictionary<int, TrackedPlayer> _playerSpeeds = new Dictionary<int, TrackedPlayer>();
+        private readonly HashSet<int> _playersSeen = new HashSet<int>();
+        private readonly List<int> _forgottenPlayers = new List<int>();
         private IPlayerMotionPort _playerMotion = null!;
-        private TargetMotionTracker _playerVelocity = null!;
 
         private float _appliedFogStart;
         private float _appliedFogEnd;
@@ -238,7 +245,6 @@ namespace FalseGods.Plugin
             // which the carry commands cannot do because they carry no idea of which goblin is which.
             _carriedLoads = new SulfurCarriedLoadMirror(cratePort, _log);
             _playerMotion = new SulfurPlayerMotionPort();
-            _playerVelocity = new TargetMotionTracker(VolleyLeadSmoothingSeconds);
 
             // The Strategy A generation hooks patch the base game, so they are installed once, here, rather than
             // as a side effect of constructing a port. They stay inert until a hijacked load arms them, and pull
@@ -302,17 +308,9 @@ namespace FalseGods.Plugin
 
             ApplyFogChanges();
 
-            // Track the player's velocity every frame so a volley can lead by the average, not the instant — read
-            // once here and reused when a volley fires this frame.
-            var playerMotion = _playerMotion.TryReadLocalPlayer();
-            if (playerMotion.Known)
-            {
-                _playerVelocity.Observe(playerMotion.Velocity, Time.deltaTime);
-            }
-            else
-            {
-                _playerVelocity.Reset();
-            }
+            // Track EVERY player's velocity each frame so a volley can lead all of them by the average rather than
+            // the instant — and so a barrage threatens the whole room, not whoever happens to be hosting.
+            TrackPlayerMotion(Time.deltaTime);
 
             // The destructibles are host-authoritative like everything else that changes the world: the host does
             // the thing and tells everyone, and a client's key does nothing rather than producing a second set of
@@ -431,12 +429,11 @@ namespace FalseGods.Plugin
                         _log.Log($"[carrier] host put {count} down on {pile} (seed {seed}); {placed} laid out "
                             + $"here, {_crates.RestingOn(pile)} on that pile.");
                     },
-                    OnVolleyFired = (pile, current, lead, shape) =>
+                    OnVolleyFired = (pile, aims, shape) =>
                     {
-                        var launched = _crates.LaunchVolley(pile, current, lead, shape);
-                        _log.Log($"[crate] host fired a volley of {shape.Count} off {pile} (seed {shape.Seed}); "
-                            + $"{launched} lifted here, aimed at ({current.X:0.0}, {current.Z:0.0}) / led to "
-                            + $"({lead.X:0.0}, {lead.Z:0.0}).");
+                        var launched = _crates.LaunchVolley(pile, aims, shape);
+                        _log.Log($"[crate] host fired a volley of {shape.Count} off {pile} (seed {shape.Seed}) "
+                            + $"spread over {aims.Count} player(s); {launched} lifted here.");
                     },
                 };
                 _crateFlowIntegration = integration;
@@ -729,46 +726,156 @@ namespace FalseGods.Plugin
             var eye = camera.transform.position;
             var footY = eye.y - LocalEncounterController.EyeToFootDrop;
 
-            var motion = _playerMotion.TryReadLocalPlayer();
-            SimVector2 current;
-            SimVector2 lead;
-            if (motion.Known)
+            var aims = BuildVolleyAims(airtime, footY);
+            if (aims.Count == 0)
             {
-                // The velocity is the smoothed average tracked each frame, not this instant's reading, so a
-                // stand-still jitter no longer flings the lead across the arena.
-                current = motion.Position;
-                lead = LeadAim.Predict(motion.Position, _playerVelocity.SmoothedVelocity, airtime);
+                _log.Log("[crate] nobody to throw at — every player is down or out of the level.");
+                return;
             }
-            else
-            {
-                // No player to read: aim both at the camera, with no lead — the volley still fires, just at one spot.
-                current = new SimVector2(eye.x, eye.z);
-                lead = current;
-            }
-
-            var currentCenter = new ArenaWorldPoint(current.X, footY, current.Z);
-            var leadCenter = new ArenaWorldPoint(lead.X, footY, lead.Z);
 
             var shape = new CrateVolleyShape(
                 seed, count, VolleySpreadMin, VolleySpreadMax,
                 VolleyLiftHeight, VolleyLiftSeconds, hold, VolleyFlightSeconds, VolleyApex, VolleyLeadShare,
                 VolleyFireInterval);
 
-            var launched = _crates.LaunchVolley(pile, currentCenter, leadCenter, shape);
+            var launched = _crates.LaunchVolley(pile, aims, shape);
             if (launched > 0)
             {
                 // The shape is the volley: every client computes the same crates from these inputs, so what the
                 // players dodge is the same volley rather than a description of one.
-                _crateFlow?.BroadcastVolley(pile, currentCenter, leadCenter, shape);
+                _crateFlow?.BroadcastVolley(pile, aims, shape);
                 _log.Log($"[crate] volley of {launched} lifted off {pile}; {_crates.RestingOn(pile)} left there. "
                     + $"Hold {hold:0.00}s, then {VolleyCratesPerSecond:0.#}/s for {launched * VolleyFireInterval:0.00}s; "
-                    + $"some aimed here ({current.X:0.0}, {current.Z:0.0}), "
-                    + $"some led {airtime:0.00}s to ({lead.X:0.0}, {lead.Z:0.0}). Shoot them for loot.");
+                    + $"spread over {aims.Count} player(s), led {airtime:0.00}s. Shoot them for loot.");
             }
             else
             {
                 _log.Log($"[crate] {pile} is empty - the boss has no ammunition. Nothing has been carried to it "
                     + "yet.");
+            }
+        }
+
+        /// <summary>
+        /// One aim per player worth throwing at: where they stand, and where they will be when the crates arrive.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Everyone, not the local player.</b> Reading the game's player singleton aims every volley at
+        /// whoever is hosting; measured on two peers, every crate landed on the host and the client walked through
+        /// the barrage untouched.</para>
+        /// <para><b>Why the speeds are tracked here.</b> Only the player on this machine has a movement controller
+        /// to ask. Everyone else is a figure the session keeps up to date, so their speed comes from watching their
+        /// position move — one smoothed tracker per player, for the same reason the local one is smoothed: a
+        /// jitter must not fling the lead across the arena.</para>
+        /// </remarks>
+        private List<CrateVolleyAim> BuildVolleyAims(float airtime, float footY)
+        {
+            _playerMotion.ReadPlayersToThrowAt(_playersToThrowAt);
+
+            _volleyAims.Clear();
+            for (var i = 0; i < _playersToThrowAt.Count; i++)
+            {
+                var player = _playersToThrowAt[i];
+                if (!_playerSpeeds.TryGetValue(player.Index, out var tracked))
+                {
+                    continue; // seen for the first time this frame; it is aimed at from the next volley on
+                }
+
+                var lead = LeadAim.Predict(player.Position, tracked.SmoothedVelocity, airtime);
+                _volleyAims.Add(new CrateVolleyAim(
+                    new ArenaWorldPoint(player.Position.X, footY, player.Position.Z),
+                    new ArenaWorldPoint(lead.X, footY, lead.Z)));
+            }
+
+            return _volleyAims;
+        }
+
+        /// <summary>
+        /// Keep a smoothed speed for every player in the room, so a volley can lead all of them and not just the
+        /// one on this machine. Players who leave are forgotten.
+        /// </summary>
+        private void TrackPlayerMotion(float deltaSeconds)
+        {
+            if (deltaSeconds <= 0f)
+            {
+                return;
+            }
+
+            _playerMotion.ReadPlayersToThrowAt(_playersToThrowAt);
+            _playersSeen.Clear();
+
+            for (var i = 0; i < _playersToThrowAt.Count; i++)
+            {
+                var player = _playersToThrowAt[i];
+                _playersSeen.Add(player.Index);
+
+                if (!_playerSpeeds.TryGetValue(player.Index, out var tracked))
+                {
+                    tracked = new TrackedPlayer(VolleyLeadSmoothingSeconds);
+                    _playerSpeeds[player.Index] = tracked;
+                }
+
+                tracked.Observe(player, deltaSeconds);
+            }
+
+            if (_playerSpeeds.Count == _playersSeen.Count)
+            {
+                return;
+            }
+
+            _forgottenPlayers.Clear();
+            foreach (var known in _playerSpeeds.Keys)
+            {
+                if (!_playersSeen.Contains(known))
+                {
+                    _forgottenPlayers.Add(known);
+                }
+            }
+
+            for (var i = 0; i < _forgottenPlayers.Count; i++)
+            {
+                _playerSpeeds.Remove(_forgottenPlayers[i]);
+            }
+        }
+
+        /// <summary>
+        /// One player's smoothed ground speed. The player on this machine reports its own velocity, which is the
+        /// reading the controller itself keeps; everybody else's is worked out from how far they moved, because a
+        /// figure the session drives has no controller to ask.
+        /// </summary>
+        private sealed class TrackedPlayer
+        {
+            private readonly TargetMotionTracker _tracker;
+            private SimVector2 _lastPosition;
+            private bool _hasLastPosition;
+
+            public TrackedPlayer(float smoothingSeconds)
+            {
+                _tracker = new TargetMotionTracker(smoothingSeconds);
+            }
+
+            public SimVector2 SmoothedVelocity => _tracker.SmoothedVelocity;
+
+            public void Observe(PlayerAim player, float deltaSeconds)
+            {
+                SimVector2 velocity;
+                if (player.VelocityKnown)
+                {
+                    velocity = player.Velocity;
+                }
+                else if (_hasLastPosition)
+                {
+                    velocity = new SimVector2(
+                        (player.Position.X - _lastPosition.X) / deltaSeconds,
+                        (player.Position.Z - _lastPosition.Z) / deltaSeconds);
+                }
+                else
+                {
+                    velocity = SimVector2.Zero;
+                }
+
+                _lastPosition = player.Position;
+                _hasLastPosition = true;
+                _tracker.Observe(velocity, deltaSeconds);
             }
         }
 

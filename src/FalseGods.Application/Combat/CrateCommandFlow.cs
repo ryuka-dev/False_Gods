@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Bosses.Combat;
 using FalseGods.Protocol.Wire;
@@ -44,6 +45,9 @@ namespace FalseGods.Application.Combat
         /// clean from a single point.</summary>
         public const float MaxPickUpReach = 50f;
 
+        /// <summary>A ceiling on how many players one volley may name. Far above any party the game supports.</summary>
+        public const int MaxVolleyTargets = 32;
+
         private readonly IEncounterChannel _channel;
         private readonly IMultiplayerSession _session;
 
@@ -61,7 +65,7 @@ namespace FalseGods.Application.Combat
         public Action<ArenaWorldPoint, ArenaWorldPoint, float, float>? OnThrown { get; set; }
 
         /// <summary>The host fired a volley off a pile; compute the same one here from its shape.</summary>
-        public Action<CratePileId, ArenaWorldPoint, ArenaWorldPoint, CrateVolleyShape>? OnVolleyFired { get; set; }
+        public Action<CratePileId, IReadOnlyList<CrateVolleyAim>, CrateVolleyShape>? OnVolleyFired { get; set; }
 
         /// <summary>A carrier picked a load up on the host; take the same crates off the same heap here.</summary>
         public Action<ArenaWorldPoint, CratePileId, int, float>? OnTaken { get; set; }
@@ -93,16 +97,21 @@ namespace FalseGods.Application.Combat
 
         /// <summary>Host: tell every client the volley's inputs, which is the whole volley.</summary>
         public void BroadcastVolley(
-            CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape)
+            CratePileId pile, IReadOnlyList<CrateVolleyAim> aims, CrateVolleyShape shape)
         {
             if (!IsHosting)
             {
                 return;
             }
 
+            var targets = new List<CrateVolleyTarget>(aims.Count);
+            for (var i = 0; i < aims.Count; i++)
+            {
+                targets.Add(new CrateVolleyTarget(ToWire(aims[i].Current), ToWire(aims[i].Lead)));
+            }
+
             Broadcast(EncounterCodec.Encode(new CrateVolleyFired(
-                ToWire(currentCenter),
-                ToWire(leadCenter),
+                targets,
                 (int)pile.Kind,
                 pile.Index,
                 shape.Seed,
@@ -197,8 +206,7 @@ namespace FalseGods.Application.Combat
                     && CratePileId.TryFrom(volley.PileKind, volley.PileIndex, out var volleyPile):
                     OnVolleyFired?.Invoke(
                         volleyPile,
-                        FromWire(volley.CurrentCenter),
-                        FromWire(volley.LeadCenter),
+                        ToAims(volley.Targets),
                         new CrateVolleyShape(
                             volley.Seed,
                             volley.Count,
@@ -215,9 +223,20 @@ namespace FalseGods.Application.Combat
             }
         }
 
+        /// <summary>Rebuild the aim points a volley named. The wire's own reader has already bounded the count.</summary>
+        private static IReadOnlyList<CrateVolleyAim> ToAims(IReadOnlyList<CrateVolleyTarget> targets)
+        {
+            var aims = new List<CrateVolleyAim>(targets.Count);
+            for (var i = 0; i < targets.Count; i++)
+            {
+                aims.Add(new CrateVolleyAim(FromWire(targets[i].Current), FromWire(targets[i].Lead)));
+            }
+
+            return aims;
+        }
+
         private static bool IsSaneVolley(CrateVolleyFired v) =>
-            IsFinite(v.CurrentCenter)
-            && IsFinite(v.LeadCenter)
+            HasSaneTargets(v.Targets)
             && v.Count > 0
             && v.Count <= MaxVolleyCount
             && IsFinite(v.SpreadMinRadius)
@@ -238,6 +257,26 @@ namespace FalseGods.Application.Combat
             // A barrage cannot outlast the fight: the last crate waits Count * interval, so a forged command
             // cannot park the whole pile in the air for an hour.
             && v.FireIntervalSeconds <= MaxFireIntervalSeconds;
+
+        /// <summary>A volley must name at least one player and no absurd number of them, with every spot a real
+        /// place — an aim full of NaN would scatter crates to nowhere.</summary>
+        private static bool HasSaneTargets(IReadOnlyList<CrateVolleyTarget> targets)
+        {
+            if (targets == null || targets.Count == 0 || targets.Count > MaxVolleyTargets)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < targets.Count; i++)
+            {
+                if (!IsFinite(targets[i].Current) || !IsFinite(targets[i].Lead))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         private static bool IsPositive(float value) => IsFinite(value) && value > 0f;
 
