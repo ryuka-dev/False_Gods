@@ -174,6 +174,15 @@ namespace FalseGods.RuntimeContractsTests
             public ISpawnOwnership Spawns { get; } = new FakeSpawnOwnership();
 
             public IPlayerLifeQuery Lives { get; } = new FakePlayerLifeQuery();
+
+            public IDestructibleOwnership Destructibles { get; } = new FakeDestructibleOwnership();
+        }
+
+        private sealed class FakeDestructibleOwnership : IDestructibleOwnership
+        {
+            public void ClaimAsOurs(object destructible)
+            {
+            }
         }
 
         private sealed class FakePlayerLifeQuery : IPlayerLifeQuery

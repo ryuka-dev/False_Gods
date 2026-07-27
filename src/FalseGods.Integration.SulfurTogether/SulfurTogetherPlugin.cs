@@ -161,7 +161,8 @@ namespace FalseGods.Integration.SulfurTogether
                     new StPlayerRoster(peers),
                     new StParticipantPeerMap(peers),
                     new StSpawnOwnership(_log),
-                    new StPlayerLifeQuery(_log));
+                    new StPlayerLifeQuery(_log),
+                    new StDestructibleOwnership(_log));
                 _log.Log($"ST adapter composed over {bridgeVersion}.");
                 return true;
             }

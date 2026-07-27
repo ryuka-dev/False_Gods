@@ -96,10 +96,6 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// coin's, so which crates pay is independent of where they land and what they aim at.</summary>
         private const int LootSalt = 70001;
 
-        /// <summary>How far a surface must face downwards before a crate treats it as a ceiling to be ignored
-        /// rather than a wall to burst on. Comfortably past vertical, so an overhanging wall still stops a crate.</summary>
-        private const float CeilingFacing = -0.3f;
-
         /// <summary>How a set-down load lands: a ring around the spot, a short drop onto it, and the little arc it
         /// rides out of the carrier's hands to get there. Constants rather than wire fields — every peer runs the
         /// same build, so the same seed lays the same load out on all of them.</summary>
@@ -375,6 +371,11 @@ namespace FalseGods.Integration.Sulfur.Combat
             // The clone is inactive because the template is; waking it runs the unit's own Start after Spawn has
             // already marked it spawned, so nothing re-initialises.
             unit.gameObject.SetActive(true);
+
+            // Ours, not the session layer's. It matches destructible breaks by spawn position, and every one of
+            // these is made on the same heap — so its match picks the wrong crate and breaks something that was
+            // mid-throw. We already replicate these from the command that made them.
+            OurDestructibles.Claim(unit.gameObject);
 
             breakable = unit as Breakable;
             if (breakable != null)
@@ -793,22 +794,13 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return false;
             }
 
-            if (!Physics.Raycast(from, delta / distance, out var hit, distance, mask, QueryTriggerInteraction.Ignore))
+            if (Physics.Raycast(from, delta / distance, out var hit, distance, mask, QueryTriggerInteraction.Ignore))
             {
-                return false;
+                point = hit.point;
+                return true;
             }
 
-            // A surface facing downwards is a ceiling, and clipping one is our arc overshooting, not the crate
-            // flying into something. A cave's roof is part of the same shell as its walls, so the mask cannot tell
-            // them apart — but their facing can. Without this a volley thrown from the high pile burst in mid-air
-            // on the way up, which read as crates exploding for no reason.
-            if (hit.normal.y < CeilingFacing)
-            {
-                return false;
-            }
-
-            point = hit.point;
-            return true;
+            return false;
         }
 
         /// <summary>The physics layer mask of the arena's solid walls and props — built once from the game's own

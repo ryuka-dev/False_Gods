@@ -39,5 +39,8 @@ namespace FalseGods.RuntimeContracts.Integration
 
         /// <summary>Whether a player is still in the fight, or down waiting to be rescued.</summary>
         IPlayerLifeQuery Lives { get; }
+
+        /// <summary>Claiming our own destructibles, so the session layer does not also replicate them.</summary>
+        IDestructibleOwnership Destructibles { get; }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using FalseGods.RuntimeContracts.Multiplayer;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.Units;
+using UnityEngine;
 
 namespace FalseGods.Integration.Sulfur.Combat
 {
@@ -60,5 +61,41 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// game's roster. A player without a unit is nobody to attack.</summary>
         public static bool IsFighting(Player? player) =>
             player != null && IsFighting(player.playerUnit);
+    }
+
+    /// <summary>
+    /// Claiming the destructibles we make, so the session layer does not replicate them on top of us.
+    /// </summary>
+    /// <remarks>
+    /// <para>A session layer mirrors destructible breaks by matching where an object was spawned — sound for a
+    /// level's own breakables, wrong for ours: a boss's ammunition is heaped in one place, so the key matches
+    /// whichever of the pile is nearest and a break on one peer destroyed an unrelated crate on the other. It was
+    /// measured as crates bursting in mid-air and loot appearing with no shot fired.</para>
+    /// <para>Set by the composition root while a session is live, like <see cref="FightingPlayers"/>. Without one
+    /// there is nobody to claim them from, and claiming is a no-op.</para>
+    /// </remarks>
+    public static class OurDestructibles
+    {
+        private static IDestructibleOwnership? _ownership;
+
+        public static void ClaimedWith(IDestructibleOwnership? ownership) => _ownership = ownership;
+
+        /// <summary>Say that this destructible is ours to replicate. Safe with no session and safe to repeat.</summary>
+        public static void Claim(GameObject? destructible)
+        {
+            if (destructible == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _ownership?.ClaimAsOurs(destructible);
+            }
+            catch (Exception)
+            {
+                // The adapter reports its own failure; an unclaimed crate is a worse fight, not a broken one.
+            }
+        }
     }
 }
