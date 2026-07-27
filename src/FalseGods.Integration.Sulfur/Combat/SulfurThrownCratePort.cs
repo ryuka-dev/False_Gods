@@ -88,6 +88,14 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// they are being killed faster than they can collect.</summary>
         private const int MaxLooseCrates = 60;
 
+        /// <summary>How often a crate the boss actually threw pays out when a player shoots it out of the air.
+        /// A barrage is a lot of crates, and every one of them paying buried the floor in pickups.</summary>
+        private const float LootChance = 0.1f;
+
+        /// <summary>Salt for the per-crate loot roll, clear of the scatter's salts (0..2*count+2) and the lead
+        /// coin's, so which crates pay is independent of where they land and what they aim at.</summary>
+        private const int LootSalt = 70001;
+
         /// <summary>How a set-down load lands: a ring around the spot, a short drop onto it, and the little arc it
         /// rides out of the carrier's hands to get there. Constants rather than wire fields — every peer runs the
         /// same build, so the same seed lays the same load out on all of them.</summary>
@@ -125,6 +133,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         private int _wallMask;
         private bool _wallMaskBuilt;
         private bool _looseNeedsCapping;
+        private int _nextThrowSeed = 1;
 
         public SulfurThrownCratePort(ILogger logger = null, IThrownCrateImpact impact = null)
         {
@@ -141,8 +150,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             var total = 0;
             for (var index = 0; index < _crates.Count; index++)
             {
-                var crate = _crates[index];
-                if (crate.Phase == Phase.Resting && crate.Pile == pile && crate.Unit != null)
+                if (IsOn(_crates[index], pile))
                 {
                     total++;
                 }
@@ -150,6 +158,22 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             return total;
         }
+
+        /// <summary>
+        /// Whether a crate belongs to <paramref name="pile"/> right now — resting on it, or still in the air on its
+        /// way down to it.
+        /// </summary>
+        /// <remarks>
+        /// <b>The moment it is thrown toward a pile, it is that pile's.</b> Counting only what had already settled
+        /// made the two peers disagree: a delivery command reaches a client a little later than the host acts on
+        /// it, so a volley fired in between found the client's crates still mid-air and lifted nothing — measured
+        /// on two peers, fourteen volleys in a hundred and sixteen. Whether a crate has finished falling is a
+        /// question of local timing, and local timing must not decide what the boss is holding.
+        /// </remarks>
+        private static bool IsOn(ManagedCrate crate, CratePileId pile) =>
+            crate.Unit != null
+            && crate.Pile == pile
+            && (crate.Phase == Phase.Resting || crate.Phase == Phase.Tossing);
 
         private int CountWhere(Func<Phase, bool> predicate)
         {
@@ -391,6 +415,9 @@ namespace FalseGods.Integration.Sulfur.Combat
                     unit.Rigidbody.isKinematic = true;
                 }
 
+                // Thrown at somebody, so it can pay — on the same odds as a crate out of a volley.
+                SetLootAllowed(breakable, SeededRandom.Unit01(_nextThrowSeed++, LootSalt) < LootChance);
+
                 var crate = new ManagedCrate(unit, breakable);
                 crate.BeginFlight(start, target, flightSeconds, apexHeight);
                 _crates.Add(crate);
@@ -433,6 +460,8 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 // A new crate is resting by default — the game's physics owns it until it is lifted — and belongs
                 // to the pile it was dropped onto, which is what decides whether the boss may ever fire it.
+                // Standing on a pile it is worth nothing to shoot; only what the boss sends can pay.
+                SetLootAllowed(breakable, false);
                 _crates.Add(new ManagedCrate(unit, breakable) { Pile = pile });
                 if (pile.Kind == CratePileKind.Loose)
                 {
@@ -493,6 +522,9 @@ namespace FalseGods.Integration.Sulfur.Combat
                     unit.Rigidbody.useGravity = false;
                 }
 
+                // On its way to a pile, so worth nothing to shoot — the same rule as one already standing there.
+                SetLootAllowed(breakable, false);
+
                 var crate = new ManagedCrate(unit, breakable);
                 crate.BeginToss(start, new Vector3(to.X, to.Y, to.Z), flightSeconds, apexHeight, pile);
                 _crates.Add(crate);
@@ -522,10 +554,9 @@ namespace FalseGods.Integration.Sulfur.Combat
             var chosen = new List<ManagedCrate>();
             for (var index = 0; index < _crates.Count && chosen.Count < shape.Count; index++)
             {
-                var candidate = _crates[index];
-                if (candidate.Phase == Phase.Resting && candidate.Pile == pile && candidate.Unit != null)
+                if (IsOn(_crates[index], pile))
                 {
-                    chosen.Add(candidate);
+                    chosen.Add(_crates[index]);
                 }
             }
 
@@ -551,6 +582,11 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 var from = crate.Unit.transform.position;
                 crate.BeginLift(from, from + Vector3.up * shape.LiftHeight, target, shape, index);
+
+                // Off the pile and aimed at somebody: from here it is worth shooting down — some of the time.
+                // Seeded from the volley, so every peer agrees which crates of it pay.
+                SetLootAllowed(
+                    crate.Breakable, SeededRandom.Unit01(shape.Seed, LootSalt + index) < LootChance);
 
                 // We drive it from here on, so it leaves the physics engine's hands — and, like a thrown crate, it
                 // must not shatter on contact or on its own speed while we carry it.
@@ -1103,7 +1139,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var index = _crates.Count - 1; index >= 0 && taken < count; index--)
             {
                 var crate = _crates[index];
-                if (crate.Phase != Phase.Resting || crate.Pile != pile)
+                if (!IsOn(crate, pile))
                 {
                     continue;
                 }
@@ -1150,7 +1186,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var index = 0; index < _crates.Count; index++)
             {
                 var crate = _crates[index];
-                if (crate.Phase != Phase.Resting || crate.Pile != pile || crate.Unit == null)
+                if (!IsOn(crate, pile))
                 {
                     continue;
                 }
@@ -1188,7 +1224,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var index = 0; index < _crates.Count && over > 0; index++)
             {
                 var crate = _crates[index];
-                if (crate.Phase != Phase.Resting || crate.Pile != CratePileId.Loose)
+                if (!IsOn(crate, CratePileId.Loose))
                 {
                     continue;
                 }
@@ -1205,6 +1241,34 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             _logger?.Log($"[crate] {loose - MaxLooseCrates} abandoned crate(s) cleared; the loose pile was over "
                 + $"its ceiling of {MaxLooseCrates}.");
+        }
+
+        /// <summary>
+        /// Say whether breaking this crate should pay out the game's own loot.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>A crate on a pile never pays.</b> The room produces destructibles continuously and carries them
+        /// to the boss, so a standing pile is an endless supply of breakables: paying for those would turn the
+        /// supply line into a loot farm and make ignoring the fight the best way to play it. Only what the boss has
+        /// actually sent at a player is worth anything.</para>
+        /// <para><b>And then only sometimes.</b> Even a barrage is a lot of crates; at a full pay-out the fight
+        /// buries the floor in pickups. See <see cref="LootChance"/>.</para>
+        /// </remarks>
+        private void SetLootAllowed(Breakable breakable, bool allowed)
+        {
+            if (breakable == null || _preventDroppingLoot == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _preventDroppingLoot.SetValue(breakable, !allowed);
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] a crate's loot rule could not be set: {exception.Message}");
+            }
         }
 
         private static ArenaWorldPoint ToPoint(Vector3 position) =>
