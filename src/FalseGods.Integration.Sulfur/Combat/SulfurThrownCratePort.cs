@@ -115,6 +115,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         private bool _warnedAboutLootFlag;
         private int _wallMask;
         private bool _wallMaskBuilt;
+        private bool _looseNeedsCapping;
 
         public SulfurThrownCratePort(ILogger logger = null, IThrownCrateImpact impact = null)
         {
@@ -438,6 +439,42 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        public bool Toss(ArenaWorldPoint from, ArenaWorldPoint to, CratePileId pile, float flightSeconds, float apexHeight)
+        {
+            if (!Prepare())
+            {
+                return false;
+            }
+
+            try
+            {
+                var start = new Vector3(from.X, from.Y, from.Z);
+                var unit = SpawnFrom(PickKind(), start, out var breakable);
+                if (unit == null)
+                {
+                    _logger?.LogWarning("[crate] the game returned no unit for the tossed destructible.");
+                    return false;
+                }
+
+                // Our arc drives it, so physics must not fight us on the way down; Settle hands it back.
+                if (unit.Rigidbody != null)
+                {
+                    unit.Rigidbody.isKinematic = true;
+                    unit.Rigidbody.useGravity = false;
+                }
+
+                var crate = new ManagedCrate(unit, breakable);
+                crate.BeginToss(start, new Vector3(to.X, to.Y, to.Z), flightSeconds, apexHeight, pile);
+                _crates.Add(crate);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] the crate could not be tossed: {exception}");
+                return false;
+            }
+        }
+
         // Salt for the per-crate "lead this one or not" coin, kept clear of the scatter's salts (0..2*count+2) so
         // the choice is independent of where a crate lands within its slice.
         private const int LeadChoiceSalt = 40009;
@@ -527,6 +564,20 @@ namespace FalseGods.Integration.Sulfur.Combat
                         AdvanceLift(crate, deltaSeconds);
                         break;
 
+                    case Phase.Tossing:
+                    {
+                        crate.Elapsed += deltaSeconds;
+                        var progress = crate.Elapsed / crate.FlightSeconds;
+                        if (progress >= 1f)
+                        {
+                            Settle(crate);
+                            break;
+                        }
+
+                        crate.Unit.transform.position = ArcPoint(crate, progress);
+                        break;
+                    }
+
                     case Phase.Flying:
                     {
                         crate.Elapsed += deltaSeconds;
@@ -567,6 +618,37 @@ namespace FalseGods.Integration.Sulfur.Combat
                         break;
                     }
                 }
+            }
+
+            // Safe here, and only here: the walk above is finished, so removing entries cannot pull the ground out
+            // from under it.
+            if (_looseNeedsCapping)
+            {
+                _looseNeedsCapping = false;
+                CapLooseCrates();
+            }
+        }
+
+        /// <summary>
+        /// A tossed crate has arrived: hand it back to the game's physics, resting on the pile it was thrown onto.
+        /// The opposite end of a flight — nothing splashes, nothing breaks, the crate simply comes down and stays.
+        /// </summary>
+        private void Settle(ManagedCrate crate)
+        {
+            crate.Settle();
+
+            if (crate.Unit != null && crate.Unit.Rigidbody != null)
+            {
+                // Real gravity again, so it drops the last inch onto whatever is already there and stacks.
+                crate.Unit.Rigidbody.isKinematic = false;
+                crate.Unit.Rigidbody.useGravity = true;
+            }
+
+            // NOT capped here: this runs inside Advance's walk over the crate list, and capping removes entries
+            // from it. The request is deferred to the end of that walk instead.
+            if (crate.Pile.Kind == CratePileKind.Loose)
+            {
+                _looseNeedsCapping = true;
             }
         }
 
@@ -978,13 +1060,15 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public int TakeFrom(CratePileId pile, int count)
+        public int TakeFrom(CratePileId pile, int count, ArenaWorldPoint near, float radius)
         {
             if (count <= 0)
             {
                 return 0;
             }
 
+            var from = new Vector3(near.X, 0f, near.Z);
+            var reach = radius * radius;
             var taken = 0;
             for (var index = _crates.Count - 1; index >= 0 && taken < count; index--)
             {
@@ -992,6 +1076,16 @@ namespace FalseGods.Integration.Sulfur.Combat
                 if (crate.Phase != Phase.Resting || crate.Pile != pile)
                 {
                     continue;
+                }
+
+                // Only what is within arm's reach of the taker, so collecting one heap does not empty another.
+                if (crate.Unit != null)
+                {
+                    var here = crate.Unit.transform.position;
+                    if ((new Vector3(here.x, 0f, here.z) - from).sqrMagnitude > reach)
+                    {
+                        continue;
+                    }
                 }
 
                 // Picked up, not destroyed: no loot, no break effect, no sound. The crate reappears where the
@@ -1209,6 +1303,10 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             /// <summary>Riding the arc we drive toward its landing spot.</summary>
             Flying,
+
+            /// <summary>Riding a short arc out of a carrier's hands to the spot it will rest on. Unlike a flight
+            /// this hurts nobody and breaks nothing: at the end of it the crate is simply on the ground.</summary>
+            Tossing,
         }
 
         /// <summary>
@@ -1268,6 +1366,27 @@ namespace FalseGods.Integration.Sulfur.Combat
                 ApexHeight = apexHeight;
                 Elapsed = 0f;
                 Phase = Phase.Flying;
+            }
+
+            /// <summary>Enter the tossing phase: a short arc out of a carrier's hands onto the ground, ending in
+            /// the crate resting on <paramref name="pile"/>.</summary>
+            public void BeginToss(
+                Vector3 start, Vector3 target, float flightSeconds, float apexHeight, CratePileId pile)
+            {
+                Start = start;
+                Target = target;
+                FlightSeconds = flightSeconds > 0f ? flightSeconds : 0.01f;
+                ApexHeight = apexHeight;
+                Pile = pile;
+                Elapsed = 0f;
+                Phase = Phase.Tossing;
+            }
+
+            /// <summary>Come to rest where the toss ended — back under the game's own physics, on its pile.</summary>
+            public void Settle()
+            {
+                Elapsed = 0f;
+                Phase = Phase.Resting;
             }
 
             /// <summary>Enter the lifting phase: the rise off the pile, remembering the scattered

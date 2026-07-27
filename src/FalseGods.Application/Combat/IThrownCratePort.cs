@@ -62,6 +62,18 @@ namespace FalseGods.Application.Combat
         int LaunchVolley(
             CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape);
 
+        /// <summary>
+        /// Toss one crate on a short arc from <paramref name="from"/> to <paramref name="to"/>, where it comes to
+        /// rest on <paramref name="pile"/> under the game's own physics. Returns false when it could not be made.
+        /// </summary>
+        /// <remarks>
+        /// The gentle end of a destructible's life, and the opposite of <see cref="Throw"/>: nothing splashes,
+        /// nothing breaks, and the crate is simply on the ground afterwards. This is a carrier setting a load
+        /// down, or spilling one — the arc out of its hands is what makes a delivery read as an act rather than
+        /// crates appearing beside a goblin.
+        /// </remarks>
+        bool Toss(ArenaWorldPoint from, ArenaWorldPoint to, CratePileId pile, float flightSeconds, float apexHeight);
+
         /// <summary>How many crates are resting on one pile. This is what the supply line is told to decide
         /// whether a production point is full and whether a delivery pile has room.</summary>
         int RestingOn(CratePileId pile);
@@ -78,7 +90,10 @@ namespace FalseGods.Application.Combat
         /// cannot interact with anyway — so the crates stop existing here and are made again where they are set
         /// down.
         /// </remarks>
-        int TakeFrom(CratePileId pile, int count);
+        /// <param name="near">Where the taker is standing.</param>
+        /// <param name="radius">How far it can reach. Crates further than this are left alone, so a carrier
+        /// standing on one heap does not quietly collect another one across the room.</param>
+        int TakeFrom(CratePileId pile, int count, ArenaWorldPoint near, float radius);
 
         /// <summary>
         /// Where the nearest crate resting on <paramref name="pile"/> lies, measured on the ground plane from

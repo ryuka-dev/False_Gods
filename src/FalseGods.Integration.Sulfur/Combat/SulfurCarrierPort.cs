@@ -64,6 +64,15 @@ namespace FalseGods.Integration.Sulfur.Combat
         private const float SetDownMaxRadius = 4f;
         private const float SetDownHeight = 1.2f;
 
+        /// <summary>The little arc a crate rides out of a carrier's hands to the ground. Short and high enough to
+        /// read as the load being thrown down rather than crates appearing beside a goblin.</summary>
+        private const float SetDownFlightSeconds = 0.55f;
+        private const float SetDownApexHeight = 1.6f;
+
+        /// <summary>How far a carrier can gather from where it stands. Comfortably wider than a set-down ring, so
+        /// one heap is collected in one visit, and far short of the room, so it does not empty another.</summary>
+        private const float PickUpReach = 9f;
+
         /// <summary>The tallest a stack is drawn. A carrier hauling a dozen crates would otherwise wear a mast;
         /// beyond this the load is still carried, just not all of it drawn.</summary>
         private const int MaxDrawnStack = 5;
@@ -229,29 +238,33 @@ namespace FalseGods.Integration.Sulfur.Combat
                     var room = loadPerCarrier - carrier.Load;
                     if (room > 0)
                     {
-                        carrier.Load += _crates.TakeFrom(carrier.FetchPile, room);
+                        var here = carrier.Unit != null ? carrier.Unit.transform.position : carrier.LastPosition;
+                        carrier.Load += _crates.TakeFrom(
+                            carrier.FetchPile,
+                            room,
+                            new ArenaWorldPoint(here.x, here.y, here.z),
+                            PickUpReach);
                     }
 
                     if (carrier.Load <= 0)
                     {
-                        carrier.Handling = 0f;
-
-                        // Nothing here after all — spilled cargo someone else already collected, or a point that
-                        // has not produced yet. Re-decide rather than standing at an empty spot forever, and walk
-                        // if that changed the answer.
-                        var was = carrier.Fetch;
+                        // Nothing here after all — spilled cargo somebody else already collected, or a point that
+                        // has not produced yet. Re-decide and always begin the leg again, even when the answer is
+                        // the same place: the game clears a forced destination the moment it is reached, so a
+                        // carrier that is not re-sent simply stands there, and the stuck-check cannot rescue it
+                        // because as far as it is concerned the carrier has arrived.
                         AimAtSomethingToFetch(carrier, sources);
-                        if (Flat(was, carrier.Fetch) > 1f)
-                        {
-                            Begin(carrier, Leg.ToSource, carrier.Fetch);
-                        }
-
+                        Begin(carrier, Leg.ToSource, carrier.Fetch);
                         return;
                     }
 
-                    if (carrier.Load < loadPerCarrier && carrier.Waited < HandlingSeconds * 4f)
+                    // A part load waits a little to be topped up rather than walking half empty — but only at a
+                    // production point, which is the only thing that produces. Waiting on a heap of spilled cargo
+                    // waits for something that is never coming.
+                    if (carrier.Load < loadPerCarrier
+                        && carrier.FetchPile.Kind == CratePileKind.Source
+                        && carrier.Waited < HandlingSeconds * 4f)
                     {
-                        // A part load waits a little for the point to top it up rather than walking half empty.
                         carrier.Waited += deltaSeconds;
                         return;
                     }
@@ -321,6 +334,45 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        /// <summary>
+        /// Throw a carrier's whole load off its shoulders onto the ground around <paramref name="at"/>, each crate
+        /// arcing out of its hands to its own patch of floor. Returns how many made it out.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why an arc and not an appearance.</b> Crates that simply materialised beside a goblin read as
+        /// a bookkeeping event; thrown from its hands and tumbling out, the same crates read as it putting its
+        /// load down — and, when it dies, as the load bursting out of it.</para>
+        /// <para><b>Why a ring and not a column.</b> Crates are solid bodies with real mass. A load released down
+        /// one column spawns them inside each other, and physics resolves that by firing them across the room.
+        /// The ring gives each its own patch, and reuses the volley's own scatter rather than a second one.</para>
+        /// </remarks>
+        private int TossLoadAround(Carrier carrier, ArenaWorldPoint at, CratePileId pile)
+        {
+            var load = carrier.Load;
+            if (load <= 0)
+            {
+                return 0;
+            }
+
+            // Out of its hands, not out of the floor: the load leaves from where it was being carried.
+            var head = carrier.Unit != null ? carrier.Unit.transform.position : carrier.LastPosition;
+            var from = new ArenaWorldPoint(head.x, head.y + StackBase, head.z);
+
+            var seed = _nextSetDownSeed++;
+            var placed = 0;
+            for (var i = 0; i < load; i++)
+            {
+                var ring = ShotgunSpread.Offset(seed, i, load, SetDownMinRadius, SetDownMaxRadius);
+                var to = new ArenaWorldPoint(at.X + ring.X, at.Y + SetDownHeight, at.Z + ring.Z);
+                if (_crates.Toss(from, to, pile, SetDownFlightSeconds, SetDownApexHeight))
+                {
+                    placed++;
+                }
+            }
+
+            return placed;
+        }
+
         /// <summary>Ground-plane distance, squared — heights differ across the room's terraces and would otherwise
         /// make a pile one floor up look further away than it is to walk to.</summary>
         private static float Flat(ArenaWorldPoint a, ArenaWorldPoint b)
@@ -334,22 +386,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// the boss's ammunition.</summary>
         private void SetDown(Carrier carrier, ArenaWorldPoint at, CratePileId pile)
         {
-            var placed = 0;
-            var load = carrier.Load;
-            var seed = _nextSetDownSeed++;
-            for (var i = 0; i < load; i++)
-            {
-                // Laid out around the pile rather than all on one spot. Dropping a load down a single column made
-                // the crates interpenetrate and fire each other across the room the moment physics resolved them;
-                // ringed, each one lands on its own patch of floor and settles. The volley does not care where on
-                // the pile a crate lies, only which pile it is on.
-                var ring = ShotgunSpread.Offset(seed, i, load, SetDownMinRadius, SetDownMaxRadius);
-                var drop = new ArenaWorldPoint(at.X + ring.X, at.Y + SetDownHeight, at.Z + ring.Z);
-                if (_crates.Drop(drop, pile))
-                {
-                    placed++;
-                }
-            }
+            var placed = TossLoadAround(carrier, at, pile);
 
             _logger?.Log($"[carrier] delivered {placed} to {pile}; {_crates.RestingOn(pile)} now on that pile.");
             carrier.Load = 0;
@@ -365,24 +402,12 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return;
             }
 
-            var spilled = 0;
+            var where = new ArenaWorldPoint(
+                carrier.LastPosition.x, carrier.LastPosition.y, carrier.LastPosition.z);
             var load = carrier.Load;
-            var seed = _nextSetDownSeed++;
-            for (var i = 0; i < load; i++)
-            {
-                // Spread like a delivery, for the same reason: a column of crates dropped on one spot explodes.
-                var ring = ShotgunSpread.Offset(seed, i, load, SetDownMinRadius, SetDownMaxRadius);
-                var at = new ArenaWorldPoint(
-                    carrier.LastPosition.x + ring.X,
-                    carrier.LastPosition.y + SetDownHeight,
-                    carrier.LastPosition.z + ring.Z);
-                if (_crates.Drop(at, CratePileId.Loose))
-                {
-                    spilled++;
-                }
-            }
+            var spilled = TossLoadAround(carrier, where, CratePileId.Loose);
 
-            _logger?.Log($"[carrier] a carrier died holding {carrier.Load}; {spilled} spilled where it fell — "
+            _logger?.Log($"[carrier] a carrier died holding {load}; {spilled} spilled where it fell — "
                 + "the boss cannot fire those.");
             carrier.Load = 0;
         }
