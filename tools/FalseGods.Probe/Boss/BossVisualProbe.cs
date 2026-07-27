@@ -110,7 +110,10 @@ namespace FalseGods.Probe.Boss
                 new ProbeAuthoritativeRandom(seed: Environment.TickCount),
                 new CameraParticipantQuery());
 
-            _renderer = new FalseGods.UnityRuntime.Presentation.BossPresentation(new ProbeLogger(report), spawn);
+            // The probe's "arena floor" is wherever the camera is standing: the spawn point is the viewer's own
+            // foot height projected forward, so its Y is the surface the boss is being raised onto.
+            _renderer = new FalseGods.UnityRuntime.Presentation.BossPresentation(
+                new ProbeLogger(report), spawn, arenaFloorY: spawn.y);
             _presenter = new BossPresenter(_renderer);
 
             _boss.Spawn(new SimVector2(spawn.x, spawn.z));
