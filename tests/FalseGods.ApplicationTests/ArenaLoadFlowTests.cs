@@ -570,7 +570,7 @@ namespace FalseGods.ApplicationTests
             // The hazard is the pool's authored behaviour and is kept — and kept on the layer it was authored
             // for, or the trigger would report nothing and the hazard would be dead while still looking right.
             Assert.DoesNotContain("ApplyDamageInsideCollider", request.StripComponentNames);
-            Assert.Contains("PoolBlocker", request.KeepLayerChildNames);
+            Assert.Contains("PoolBlocker", request.VolumeChildNames);
         }
 
         [Fact]

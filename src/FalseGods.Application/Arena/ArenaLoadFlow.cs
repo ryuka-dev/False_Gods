@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Protocol.Arena;
 using FalseGods.Protocol.Wire;
@@ -151,7 +151,7 @@ namespace FalseGods.Application.Arena
         /// decides which other layers it reports contact with at all, so sweeping this trigger onto the scenery
         /// layer with the rest of the prop would not just recategorise it — it would stop it firing, and the
         /// hazard would be silently dead while everything still looked right.</summary>
-        public static readonly IReadOnlyList<string> MudPoolKeepLayerChildren = new[] { "PoolBlocker" };
+        public static readonly IReadOnlyList<string> MudPoolVolumeChildren = new[] { "PoolBlocker" };
     }
 
     /// <summary>Where the local arena load stands. Failure at any step returns the flow to
@@ -489,7 +489,7 @@ namespace FalseGods.Application.Arena
                 VanillaPropDecoration.MudPoolStripChildren,
                 strip,
                 VanillaPropDecoration.LayerName,
-                VanillaPropDecoration.MudPoolKeepLayerChildren));
+                VanillaPropDecoration.MudPoolVolumeChildren));
         }
 
         /// <summary>Paint the sculpted cave shell's surfaces with the vanilla cave materials, reusing the same

@@ -84,11 +84,17 @@ namespace FalseGods.Application.Arena
     /// <param name="StripComponentNames">Components removed from the clone, by type name, at any depth.</param>
     /// <param name="LayerName">The layer the whole clone subtree is moved to. A name, never an index — indices are
     /// not stable across builds.</param>
-    /// <param name="KeepLayerChildNames">Child objects, by name, whose own subtree keeps the layer the donor
-    /// authored instead of being moved to <paramref name="LayerName"/>. A prop's trigger volumes belong here:
-    /// which layer a collider is on decides which other layers it reports contact with at all, so moving a trigger
-    /// off the layer it was authored for does not merely change a category — it silently stops the trigger
-    /// firing.</param>
+    /// <param name="VolumeChildNames">Child objects, by name, that <i>act</i> on whoever is inside them rather
+    /// than decorate — a prop's trigger volumes. Two things follow, and both are needed for the volume to do in
+    /// our room what it did in the donor's.
+    /// <list type="bullet">
+    /// <item>They keep the layer the donor authored. Which layer a collider sits on decides which other layers it
+    /// reports contact with at all, so moving a trigger off its authored layer does not recategorise it — it
+    /// stops it firing, leaving something that looks right and does nothing.</item>
+    /// <item>They are re-centred horizontally over the prop's own body. A donor places its volumes wherever its
+    /// own room needed them, which need not be over the middle of the prop or even inside it; the height the
+    /// donor chose is kept, since that is the prop's own surface.</item>
+    /// </list></param>
     public sealed record VanillaPropClone(
         string ParentPath,
         string MarkerNamePrefix,
@@ -97,7 +103,7 @@ namespace FalseGods.Application.Arena
         IReadOnlyList<string> StripChildNames,
         IReadOnlyList<string> StripComponentNames,
         string LayerName,
-        IReadOnlyList<string> KeepLayerChildNames);
+        IReadOnlyList<string> VolumeChildNames);
 
     /// <summary>The outcome of cloning one prop recipe: how many clones were placed, or the fail-closed reason.</summary>
     public sealed record VanillaPropResult(bool Success, string? Error, int Cloned)

@@ -1,4 +1,4 @@
-// Addressables / Unity interop (none of those APIs carry nullable annotations), so this file opts out of the
+﻿// Addressables / Unity interop (none of those APIs carry nullable annotations), so this file opts out of the
 // nullable-reference context like the other game-facing implementations.
 #nullable disable
 
@@ -250,7 +250,7 @@ namespace FalseGods.Integration.Sulfur.Arena
 
                     StripChildren(clone, request.StripChildNames);
                     StripComponents(clone, request.StripComponentNames);
-                    SetLayerRecursively(clone.transform, layer, request.KeepLayerChildNames);
+                    SetLayerRecursively(clone.transform, layer, request.VolumeChildNames);
 
                     // The marker owns placement; the clone keeps the source's own scale as its base, so a marker
                     // left at scale 1 reproduces the prop at its vanilla proportions.
@@ -258,6 +258,10 @@ namespace FalseGods.Integration.Sulfur.Arena
                     clone.transform.localPosition = Vector3.zero;
                     clone.transform.localRotation = Quaternion.identity;
                     clone.transform.localScale = source.localScale;
+
+                    // Only once the clone stands where it will stand, since centring a volume is measured against
+                    // the prop's real body in the world.
+                    CenterVolumes(clone, request.VolumeChildNames);
                     cloned++;
                 }
             }
@@ -273,6 +277,35 @@ namespace FalseGods.Integration.Sulfur.Arena
         }
 
         /// <summary>
+        /// Move each acting volume so it sits over the prop's own body, horizontally. A donor authored its volumes
+        /// wherever its own room needed them — the sludge pool's damage sphere sits well off to one side of the
+        /// basin, and any scale we place the prop at multiplies that offset — so a volume left where it was found
+        /// would punish a patch of empty floor while the thing it belongs to is safe to stand in. The body is
+        /// measured from what the prop actually renders, not from its transform, because a prop's origin is not
+        /// its middle. Height is left alone: that is the prop's own surface, which the donor did get right.
+        /// </summary>
+        private static void CenterVolumes(GameObject clone, IReadOnlyList<string> names)
+        {
+            if (names == null || names.Count == 0)
+                return;
+
+            var body = clone.GetComponent<Renderer>();
+            if (body == null)
+                return;
+
+            var middle = body.bounds.center;
+            foreach (var child in clone.GetComponentsInChildren<Transform>(includeInactive: true))
+            {
+                if (child == clone.transform || !Contains(names, child.name))
+                    continue;
+
+                var collider = child.GetComponent<Collider>();
+                var current = collider != null ? collider.bounds.center : child.position;
+                child.position += new Vector3(middle.x - current.x, 0f, middle.z - current.z);
+            }
+        }
+
+        /// <summary>
         /// Say where the parts that were deliberately kept ended up. Those are the pieces that <i>act</i> — a
         /// hazard volume, not a mesh — and a donor authored them wherever its own room needed them, which after
         /// our own placement and scale is not necessarily over the middle of the prop or even inside it. A player
@@ -280,12 +313,12 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// </summary>
         private void ReportKeptParts(Transform parent, VanillaPropClone request)
         {
-            if (_logger == null || request.KeepLayerChildNames == null || request.KeepLayerChildNames.Count == 0)
+            if (_logger == null || request.VolumeChildNames == null || request.VolumeChildNames.Count == 0)
                 return;
 
             foreach (var child in parent.GetComponentsInChildren<Transform>(includeInactive: true))
             {
-                if (!Contains(request.KeepLayerChildNames, child.name))
+                if (!Contains(request.VolumeChildNames, child.name))
                     continue;
 
                 var sphere = child.GetComponent<SphereCollider>();
