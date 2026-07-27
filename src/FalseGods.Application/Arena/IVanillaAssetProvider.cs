@@ -84,6 +84,11 @@ namespace FalseGods.Application.Arena
     /// <param name="StripComponentNames">Components removed from the clone, by type name, at any depth.</param>
     /// <param name="LayerName">The layer the whole clone subtree is moved to. A name, never an index — indices are
     /// not stable across builds.</param>
+    /// <param name="KeepLayerChildNames">Child objects, by name, whose own subtree keeps the layer the donor
+    /// authored instead of being moved to <paramref name="LayerName"/>. A prop's trigger volumes belong here:
+    /// which layer a collider is on decides which other layers it reports contact with at all, so moving a trigger
+    /// off the layer it was authored for does not merely change a category — it silently stops the trigger
+    /// firing.</param>
     public sealed record VanillaPropClone(
         string ParentPath,
         string MarkerNamePrefix,
@@ -91,7 +96,8 @@ namespace FalseGods.Application.Arena
         string PropPath,
         IReadOnlyList<string> StripChildNames,
         IReadOnlyList<string> StripComponentNames,
-        string LayerName);
+        string LayerName,
+        IReadOnlyList<string> KeepLayerChildNames);
 
     /// <summary>The outcome of cloning one prop recipe: how many clones were placed, or the fail-closed reason.</summary>
     public sealed record VanillaPropResult(bool Success, string? Error, int Cloned)

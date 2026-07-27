@@ -268,13 +268,13 @@ namespace FalseGods.ApplicationTests
             public readonly FakeVanillaAssets Vanilla;
             public readonly ArenaLoadFlow Flow;
 
-            public Rig(string? artifactText = "unset")
+            public Rig(string? artifactText = "unset", Func<bool>? worldIsOurs = null)
             {
                 Assets = new FakeAssets(Journal, artifactText == "unset" ? Authored.Serialize() : artifactText);
                 Realization = new FakeRealization(Journal, Authored);
                 Navigation = new FakeNavigation(Journal);
                 Vanilla = new FakeVanillaAssets(Journal);
-                Flow = new ArenaLoadFlow(Assets, Realization, Navigation, Vanilla);
+                Flow = new ArenaLoadFlow(Assets, Realization, Navigation, Vanilla, worldIsOurs);
             }
         }
 
@@ -563,10 +563,33 @@ namespace FalseGods.ApplicationTests
             // basin silently becomes terrain.
             Assert.Equal("GeometryNoNavMesh", request.LayerName);
 
-            // The donor boss's anchor, its damage volume and its pool controller stay in the donor room.
+            // The donor boss's anchor and its pool controller stay in the donor room.
             Assert.Contains("CousinPosition", request.StripChildNames);
-            Assert.Contains("PoolBlocker", request.StripChildNames);
             Assert.Contains("CousinPool", request.StripComponentNames);
+
+            // The hazard is the pool's authored behaviour and is kept — and kept on the layer it was authored
+            // for, or the trigger would report nothing and the hazard would be dead while still looking right.
+            Assert.DoesNotContain("ApplyDamageInsideCollider", request.StripComponentNames);
+            Assert.Contains("PoolBlocker", request.KeepLayerChildNames);
+        }
+
+        [Fact]
+        public void Vanilla_prop_hazard_is_built_only_where_the_world_is_ours()
+        {
+            var host = new Rig();
+            host.Flow.Prepare();
+            Assert.True(host.Flow.Realize(Origin).Success);
+            Assert.DoesNotContain(
+                "ApplyDamageInsideCollider", host.Vanilla.CapturedPropClone!.StripComponentNames);
+
+            var client = new Rig(worldIsOurs: () => false);
+            client.Flow.Prepare();
+            Assert.True(client.Flow.Realize(Origin).Success);
+            var request = client.Vanilla.CapturedPropClone!;
+
+            // The client keeps the scenery and loses the hazard: one pool, one place it is resolved.
+            Assert.Contains("ApplyDamageInsideCollider", request.StripComponentNames);
+            Assert.Equal(VanillaPropDecoration.MudPoolPath, request.PropPath);
         }
 
         // ---------------------------------------------------------------- teardown & guards

@@ -250,7 +250,7 @@ namespace FalseGods.Integration.Sulfur.Arena
 
                     StripChildren(clone, request.StripChildNames);
                     StripComponents(clone, request.StripComponentNames);
-                    SetLayerRecursively(clone.transform, layer);
+                    SetLayerRecursively(clone.transform, layer, request.KeepLayerChildNames);
 
                     // The marker owns placement; the clone keeps the source's own scale as its base, so a marker
                     // left at scale 1 reproduces the prop at its vanilla proportions.
@@ -268,7 +268,41 @@ namespace FalseGods.Integration.Sulfur.Arena
 
             _logger?.Log($"[vanilla-prop] {cloned} '{source.name}' clone(s) placed on '{request.MarkerNamePrefix}*'"
                 + $", layer '{request.LayerName}'");
+            ReportKeptParts(parent, request);
             return VanillaPropResult.Placed(cloned);
+        }
+
+        /// <summary>
+        /// Say where the parts that were deliberately kept ended up. Those are the pieces that <i>act</i> — a
+        /// hazard volume, not a mesh — and a donor authored them wherever its own room needed them, which after
+        /// our own placement and scale is not necessarily over the middle of the prop or even inside it. A player
+        /// who reports "I stood in it and nothing happened" is then answered from the log rather than from theory.
+        /// </summary>
+        private void ReportKeptParts(Transform parent, VanillaPropClone request)
+        {
+            if (_logger == null || request.KeepLayerChildNames == null || request.KeepLayerChildNames.Count == 0)
+                return;
+
+            foreach (var child in parent.GetComponentsInChildren<Transform>(includeInactive: true))
+            {
+                if (!Contains(request.KeepLayerChildNames, child.name))
+                    continue;
+
+                var sphere = child.GetComponent<SphereCollider>();
+                var reach = sphere == null
+                    ? string.Empty
+                    : $", reach {WorldRadius(sphere):0.#} around {child.TransformPoint(sphere.center).ToString("0.#")}";
+                _logger.Log($"[vanilla-prop] kept '{child.name}' at {child.position.ToString("0.#")}"
+                    + $", layer '{LayerMask.LayerToName(child.gameObject.layer)}'{reach}");
+            }
+        }
+
+        /// <summary>A sphere collider's radius in world units — Unity scales it by the largest of the three
+        /// lossy-scale axes, so a prop placed at three times its authored size reaches three times as far.</summary>
+        private static float WorldRadius(SphereCollider sphere)
+        {
+            var scale = sphere.transform.lossyScale;
+            return sphere.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Max(Mathf.Abs(scale.y), Mathf.Abs(scale.z)));
         }
 
         /// <summary>Remove whole child objects from a staged clone by name, at any depth. Used for the parts of a
@@ -318,11 +352,17 @@ namespace FalseGods.Integration.Sulfur.Arena
             return false;
         }
 
-        private static void SetLayerRecursively(Transform node, int layer)
+        /// <summary>Move the clone onto its arena layer, leaving named subtrees on the layer the donor authored.
+        /// A whole subtree is skipped, not just its root: a trigger's own collider is what must stay put, and a
+        /// prop is free to nest one.</summary>
+        private static void SetLayerRecursively(Transform node, int layer, IReadOnlyList<string> keepLayer)
         {
+            if (keepLayer != null && keepLayer.Count > 0 && Contains(keepLayer, node.name))
+                return;
+
             node.gameObject.layer = layer;
             for (var i = 0; i < node.childCount; i++)
-                SetLayerRecursively(node.GetChild(i), layer);
+                SetLayerRecursively(node.GetChild(i), layer, keepLayer);
         }
 
         /// <summary>The rule whose placeholder name the slot's current material carries, or null. Exact, ordinal

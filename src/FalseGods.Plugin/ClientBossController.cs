@@ -214,7 +214,9 @@ namespace FalseGods.Plugin
                 realization,
                 realization,
                 new AstarNavigationPort(() => realization.CurrentRoot, _logger),
-                new SulfurVanillaAssetProvider(() => realization.CurrentRoot, _logger));
+                new SulfurVanillaAssetProvider(() => realization.CurrentRoot, _logger),
+                // A client never settles the shared world: the host resolves what the arena's hazards do.
+                worldIsOurs: () => false);
 
             var prepared = flow.Prepare();
             if (!prepared.Success)

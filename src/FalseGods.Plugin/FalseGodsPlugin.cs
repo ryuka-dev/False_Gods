@@ -251,7 +251,13 @@ namespace FalseGods.Plugin
             // the arena from content this root owns — the adapter cannot reach the bundle pipeline itself.
             LevelGenerationHijackPatches.Install(_log);
             _levelArena = new HijackedArenaContent(
-                Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".", _log);
+                Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".",
+                _log,
+                // Asked at load time, not now: the arena is built during level generation, by which point the peer
+                // is in whatever session it is in. No session at all is single player, and single player decides
+                // its own world.
+                worldIsOurs: () => FalseGodsIntegrations.Current?.Session.Role
+                    != RuntimeContracts.Multiplayer.SessionRole.Client);
             LevelGenerationHijack.ArenaRooms = _levelArena.CreateRoomSource();
             _appliedFogStart = _fogStartDistance.Value;
             _appliedFogEnd = _fogEndDistance.Value;

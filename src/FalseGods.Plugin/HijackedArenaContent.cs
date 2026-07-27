@@ -33,15 +33,21 @@ namespace FalseGods.Plugin
 
         private readonly string _contentDirectory;
         private readonly ILogger _logger;
+        private readonly Func<bool> _worldIsOurs;
 
         private BundleArenaRealization? _realization;
         private ArenaLoadFlow? _flow;
         private ArenaRealizeResult? _realized;
 
-        public HijackedArenaContent(string contentDirectory, ILogger logger)
+        /// <param name="worldIsOurs">Whether this peer settles what happens in the shared world. Unlike the
+        /// additive path, which has a controller per role, this one runs on every peer — the arena arrives as the
+        /// level for host and client alike — so the answer has to be asked of the live session rather than implied
+        /// by which class is running. Null means yes, which is what single player means.</param>
+        public HijackedArenaContent(string contentDirectory, ILogger logger, Func<bool>? worldIsOurs = null)
         {
             _contentDirectory = contentDirectory ?? throw new ArgumentNullException(nameof(contentDirectory));
             _logger = logger;
+            _worldIsOurs = worldIsOurs ?? (() => true);
         }
 
         /// <summary>
@@ -80,7 +86,8 @@ namespace FalseGods.Plugin
                 realization,
                 realization,
                 new NativeLevelNavigationPort(_logger),
-                new SulfurVanillaAssetProvider(() => realization.CurrentRoot, _logger));
+                new SulfurVanillaAssetProvider(() => realization.CurrentRoot, _logger),
+                _worldIsOurs);
 
             var prepared = _flow.Prepare();
             if (!prepared.Success)

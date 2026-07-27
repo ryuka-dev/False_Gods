@@ -123,14 +123,35 @@ namespace FalseGods.Application.Arena
         /// </summary>
         public const string LayerName = "GeometryNoNavMesh";
 
-        /// <summary>Removed from the clone: the donor boss's teleport anchor, and the damage volume. The pool's
-        /// hazard is a gameplay decision of its own and is not smuggled in with the scenery.</summary>
-        public static readonly IReadOnlyList<string> MudPoolStripChildren = new[] { "CousinPosition", "PoolBlocker" };
+        /// <summary>Removed from the clone: the donor boss's teleport anchor. Our boss is anchored by the room's
+        /// own authored points, and an unused game object has no business standing in our arena.</summary>
+        public static readonly IReadOnlyList<string> MudPoolStripChildren = new[] { "CousinPosition" };
 
-        /// <summary>Removed from the clone: the donor boss's pool controller. It is inert without that boss —
-        /// it only caches its damage volume and waits to be told to bubble — but an unused game component has no
-        /// business running in our room.</summary>
+        /// <summary>
+        /// Removed from the clone: the donor boss's pool controller, which is inert without that boss — it only
+        /// caches the pool's damage volume and waits to be told to bubble or to switch the volume off.
+        /// <para>The damage volume itself is <b>kept</b>. Standing in the sludge hurting the player is the pool's
+        /// authored behaviour, and the authored version is better than one of ours: the room's own designers set
+        /// the amount, the interval and the shape, and limited it to the player faction — so the boss's own
+        /// minions wading through their master's pool are unharmed, which is exactly what was wanted.</para>
+        /// </summary>
         public static readonly IReadOnlyList<string> MudPoolStripComponents = new[] { "CousinPool" };
+
+        /// <summary>
+        /// What a client strips on top of <see cref="MudPoolStripComponents"/>: the damage volume.
+        /// <para>Hurting a player is a decision about the shared world, and this repository settles those on the
+        /// host — that is how the boss's own hits reach a client today. A vanilla damage volume knows nothing of
+        /// that: cloned onto every peer it would run everywhere at once, each peer damaging every player standing
+        /// in its own copy, so one player wading in would be hurt once by their own machine and again by the
+        /// host's. Building the volume only where the world is authoritative keeps one hazard, resolved once.</para>
+        /// </summary>
+        public const string MudPoolHazardComponent = "ApplyDamageInsideCollider";
+
+        /// <summary>The pool's hazard volume keeps the layer the donor authored. Which layer a collider sits on
+        /// decides which other layers it reports contact with at all, so sweeping this trigger onto the scenery
+        /// layer with the rest of the prop would not just recategorise it — it would stop it firing, and the
+        /// hazard would be silently dead while everything still looked right.</summary>
+        public static readonly IReadOnlyList<string> MudPoolKeepLayerChildren = new[] { "PoolBlocker" };
     }
 
     /// <summary>Where the local arena load stands. Failure at any step returns the flow to
@@ -214,19 +235,26 @@ namespace FalseGods.Application.Arena
         private readonly IArenaRealization _realization;
         private readonly INavigationPort _navigation;
         private readonly IVanillaAssetProvider _vanillaAssets;
+        private readonly Func<bool> _worldIsOurs;
 
         private ContentHash _contentHash;
 
+        /// <param name="worldIsOurs">Whether this peer decides what happens in the shared world — true in single
+        /// player and on the host, false on a client. Scenery that <i>acts</i> on players (the mud pool's hazard)
+        /// is only built where the answer is yes, so a hazard is resolved once for everyone rather than once per
+        /// peer. Null means yes, which is what single player means.</param>
         public ArenaLoadFlow(
             IArenaAssetProvider assets,
             IArenaRealization realization,
             INavigationPort navigation,
-            IVanillaAssetProvider vanillaAssets)
+            IVanillaAssetProvider vanillaAssets,
+            Func<bool>? worldIsOurs = null)
         {
             _assets = assets ?? throw new ArgumentNullException(nameof(assets));
             _realization = realization ?? throw new ArgumentNullException(nameof(realization));
             _navigation = navigation ?? throw new ArgumentNullException(nameof(navigation));
             _vanillaAssets = vanillaAssets ?? throw new ArgumentNullException(nameof(vanillaAssets));
+            _worldIsOurs = worldIsOurs ?? (() => true);
         }
 
         public ArenaLoadStage Stage { get; private set; }
@@ -443,15 +471,26 @@ namespace FalseGods.Application.Arena
         /// <summary>Place the vanilla scenery the room authored markers for. Runs before navigation so the clones
         /// are already standing — and already on their intended layer — when the level scans; an arena that
         /// authored no prop markers places nothing and succeeds.</summary>
-        private VanillaPropResult CloneVanillaProps() =>
-            _vanillaAssets.CloneProps(new VanillaPropClone(
+        private VanillaPropResult CloneVanillaProps()
+        {
+            // A client keeps the scenery and loses the hazard: the host resolves what the pool does to whoever is
+            // standing in it, exactly as it resolves the boss's own hits.
+            var strip = new List<string>(VanillaPropDecoration.MudPoolStripComponents);
+            if (!_worldIsOurs())
+            {
+                strip.Add(VanillaPropDecoration.MudPoolHazardComponent);
+            }
+
+            return _vanillaAssets.CloneProps(new VanillaPropClone(
                 VanillaPropDecoration.ParentPath,
                 VanillaPropDecoration.MudPoolMarkerPrefix,
                 VanillaPropDecoration.CaveBossRoomKey,
                 VanillaPropDecoration.MudPoolPath,
                 VanillaPropDecoration.MudPoolStripChildren,
-                VanillaPropDecoration.MudPoolStripComponents,
-                VanillaPropDecoration.LayerName));
+                strip,
+                VanillaPropDecoration.LayerName,
+                VanillaPropDecoration.MudPoolKeepLayerChildren));
+        }
 
         /// <summary>Paint the sculpted cave shell's surfaces with the vanilla cave materials, reusing the same
         /// carrier the surfaces borrow from. The sculpt arrives in two objects — the solid shell and the walkable
