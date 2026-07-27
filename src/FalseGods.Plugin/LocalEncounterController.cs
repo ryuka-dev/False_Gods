@@ -76,12 +76,43 @@ namespace FalseGods.Plugin
         /// the room will hold at each end. First-pass numbers, tuned in game like the boss's own — and destined
         /// for authored boss content rather than staying constants here.
         /// </summary>
+        /// <remarks>
+        /// The production interval has to keep up with what the carriers can haul away, or the room becomes the
+        /// bottleneck instead of the walk: the hardest step of <see cref="Escalation"/> asks for roughly six
+        /// destructibles a second across two points. A point holds a full carrier load, so nobody leaves half
+        /// empty because the pile was still filling.
+        /// </remarks>
         private static readonly SupplyLineShape Supply = new SupplyLineShape(
-            secondsPerCrate: 6f, sourceCapacity: 6, deliveryCapacity: 12);
+            secondsPerCrate: 0.35f, sourceCapacity: 14, deliveryCapacity: 40);
+
+        /// <summary>
+        /// How hard the village works as the boss loses health. Carriers times load is what decides the barrage,
+        /// and it doubles across the fight — the last step supplies roughly twice the first.
+        /// </summary>
+        /// <remarks>
+        /// The rate these produce depends on how long a round trip takes, which depends on the room's authored
+        /// route and the goblins' own walking speed — neither of which this can know. Both are measured and
+        /// reported at the start of a fight so the ladder can be tuned against the real number rather than an
+        /// estimate.
+        /// </remarks>
+        private static readonly SupplyEscalation Escalation = new SupplyEscalation(
+            new SupplyStep(0.80f, carriers: 8, loadPerCarrier: 8),
+            new SupplyStep(0.60f, carriers: 9, loadPerCarrier: 9),
+            new SupplyStep(0.40f, carriers: 10, loadPerCarrier: 10),
+            new SupplyStep(0.20f, carriers: 11, loadPerCarrier: 11),
+            new SupplyStep(0.00f, carriers: 12, loadPerCarrier: 12));
 
         /// <summary>How high above a production point a destructible appears, so it falls into view and settles
         /// rather than being born inside whatever is already stacked there.</summary>
         private const float ProductionDropHeight = 3f;
+
+        /// <summary>How long a carrier spends loading and again setting down, mirroring the carrier port's own
+        /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
+        private const float CarrierHandlingSeconds = 0.75f;
+
+        /// <summary>The walking speed assumed for the round-trip estimate until a real carrier reports its own.
+        /// Only ever a placeholder for the first frames of a fight — the measured value replaces it.</summary>
+        private const float AssumedCarrierWalkSpeed = 3f;
 
         /// <summary>
         /// The first boss's itinerary: it holds its home anchor, drops to the second one to summon, returns, does
@@ -112,12 +143,15 @@ namespace FalseGods.Plugin
         private readonly float _maxClientHitDamage;
         private readonly IMinionSpawnPort _minionSpawns;
         private readonly IThrownCratePort _crates;
+        private readonly ICarrierPort _carriers;
         private readonly Action<ArenaWorldPoint, CratePileId>? _announceProduced;
 
         // Live only while a fight is: the supply line is the encounter's, and a room with no production points
         // leaves it null so nothing is produced rather than producing nowhere.
         private SupplyLine? _supply;
         private int[]? _restingAtSource; // reused each tick so counting the room costs no allocation
+        private float _measuredRoundTripSeconds = 1f;
+        private int _lastReportedThroughput = -1;
 
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
@@ -153,16 +187,20 @@ namespace FalseGods.Plugin
         /// <param name="announceProduced">Told about every destructible this encounter produced, so a host can
         /// pass it on to its clients. The encounter decides <i>what</i> is produced; whether anyone else needs to
         /// hear about it belongs to whoever owns the session, so it is handed out rather than reached for.</param>
+        /// <param name="carriers">The goblins who walk the boss's ammunition across the room. Like the minions,
+        /// they belong to the fight and leave with it.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
             IThrownCratePort crates,
+            ICarrierPort carriers,
             Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
             float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
             _logger = logger;
             _minionSpawns = minions ?? throw new ArgumentNullException(nameof(minions));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
+            _carriers = carriers ?? throw new ArgumentNullException(nameof(carriers));
             _announceProduced = announceProduced;
             _maxClientHitDamage = maxClientHitDamage;
             // The single-player Core-port bundle. Clock and roster are stateless and shared across raises; the RNG is
@@ -410,6 +448,8 @@ namespace FalseGods.Plugin
                 _restingAtSource[i] = _crates.RestingOn(CratePileId.Source(i));
             }
 
+            AdvanceCarriers(deltaSeconds, sources);
+
             _supply.Advance(deltaSeconds, _restingAtSource);
 
             var due = _supply.DrainProductionRequests();
@@ -432,6 +472,78 @@ namespace FalseGods.Plugin
                 _announceProduced?.Invoke(above, pile);
                 _logger?.Log($"[supply] source {source} produced one; {_crates.RestingOn(pile)} resting there.");
             }
+        }
+
+        /// <summary>
+        /// Work the supply route for one frame: how many goblins are on it, and how much each hauls, is read from
+        /// the boss's health, so the village visibly strains as the fight turns against it.
+        /// </summary>
+        /// <remarks>
+        /// <para>A room that authored no delivery pile has nowhere for a carrier to take anything, so nobody is
+        /// put on the route rather than goblins walking crates to an imaginary place.</para>
+        /// <para><b>Not replicated yet.</b> The goblins themselves mirror for free, being the game's own units
+        /// under the host-authoritative spawn declaration; what does not yet cross is the <i>load</i> — a client
+        /// is told about each crate produced but not about one being picked up or set down, so its piles drift
+        /// from the host's. Until that is wired, a client's boss fires only what the delivery key put there.
+        /// </para>
+        /// </remarks>
+        private void AdvanceCarriers(float deltaSeconds, IReadOnlyList<ArenaWorldPoint> sources)
+        {
+            if (_boss is null || !TryGetSupplyPile(out var pile, out var at))
+            {
+                return;
+            }
+
+            var step = Escalation.At(_boss.HealthFraction);
+            _carriers.Advance(deltaSeconds, step.Carriers, step.LoadPerCarrier, sources, at, pile);
+            ReportSupplyStepChange(step);
+        }
+
+        /// <summary>Report the ladder stepping up, once per step, with what it actually means in crates a second
+        /// over the route this room authored. Diagnostics — but the number the tuning is done against.</summary>
+        private void ReportSupplyStepChange(SupplyStep step)
+        {
+            if (step.Throughput == _lastReportedThroughput)
+            {
+                return;
+            }
+
+            _lastReportedThroughput = step.Throughput;
+            var rate = SupplyEscalation.RatePerSecond(step, _measuredRoundTripSeconds);
+            _logger?.Log($"[supply] the village steps up: {step.Carriers} carrier(s) hauling "
+                + $"{step.LoadPerCarrier} each = {step.Throughput} in transit, about {rate:0.0} crate(s)/s over a "
+                + $"{_measuredRoundTripSeconds:0.0}s round trip.");
+        }
+
+        /// <summary>
+        /// How long one fetch-and-deliver round trip takes over this room's authored route, from the real distance
+        /// and a walking speed. This is the divisor that turns "carriers times load" into crates per second, so it
+        /// is measured from the room rather than assumed — a route the author lengthens thins the barrage, which
+        /// is the point of the supply line being a walk.
+        /// </summary>
+        private static float EstimateRoundTripSeconds(
+            IReadOnlyList<ArenaWorldPoint> sources, IReadOnlyList<ArenaWorldPoint> piles, float walkSpeed)
+        {
+            if (sources.Count == 0 || piles.Count == 0 || walkSpeed <= 0f)
+            {
+                return 1f;
+            }
+
+            var total = 0f;
+            var legs = 0;
+            for (var s = 0; s < sources.Count; s++)
+            {
+                for (var p = 0; p < piles.Count; p++)
+                {
+                    var dx = sources[s].X - piles[p].X;
+                    var dz = sources[s].Z - piles[p].Z;
+                    total += (float)Math.Sqrt((dx * dx) + (dz * dz));
+                    legs++;
+                }
+            }
+
+            // Both ways, plus the pauses at each end for loading and setting down.
+            return ((total / legs) * 2f / walkSpeed) + (2f * CarrierHandlingSeconds);
         }
 
         /// <summary>
@@ -476,6 +588,7 @@ namespace FalseGods.Plugin
             _minionSpawns.DespawnAll();
             // The supply line stops with the fight. The destructibles it already produced are left where they are:
             // they are the game's own breakables standing in the level, and the crate port owns their lifetime.
+            _carriers.DismissAll();
             _supply = null;
             _restingAtSource = null;
             _arenaContent = null;
@@ -608,6 +721,9 @@ namespace FalseGods.Plugin
                 ? new SupplyLine(Supply, arena.CrateSources.Count)
                 : null;
             _restingAtSource = arena.CrateSources.Count > 0 ? new int[arena.CrateSources.Count] : null;
+            _measuredRoundTripSeconds = EstimateRoundTripSeconds(
+                arena.CrateSources, arena.CratePiles, AssumedCarrierWalkSpeed);
+            _lastReportedThroughput = -1; // the opening step reports itself on the first tick
 
             ReportAuthoredBossContent(arena);
         }
@@ -710,7 +826,8 @@ namespace FalseGods.Plugin
             // Reported apart from the anchors because a room can author a boss without authoring a supply line.
             _logger?.Log($"[supply-content] {arena.CrateSources.Count} crate source(s): "
                 + $"{Describe(arena.CrateSources)}; {arena.CratePiles.Count} delivery pile(s): "
-                + $"{Describe(arena.CratePiles)}");
+                + $"{Describe(arena.CratePiles)}; round trip about {_measuredRoundTripSeconds:0.0}s at "
+                + $"{AssumedCarrierWalkSpeed:0.#} m/s");
 
             if (arena.CratePiles.Count > 0 && arena.CratePiles.Count < arena.BossAnchors.Count)
             {

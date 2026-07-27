@@ -79,6 +79,12 @@ namespace FalseGods.Core.Bosses
         /// <summary>The boss's full health, from its definition. Constant for the encounter.</summary>
         public int MaxHealth => _definition.MaxHealth;
 
+        /// <summary>How much of its health the boss has left, in [0, 1]. How far through the fight it is, which is
+        /// what the itinerary's thresholds and the supply line's escalation are both read against.</summary>
+        public float HealthFraction => _definition.MaxHealth > 0
+            ? Health / (float)_definition.MaxHealth
+            : 0f;
+
         /// <summary>Current phase (Docs/MinimalProofOfConceptPlan.md §7.6.1 — two phases).</summary>
         public BossPhase Phase { get; private set; }
 
@@ -363,8 +369,7 @@ namespace FalseGods.Core.Bosses
                 return;
             }
 
-            var healthFraction = Health / (float)_definition.MaxHealth;
-            if (healthFraction > stations[next].EnterAtHealthFraction)
+            if (HealthFraction > stations[next].EnterAtHealthFraction)
             {
                 return;
             }

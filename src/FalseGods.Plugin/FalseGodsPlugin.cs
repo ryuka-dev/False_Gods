@@ -257,6 +257,7 @@ namespace FalseGods.Plugin
                 _log,
                 new SulfurMinionSpawnPort(this, _log),
                 _crates,
+                new SulfurCarrierPort(this, _crates, _log),
                 (at, pile) => _crateFlow?.BroadcastDropped(at, pile),
                 _maxClientHitDamage.Value) { LevelArena = _levelArena };
 

@@ -66,6 +66,20 @@ namespace FalseGods.Application.Combat
         /// whether a production point is full and whether a delivery pile has room.</summary>
         int RestingOn(CratePileId pile);
 
+        /// <summary>
+        /// Take up to <paramref name="count"/> resting crates off <paramref name="pile"/> and remove them from the
+        /// world without dropping loot — a carrier picking a load up off a production point. Returns how many were
+        /// actually taken, which is fewer than asked when the pile is short.
+        /// </summary>
+        /// <remarks>
+        /// No loot, because the crate has not been destroyed: it is being moved, and it comes back at the other
+        /// end. A carried load is deliberately <b>not</b> kept as live destructibles — a dozen carriers each
+        /// holding a dozen real breakables would be hundreds of bodies walking around for something the player
+        /// cannot interact with anyway — so the crates stop existing here and are made again where they are set
+        /// down.
+        /// </remarks>
+        int TakeFrom(CratePileId pile, int count);
+
         /// <summary>Move every crate still in the air, and resolve the ones that have arrived or been broken.</summary>
         void Advance(float deltaSeconds);
 

@@ -272,6 +272,50 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// <summary>The next kind to spawn, cycled so a pile or a volley mixes the kinds evenly.</summary>
         private DestructibleTemplate PickKind() => _templates[_nextKind++ % _templates.Count];
 
+        /// <summary>
+        /// The mesh and material of one destructible kind, for something that needs to <i>look</i> like a crate
+        /// without being one — a carried load riding on a goblin's back.
+        /// </summary>
+        /// <remarks>
+        /// Shared rather than resolved a second time: this port already located and holds the game's own crate
+        /// mesh and material, and loading them again elsewhere would mean a second set of handles to release and a
+        /// second chance to render magenta. Returns false until <see cref="Prepare"/> has succeeded.
+        /// </remarks>
+        internal bool TryGetLook(out Mesh mesh, out Material material)
+        {
+            mesh = null;
+            material = null;
+            if (!_prepared || _templates.Count == 0)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < _templates.Count; i++)
+            {
+                var template = _templates[i].Template;
+                if (template == null)
+                {
+                    continue;
+                }
+
+                var filter = template.GetComponentInChildren<MeshFilter>(true);
+                var renderer = template.GetComponentInChildren<MeshRenderer>(true);
+                if (filter == null || renderer == null)
+                {
+                    continue;
+                }
+
+                mesh = filter.sharedMesh;
+                material = renderer.sharedMaterial;
+                if (mesh != null && material != null)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>Clone one destructible from a kind's template through the game's own spawn — a real unit, with
         /// weapon fire and loot — wake it, and switch off the vanilla break-on-contact rules so we own its life.
         /// The caller sets its rigidbody for flight or for rest.</summary>
@@ -922,6 +966,44 @@ namespace FalseGods.Integration.Sulfur.Combat
                     UnityEngine.Object.Destroy(crate.Unit.gameObject);
                 }
             }
+        }
+
+        public int TakeFrom(CratePileId pile, int count)
+        {
+            if (count <= 0)
+            {
+                return 0;
+            }
+
+            var taken = 0;
+            for (var index = _crates.Count - 1; index >= 0 && taken < count; index--)
+            {
+                var crate = _crates[index];
+                if (crate.Phase != Phase.Resting || crate.Pile != pile)
+                {
+                    continue;
+                }
+
+                // Picked up, not destroyed: no loot, no break effect, no sound. The crate reappears where the
+                // carrier sets it down.
+                if (crate.Unit != null)
+                {
+                    try
+                    {
+                        UnityEngine.Object.Destroy(crate.Unit.gameObject);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger?.LogWarning($"[crate] a crate could not be picked up: {exception.Message}");
+                        continue;
+                    }
+                }
+
+                _crates.RemoveAt(index);
+                taken++;
+            }
+
+            return taken;
         }
 
         private static ArenaWorldPoint ToPoint(Vector3 position) =>
