@@ -136,6 +136,7 @@ namespace FalseGods.Plugin
         private int _nextVolleySeed = 1;
 
         private IThrownCratePort _crates = null!;
+        private SulfurCarriedLoadMirror? _carriedLoads;
         private IPlayerMotionPort _playerMotion = null!;
         private TargetMotionTracker _playerVelocity = null!;
 
@@ -227,10 +228,15 @@ namespace FalseGods.Plugin
                 + "standing at a production point are not the boss's until somebody carries them over.");
 
             _log = new BepInExLogger(Logger);
-            _crates = new SulfurThrownCratePort(
+            var cratePort = new SulfurThrownCratePort(
                 _log,
                 new SulfurCrateImpact(
                     CrateHitDamage, CrateContactRadius, CrateSplashRadius, CrateKnockbackSpeed, CrateKnockbackLift, _log));
+            _crates = cratePort;
+
+            // Only ever used on a client: it puts the host's loads on the backs of the goblins this peer mirrored,
+            // which the carry commands cannot do because they carry no idea of which goblin is which.
+            _carriedLoads = new SulfurCarriedLoadMirror(cratePort, _log);
             _playerMotion = new SulfurPlayerMotionPort();
             _playerVelocity = new TargetMotionTracker(VolleyLeadSmoothingSeconds);
 
@@ -257,7 +263,12 @@ namespace FalseGods.Plugin
                 _log,
                 new SulfurMinionSpawnPort(this, _log),
                 _crates,
-                new SulfurCarrierPort(this, _crates, _log),
+                new SulfurCarrierPort(
+                    this,
+                    _crates,
+                    _log,
+                    (at, pile, count, radius) => _crateFlow?.BroadcastTaken(at, pile, count, radius),
+                    (from, at, pile, count, seed) => _crateFlow?.BroadcastSetDown(from, at, pile, count, seed)),
                 (at, pile) => _crateFlow?.BroadcastDropped(at, pile),
                 _maxClientHitDamage.Value) { LevelArena = _levelArena };
 
@@ -371,6 +382,9 @@ namespace FalseGods.Plugin
                     _crateFlow.Dispose();
                     _crateFlow = null;
                     _crateFlowIntegration = null;
+
+                    // The mirrored loads exist only for as long as there is a host telling us about them.
+                    _carriedLoads?.Clear();
                 }
 
                 return;
@@ -401,6 +415,20 @@ namespace FalseGods.Plugin
                         _crates.Throw(from, to, seconds, apex);
                         _log.Log($"[crate] host threw one from ({from.X:0.0}, {from.Y:0.0}, {from.Z:0.0}) to "
                             + $"({to.X:0.0}, {to.Y:0.0}, {to.Z:0.0}); {_crates.InFlight} in the air here.");
+                    },
+                    OnTaken = (at, pile, count, radius) =>
+                    {
+                        var took = _crates.TakeFrom(pile, count, at, radius);
+                        _carriedLoads?.PickedUp(at, count);
+                        _log.Log($"[carrier] host collected {count} off {pile}; {took} taken here, "
+                            + $"{_crates.RestingOn(pile)} left on it.");
+                    },
+                    OnSetDown = (from, at, pile, count, seed) =>
+                    {
+                        var placed = _crates.TossRing(from, at, pile, count, seed);
+                        _carriedLoads?.PutDown(from);
+                        _log.Log($"[carrier] host put {count} down on {pile} (seed {seed}); {placed} laid out "
+                            + $"here, {_crates.RestingOn(pile)} on that pile.");
                     },
                     OnVolleyFired = (pile, current, lead, shape) =>
                     {

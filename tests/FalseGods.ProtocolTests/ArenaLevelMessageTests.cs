@@ -21,6 +21,29 @@ namespace FalseGods.ProtocolTests
         }
 
         [Fact]
+        public void A_pick_up_round_trips()
+        {
+            var original = new CratesTaken(
+                new WorldPosition(2f, 0.1f, -3f), PileKind: 1, PileIndex: 0, Count: 7, Radius: 9f);
+
+            Assert.Equal(original, WireCodec.DeserializeCratesTaken(WireCodec.Serialize(original)));
+        }
+
+        [Fact]
+        public void A_set_down_round_trips_every_input_the_ring_is_rebuilt_from()
+        {
+            var original = new CratesSetDown(
+                new WorldPosition(1f, 2.9f, 3f),
+                new WorldPosition(1f, 0.1f, 3f),
+                PileKind: 2,
+                PileIndex: 1,
+                Count: 7,
+                Seed: 4242);
+
+            Assert.Equal(original, WireCodec.DeserializeCratesSetDown(WireCodec.Serialize(original)));
+        }
+
+        [Fact]
         public void A_throw_round_trips()
         {
             var original = new CrateThrown(

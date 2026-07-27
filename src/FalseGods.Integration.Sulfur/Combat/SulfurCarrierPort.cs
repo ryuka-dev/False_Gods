@@ -80,6 +80,8 @@ namespace FalseGods.Integration.Sulfur.Combat
         private readonly MonoBehaviour _host;
         private readonly IThrownCratePort _crates;
         private readonly ILogger _logger;
+        private readonly Action<ArenaWorldPoint, CratePileId, int, float> _announceTaken;
+        private readonly Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int> _announceSetDown;
         private readonly List<Carrier> _carriers = new List<Carrier>();
 
         private bool _reportedDeactivationTrap;
@@ -93,11 +95,23 @@ namespace FalseGods.Integration.Sulfur.Combat
         private int _nextSetDownSeed = 1;
         private float _observedWalkSpeed;
 
-        public SulfurCarrierPort(MonoBehaviour host, IThrownCratePort crates, ILogger logger = null)
+        /// <param name="announceTaken">Told whenever a carrier picks a load up: where it stood, which heap, how
+        /// many, and how far it could reach. A peer with no carriers of its own has no other way to know its piles
+        /// have shrunk.</param>
+        /// <param name="announceSetDown">Told whenever a load is put down or spilled, with the seed the ring was
+        /// laid out from — which is the whole delivery, since every peer builds the same ring from it.</param>
+        public SulfurCarrierPort(
+            MonoBehaviour host,
+            IThrownCratePort crates,
+            ILogger logger = null,
+            Action<ArenaWorldPoint, CratePileId, int, float> announceTaken = null,
+            Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int> announceSetDown = null)
         {
             _host = host ?? throw new ArgumentNullException(nameof(host));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
             _logger = logger;
+            _announceTaken = announceTaken;
+            _announceSetDown = announceSetDown;
         }
 
         public int Working
@@ -239,11 +253,15 @@ namespace FalseGods.Integration.Sulfur.Combat
                     if (room > 0)
                     {
                         var here = carrier.Unit != null ? carrier.Unit.transform.position : carrier.LastPosition;
-                        carrier.Load += _crates.TakeFrom(
-                            carrier.FetchPile,
-                            room,
-                            new ArenaWorldPoint(here.x, here.y, here.z),
-                            PickUpReach);
+                        var at = new ArenaWorldPoint(here.x, here.y, here.z);
+                        var took = _crates.TakeFrom(carrier.FetchPile, room, at, PickUpReach);
+                        if (took > 0)
+                        {
+                            carrier.Load += took;
+
+                            // A client has no carriers of its own, so its piles only shrink when told.
+                            _announceTaken?.Invoke(at, carrier.FetchPile, took, PickUpReach);
+                        }
                     }
 
                     if (carrier.Load <= 0)
@@ -359,17 +377,10 @@ namespace FalseGods.Integration.Sulfur.Combat
             var from = new ArenaWorldPoint(head.x, head.y + StackBase, head.z);
 
             var seed = _nextSetDownSeed++;
-            var placed = 0;
-            for (var i = 0; i < load; i++)
-            {
-                var ring = ShotgunSpread.Offset(seed, i, load, SetDownMinRadius, SetDownMaxRadius);
-                var to = new ArenaWorldPoint(at.X + ring.X, at.Y + SetDownHeight, at.Z + ring.Z);
-                if (_crates.Toss(from, to, pile, SetDownFlightSeconds, SetDownApexHeight))
-                {
-                    placed++;
-                }
-            }
+            var placed = _crates.TossRing(from, at, pile, load, seed);
 
+            // Every peer lays the same load out from these few numbers; no crate position is ever sent.
+            _announceSetDown?.Invoke(from, at, pile, load, seed);
             return placed;
         }
 

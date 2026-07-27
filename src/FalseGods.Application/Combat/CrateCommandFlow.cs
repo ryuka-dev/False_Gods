@@ -36,6 +36,14 @@ namespace FalseGods.Application.Combat
         /// pile hanging in the air indefinitely. Far above any rate the boss actually fires at.</summary>
         public const float MaxFireIntervalSeconds = 5f;
 
+        /// <summary>A ceiling on one carrier's load, so a forged carry cannot conjure a thousand crates in one
+        /// message. Far above any load the escalation ladder actually asks for.</summary>
+        public const int MaxLoad = 64;
+
+        /// <summary>A ceiling on how far a reported pick-up may reach, so a forged one cannot sweep the level
+        /// clean from a single point.</summary>
+        public const float MaxPickUpReach = 50f;
+
         private readonly IEncounterChannel _channel;
         private readonly IMultiplayerSession _session;
 
@@ -54,6 +62,12 @@ namespace FalseGods.Application.Combat
 
         /// <summary>The host fired a volley off a pile; compute the same one here from its shape.</summary>
         public Action<CratePileId, ArenaWorldPoint, ArenaWorldPoint, CrateVolleyShape>? OnVolleyFired { get; set; }
+
+        /// <summary>A carrier picked a load up on the host; take the same crates off the same heap here.</summary>
+        public Action<ArenaWorldPoint, CratePileId, int, float>? OnTaken { get; set; }
+
+        /// <summary>A load was set down or spilled on the host; lay the same ring out here.</summary>
+        public Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int>? OnSetDown { get; set; }
 
         public void Dispose() => _channel.Received -= OnReceived;
 
@@ -104,6 +118,27 @@ namespace FalseGods.Application.Combat
                 shape.FireIntervalSeconds)));
         }
 
+        /// <summary>Host: tell every client that a carrier collected a load, so their piles shrink too.</summary>
+        public void BroadcastTaken(ArenaWorldPoint at, CratePileId pile, int count, float radius)
+        {
+            if (IsHosting)
+            {
+                Broadcast(EncounterCodec.Encode(
+                    new CratesTaken(ToWire(at), (int)pile.Kind, pile.Index, count, radius)));
+            }
+        }
+
+        /// <summary>Host: tell every client that a load was put down, and how its ring was laid out.</summary>
+        public void BroadcastSetDown(
+            ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed)
+        {
+            if (IsHosting)
+            {
+                Broadcast(EncounterCodec.Encode(
+                    new CratesSetDown(ToWire(from), ToWire(at), (int)pile.Kind, pile.Index, count, seed)));
+            }
+        }
+
         private bool IsHosting => _session.IsActive && _session.Role == SessionRole.Host;
 
         private void Broadcast(EncodedPayload payload) =>
@@ -139,6 +174,23 @@ namespace FalseGods.Application.Combat
                     && IsPositive(thrown.FlightSeconds) && IsFinite(thrown.ApexHeight):
                     OnThrown?.Invoke(
                         FromWire(thrown.From), FromWire(thrown.To), thrown.FlightSeconds, thrown.ApexHeight);
+                    break;
+
+                case CratesTaken taken when IsFinite(taken.At)
+                    && taken.Count > 0
+                    && taken.Count <= MaxLoad
+                    && IsPositive(taken.Radius)
+                    && taken.Radius <= MaxPickUpReach
+                    && CratePileId.TryFrom(taken.PileKind, taken.PileIndex, out var takenPile):
+                    OnTaken?.Invoke(FromWire(taken.At), takenPile, taken.Count, taken.Radius);
+                    break;
+
+                case CratesSetDown down when IsFinite(down.From)
+                    && IsFinite(down.At)
+                    && down.Count > 0
+                    && down.Count <= MaxLoad
+                    && CratePileId.TryFrom(down.PileKind, down.PileIndex, out var downPile):
+                    OnSetDown?.Invoke(FromWire(down.From), FromWire(down.At), downPile, down.Count, down.Seed);
                     break;
 
                 case CrateVolleyFired volley when IsSaneVolley(volley)

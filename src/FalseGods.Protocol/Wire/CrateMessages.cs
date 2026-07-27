@@ -24,6 +24,31 @@ namespace FalseGods.Protocol.Wire
     public sealed record CrateDropped(WorldPosition At, int PileKind, int PileIndex);
 
     /// <summary>
+    /// Host → all peers, reliable-ordered: a carrier standing at <see cref="At"/> picked <see cref="Count"/>
+    /// destructibles up off a heap, reaching <see cref="Radius"/> around itself.
+    /// </summary>
+    /// <remarks>
+    /// The half of a carry that <i>removes</i> supply. A peer with no carriers of its own — every client, since
+    /// the host owns them — would otherwise watch its production points fill up forever while its boss went
+    /// hungry, because nothing there ever collects. Sent as a place and a number rather than as crate identities:
+    /// the peers built their crates from the same commands in the same order, so taking the same count from the
+    /// same heap at the same spot leaves the same piles behind.
+    /// </remarks>
+    public sealed record CratesTaken(WorldPosition At, int PileKind, int PileIndex, int Count, float Radius);
+
+    /// <summary>
+    /// Host → all peers, reliable-ordered: a load of <see cref="Count"/> destructibles was thrown from
+    /// <see cref="From"/> down into a ring around <see cref="At"/>, laid out from <see cref="Seed"/>.
+    /// </summary>
+    /// <remarks>
+    /// The half of a carry that <i>adds</i> supply — a delivery beside the boss, or a load bursting out of a
+    /// carrier that was killed holding it, which is why the pile it lands on travels with it. The seed is the
+    /// whole layout: every peer rings the same crates around the same spot from it, so no crate position is sent.
+    /// </remarks>
+    public sealed record CratesSetDown(
+        WorldPosition From, WorldPosition At, int PileKind, int PileIndex, int Count, int Seed);
+
+    /// <summary>
     /// Host → all peers, reliable-ordered: throw one destructible from <see cref="From"/> so it lands on
     /// <see cref="To"/> after <see cref="FlightSeconds"/>, arcing <see cref="ApexHeight"/> over the straight line.
     /// </summary>

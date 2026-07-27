@@ -258,6 +258,52 @@ namespace FalseGods.Protocol.Wire
             return message;
         }
 
+        public static byte[] Serialize(CratesTaken message)
+        {
+            var w = new WireWriter();
+            WriteWorldPosition(w, message.At);
+            WriteInt(w, message.PileKind);
+            WriteInt(w, message.PileIndex);
+            WriteInt(w, message.Count);
+            w.WriteSingle(message.Radius);
+            return w.ToArray();
+        }
+
+        public static CratesTaken DeserializeCratesTaken(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new CratesTaken(
+                ReadWorldPosition(r), r.ReadInt32(), r.ReadInt32(), r.ReadInt32(), r.ReadSingle());
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(CratesSetDown message)
+        {
+            var w = new WireWriter();
+            WriteWorldPosition(w, message.From);
+            WriteWorldPosition(w, message.At);
+            WriteInt(w, message.PileKind);
+            WriteInt(w, message.PileIndex);
+            WriteInt(w, message.Count);
+            WriteInt(w, message.Seed);
+            return w.ToArray();
+        }
+
+        public static CratesSetDown DeserializeCratesSetDown(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new CratesSetDown(
+                ReadWorldPosition(r),
+                ReadWorldPosition(r),
+                r.ReadInt32(),
+                r.ReadInt32(),
+                r.ReadInt32(),
+                r.ReadInt32());
+            RequireEnd(r);
+            return message;
+        }
+
         public static byte[] Serialize(CrateThrown message)
         {
             var w = new WireWriter();

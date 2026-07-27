@@ -63,16 +63,21 @@ namespace FalseGods.Application.Combat
             CratePileId pile, ArenaWorldPoint currentCenter, ArenaWorldPoint leadCenter, CrateVolleyShape shape);
 
         /// <summary>
-        /// Toss one crate on a short arc from <paramref name="from"/> to <paramref name="to"/>, where it comes to
-        /// rest on <paramref name="pile"/> under the game's own physics. Returns false when it could not be made.
+        /// Toss <paramref name="count"/> crates from <paramref name="from"/> onto the ground in a ring around
+        /// <paramref name="at"/>, where they come to rest on <paramref name="pile"/> under the game's own physics.
+        /// The ring is laid out from <paramref name="seed"/>. Returns how many were made.
         /// </summary>
         /// <remarks>
-        /// The gentle end of a destructible's life, and the opposite of <see cref="Throw"/>: nothing splashes,
-        /// nothing breaks, and the crate is simply on the ground afterwards. This is a carrier setting a load
-        /// down, or spilling one — the arc out of its hands is what makes a delivery read as an act rather than
-        /// crates appearing beside a goblin.
+        /// <para>The gentle end of a destructible's life, and the opposite of <see cref="Throw"/>: nothing
+        /// splashes, nothing breaks, and the crates are simply on the ground afterwards. This is a carrier setting
+        /// a load down, or spilling one — the arc out of its hands is what makes a delivery read as an act rather
+        /// than crates appearing beside a goblin.</para>
+        /// <para><b>A ring, not a column</b>, because crates are solid bodies with real mass: a load released down
+        /// one line spawns them inside each other and physics answers by firing them across the room.</para>
+        /// <para><b>Seeded, and here rather than with the carriers</b>, because every peer has to lay the same
+        /// load out the same way from the same few numbers — a client has no carriers of its own to ask.</para>
         /// </remarks>
-        bool Toss(ArenaWorldPoint from, ArenaWorldPoint to, CratePileId pile, float flightSeconds, float apexHeight);
+        int TossRing(ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed);
 
         /// <summary>How many crates are resting on one pile. This is what the supply line is told to decide
         /// whether a production point is full and whether a delivery pile has room.</summary>

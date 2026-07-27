@@ -88,6 +88,15 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// they are being killed faster than they can collect.</summary>
         private const int MaxLooseCrates = 60;
 
+        /// <summary>How a set-down load lands: a ring around the spot, a short drop onto it, and the little arc it
+        /// rides out of the carrier's hands to get there. Constants rather than wire fields — every peer runs the
+        /// same build, so the same seed lays the same load out on all of them.</summary>
+        private const float SetDownMinRadius = 1.2f;
+        private const float SetDownMaxRadius = 4f;
+        private const float SetDownHeight = 1.2f;
+        private const float SetDownFlightSeconds = 0.55f;
+        private const float SetDownApexHeight = 1.6f;
+
         // The game's solid-geometry layers a flying crate should break on — walls and props, but NOT the walkable
         // floor (Geometry), whose contact is the crate's normal landing. The arena's boundary walls are colliders
         // on GeometryNoNavMesh; the rest are included defensively and skipped if absent.
@@ -439,7 +448,28 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public bool Toss(ArenaWorldPoint from, ArenaWorldPoint to, CratePileId pile, float flightSeconds, float apexHeight)
+        public int TossRing(ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed)
+        {
+            if (count <= 0 || !Prepare())
+            {
+                return 0;
+            }
+
+            var placed = 0;
+            for (var i = 0; i < count; i++)
+            {
+                var ring = ShotgunSpread.Offset(seed, i, count, SetDownMinRadius, SetDownMaxRadius);
+                var to = new ArenaWorldPoint(at.X + ring.X, at.Y + SetDownHeight, at.Z + ring.Z);
+                if (Toss(from, to, pile, SetDownFlightSeconds, SetDownApexHeight))
+                {
+                    placed++;
+                }
+            }
+
+            return placed;
+        }
+
+        private bool Toss(ArenaWorldPoint from, ArenaWorldPoint to, CratePileId pile, float flightSeconds, float apexHeight)
         {
             if (!Prepare())
             {

@@ -25,6 +25,8 @@ namespace FalseGods.Application.Replication
         CrateDropped = 15,
         CrateThrown = 16,
         CrateVolleyFired = 17,
+        CratesTaken = 18,
+        CratesSetDown = 19,
     }
 
     /// <summary>One decoded replication message: its <see cref="Kind"/> and the deserialized DTO as <see cref="Value"/>.</summary>
@@ -92,6 +94,10 @@ namespace FalseGods.Application.Replication
 
         public static EncodedPayload Encode(CrateVolleyFired message) => Wrap(ReplicationKind.CrateVolleyFired, WireCodec.Serialize(message));
 
+        public static EncodedPayload Encode(CratesTaken message) => Wrap(ReplicationKind.CratesTaken, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(CratesSetDown message) => Wrap(ReplicationKind.CratesSetDown, WireCodec.Serialize(message));
+
         /// <summary>Decode an opaque payload back into its DTO. Treats the payload as untrusted input.</summary>
         public static DecodedMessage Decode(EncodedPayload payload)
         {
@@ -141,6 +147,10 @@ namespace FalseGods.Application.Replication
                     return new DecodedMessage(kind, WireCodec.DeserializeCrateThrown(body));
                 case ReplicationKind.CrateVolleyFired:
                     return new DecodedMessage(kind, WireCodec.DeserializeCrateVolleyFired(body));
+                case ReplicationKind.CratesTaken:
+                    return new DecodedMessage(kind, WireCodec.DeserializeCratesTaken(body));
+                case ReplicationKind.CratesSetDown:
+                    return new DecodedMessage(kind, WireCodec.DeserializeCratesSetDown(body));
                 default:
                     throw new InvalidDataException($"Unknown replication kind tag {bytes[0]}.");
             }
