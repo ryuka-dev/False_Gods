@@ -91,11 +91,11 @@ namespace FalseGods.Plugin
         private const float VolleyFlightSeconds = 1.2f;
         private const float VolleyApex = 4f;
 
-        // Rate of fire: the crates rise together and are then released one at a time, so a volley is a barrage the
-        // player has to keep moving through rather than one instant they either are or are not standing in.
-        // Three a second is the opening rate; a later phase's boss is meant to fire faster, which is a thing the
-        // boss's attack design will choose once the volley belongs to the boss rather than to this key.
-        private const float VolleyCratesPerSecond = 3f;
+        // How fast the boss can physically throw, NOT a limit on the attack: the crates rise together and are then
+        // released one at a time so a volley reads as a barrage rather than one instant, but the boss is never the
+        // bottleneck. What decides how many crates a player has coming at them is how many were carried to the
+        // boss - the supply line is the throttle, so this is set well above any rate the room can supply.
+        private const float VolleyCratesPerSecond = 10f;
         private const float VolleyFireInterval = 1f / VolleyCratesPerSecond;
 
         // How much of a crate's airtime to lead the player by. 1.0 aims where the player would be if they held their

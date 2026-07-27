@@ -73,10 +73,13 @@ namespace FalseGods.Application.Combat
         public float LeadShare { get; }
 
         /// <summary>
-        /// Seconds between one crate leaving the hover and the next — the volley's <i>rate of fire</i>. Zero flings
+        /// Seconds between one crate leaving the hover and the next — how fast the boss <i>throws</i>. Zero flings
         /// the whole hover at once, which is one loud moment the player either is or is not standing in; a positive
-        /// interval turns the same crates into a barrage that has to be kept moving through, and makes "three a
-        /// second" or "six a second" a thing the boss can be given rather than a thing the count implies.
+        /// interval turns the same crates into a barrage that has to be kept moving through.
+        /// <para><b>This is not what limits the attack.</b> How many crates come at a player is decided by how many
+        /// were carried to the boss, not by how fast it can throw: the supply line is the throttle, and this is set
+        /// above any rate the room can supply so the boss is never the bottleneck. Cutting the supply is therefore
+        /// the only way to make the barrage thinner.</para>
         /// </summary>
         /// <remarks>
         /// The crates all rise together and hover as one telegraph; only their release is staggered. A consequence
