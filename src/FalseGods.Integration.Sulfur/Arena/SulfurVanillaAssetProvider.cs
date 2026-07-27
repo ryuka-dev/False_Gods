@@ -37,7 +37,9 @@ namespace FalseGods.Integration.Sulfur.Arena
         private readonly Func<GameObject> _realizedRoot;
         private readonly ILogger _logger;
 
-        // Carriers held for the encounter's lifetime, one AssetReference per GUID; released in Release().
+        // Donors held for the encounter's lifetime, one AssetReference per key; released in Release(). The key is
+        // whatever the catalog answers to — a room GUID for the material carriers, an asset path for the prop
+        // donors — so both kinds of borrow share one cache and one lifetime.
         private readonly Dictionary<string, LoadedCarrier> _carriers = new Dictionary<string, LoadedCarrier>(StringComparer.Ordinal);
 
         public SulfurVanillaAssetProvider(Func<GameObject> realizedRoot, ILogger logger = null)
@@ -193,6 +195,134 @@ namespace FalseGods.Integration.Sulfur.Arena
             _logger?.Log($"[vanilla-material] {applied} submesh paint(s) on '{borrow.TargetPath}'"
                 + (unmatched.Count > 0 ? $"; {unmatched.Count} slot(s) with no rule: {string.Join(", ", unmatched)}" : ""));
             return MaterialBorrowResult.Resolved(applied);
+        }
+
+        public VanillaPropResult CloneProps(VanillaPropClone request)
+        {
+            if (request == null)
+                return VanillaPropResult.Placed(0);
+
+            var root = _realizedRoot();
+            if (root == null)
+                return VanillaPropResult.Failed("no realized arena root to place props in");
+
+            var parent = string.IsNullOrEmpty(request.ParentPath) ? root.transform : root.transform.Find(request.ParentPath);
+            if (parent == null)
+                return VanillaPropResult.Placed(0); // the arena authored no props at all — optional décor
+
+            var markers = new List<Transform>();
+            foreach (var candidate in parent.GetComponentsInChildren<Transform>(includeInactive: true))
+            {
+                if (candidate != parent && candidate.name.StartsWith(request.MarkerNamePrefix, StringComparison.Ordinal))
+                    markers.Add(candidate);
+            }
+
+            if (markers.Count == 0)
+                return VanillaPropResult.Placed(0);
+
+            var layer = LayerMask.NameToLayer(request.LayerName);
+            if (layer < 0)
+                return VanillaPropResult.Failed($"prop layer '{request.LayerName}' does not exist in this build");
+
+            var donor = LoadCarrier(request.RoomKey, out var donorError);
+            if (donor == null)
+                return VanillaPropResult.Failed($"prop donor room '{request.RoomKey}' did not load: {donorError}");
+
+            var source = donor.transform.Find(request.PropPath);
+            if (source == null)
+                return VanillaPropResult.Failed($"prop '{request.PropPath}' not found in donor room '{request.RoomKey}'");
+
+            // Clones are assembled inside an INACTIVE staging object. A vanilla prop brings the donor room's own
+            // gameplay components along, and those must never run: Awake and Start do not fire while an object is
+            // inactive in the hierarchy, so stripping and re-layering here means a removed component has no
+            // lifecycle at all. Destruction is immediate for the same reason — a deferred Destroy would leave the
+            // component alive until the end of the frame, by which point the clone is parented and active.
+            var staging = new GameObject("FalseGodsPropStaging");
+            staging.SetActive(false);
+
+            var cloned = 0;
+            try
+            {
+                foreach (var marker in markers)
+                {
+                    var clone = UnityEngine.Object.Instantiate(source.gameObject, staging.transform);
+                    clone.name = source.name;
+
+                    StripChildren(clone, request.StripChildNames);
+                    StripComponents(clone, request.StripComponentNames);
+                    SetLayerRecursively(clone.transform, layer);
+
+                    // The marker owns placement; the clone keeps the source's own scale as its base, so a marker
+                    // left at scale 1 reproduces the prop at its vanilla proportions.
+                    clone.transform.SetParent(marker, worldPositionStays: false);
+                    clone.transform.localPosition = Vector3.zero;
+                    clone.transform.localRotation = Quaternion.identity;
+                    clone.transform.localScale = source.localScale;
+                    cloned++;
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(staging);
+            }
+
+            _logger?.Log($"[vanilla-prop] {cloned} '{source.name}' clone(s) placed on '{request.MarkerNamePrefix}*'"
+                + $", layer '{request.LayerName}'");
+            return VanillaPropResult.Placed(cloned);
+        }
+
+        /// <summary>Remove whole child objects from a staged clone by name, at any depth. Used for the parts of a
+        /// vanilla prop that belong to the donor room's own encounter rather than to the scenery.</summary>
+        private static void StripChildren(GameObject clone, IReadOnlyList<string> names)
+        {
+            if (names == null || names.Count == 0)
+                return;
+
+            foreach (var transform in clone.GetComponentsInChildren<Transform>(includeInactive: true))
+            {
+                // A child removed earlier in this loop takes its own children with it, so the array can hold
+                // already-destroyed entries by the time we reach them.
+                if (transform == null || transform == clone.transform)
+                    continue;
+
+                if (Contains(names, transform.name))
+                    UnityEngine.Object.DestroyImmediate(transform.gameObject);
+            }
+        }
+
+        /// <summary>Remove components from a staged clone by type name, at any depth. Names rather than types:
+        /// the recipe lives in Application, which has no reference to the game's assemblies.</summary>
+        private static void StripComponents(GameObject clone, IReadOnlyList<string> names)
+        {
+            if (names == null || names.Count == 0)
+                return;
+
+            foreach (var component in clone.GetComponentsInChildren<Component>(includeInactive: true))
+            {
+                if (component == null || component is Transform)
+                    continue;
+
+                if (Contains(names, component.GetType().Name))
+                    UnityEngine.Object.DestroyImmediate(component);
+            }
+        }
+
+        private static bool Contains(IReadOnlyList<string> names, string name)
+        {
+            for (var i = 0; i < names.Count; i++)
+            {
+                if (string.Equals(names[i], name, StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static void SetLayerRecursively(Transform node, int layer)
+        {
+            node.gameObject.layer = layer;
+            for (var i = 0; i < node.childCount; i++)
+                SetLayerRecursively(node.GetChild(i), layer);
         }
 
         /// <summary>The rule whose placeholder name the slot's current material carries, or null. Exact, ordinal

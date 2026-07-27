@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using FalseGods.Application.Arena;
@@ -242,6 +242,19 @@ namespace FalseGods.ApplicationTests
                 return MaterialBorrowResult.Resolved(0);
             }
 
+            public VanillaPropClone? CapturedPropClone { get; private set; }
+
+            public bool FailPropClone { get; set; }
+
+            public VanillaPropResult CloneProps(VanillaPropClone request)
+            {
+                _journal.Add("vanilla.CloneProps");
+                CapturedPropClone = request;
+                return FailPropClone
+                    ? VanillaPropResult.Failed("donor room did not load")
+                    : VanillaPropResult.Placed(0);
+            }
+
             public void Release() => _journal.Add("vanilla.Release");
         }
 
@@ -277,7 +290,7 @@ namespace FalseGods.ApplicationTests
             Assert.True(rig.Flow.Prepare().Success);
             Assert.True(rig.Flow.Realize(Origin).Success);
 
-            Assert.Equal(new[] { "assets.Load", "realize", "vanilla.Resolve", "nav.Apply" }, rig.Journal);
+            Assert.Equal(new[] { "assets.Load", "realize", "vanilla.Resolve", "vanilla.CloneProps", "nav.Apply" }, rig.Journal);
             Assert.Equal(ArenaLoadStage.Realized, rig.Flow.Stage);
             Assert.Equal(Origin, rig.Realization.CapturedOrigin);
         }
@@ -472,7 +485,7 @@ namespace FalseGods.ApplicationTests
             Assert.False(result.Success);
             Assert.Contains("navigation failed", result.FailureReason);
             Assert.Equal(
-                new[] { "assets.Load", "realize", "vanilla.Resolve", "nav.Apply", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
+                new[] { "assets.Load", "realize", "vanilla.Resolve", "vanilla.CloneProps", "nav.Apply", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
                 rig.Journal);
             Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
         }
@@ -509,6 +522,51 @@ namespace FalseGods.ApplicationTests
             Assert.Equal("CaveFloor", request.MaterialName);        // from the hashed definition
             Assert.Equal("carrier-guid", request.CarrierGuid);
             Assert.Equal(0, request.TargetSubMaterialIndex);
+        }
+
+        [Fact]
+        public void Vanilla_prop_failure_tears_down_everything()
+        {
+            var rig = new Rig();
+            rig.Vanilla.FailPropClone = true;
+            rig.Flow.Prepare();
+
+            var result = rig.Flow.Realize(Origin);
+
+            Assert.False(result.Success);
+            Assert.Contains("vanilla scenery failed", result.FailureReason);
+            // Scenery is cloned after the paints and before navigation, so nav.Apply never runs.
+            Assert.Equal(
+                new[] { "assets.Load", "realize", "vanilla.Resolve", "vanilla.CloneProps", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
+                rig.Journal);
+            Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
+        }
+
+        [Fact]
+        public void Vanilla_prop_recipe_keeps_the_pool_off_the_navigation_layers_and_strips_its_gameplay()
+        {
+            var rig = new Rig();
+
+            rig.Flow.Prepare();
+            var result = rig.Flow.Realize(Origin);
+
+            Assert.True(result.Success);
+            var request = rig.Vanilla.CapturedPropClone!;
+            Assert.Equal("VisualRoot/VanillaProps", request.ParentPath);
+            Assert.Equal("Prop_MudPool", request.MarkerNamePrefix);
+            Assert.Equal("Enemies/CousinSludgePool", request.PropPath);
+
+            // The donor room is named by the key the running game answers to, not by an exported GUID.
+            Assert.EndsWith("CaveCousinNew.prefab", request.RoomKey);
+
+            // The prop's own layer is rasterized by the navigation scan; ours must not be, or a decorative
+            // basin silently becomes terrain.
+            Assert.Equal("GeometryNoNavMesh", request.LayerName);
+
+            // The donor boss's anchor, its damage volume and its pool controller stay in the donor room.
+            Assert.Contains("CousinPosition", request.StripChildNames);
+            Assert.Contains("PoolBlocker", request.StripChildNames);
+            Assert.Contains("CousinPool", request.StripComponentNames);
         }
 
         // ---------------------------------------------------------------- teardown & guards

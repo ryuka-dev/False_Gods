@@ -93,6 +93,46 @@ namespace FalseGods.Application.Arena
         };
     }
 
+    /// <summary>
+    /// Vanilla scenery cloned into the arena at load. Like the rocks and the cave shell this is hand-authored
+    /// presentation excluded from the content hash: the author places empty marker objects under
+    /// <see cref="ParentPath"/> and each one receives a copy of the named prop, so scenery can be moved, turned,
+    /// duplicated or removed without a rehash or a re-export.
+    /// <para>The donor room is named by its <b>runtime</b> addressable key. Vanilla room prefabs answer to their
+    /// asset path in the live catalog, and that path — not the reverse-engineered export's GUID, which is a
+    /// different number entirely — is what loads. Measured in game before it was pinned here.</para>
+    /// PoC-arena content constants, grouped here like <see cref="ArenaMarkerKinds"/>.</summary>
+    public static class VanillaPropDecoration
+    {
+        public const string ParentPath = "VisualRoot/VanillaProps";
+
+        /// <summary>The vanilla cave boss room — the donor for the cave scenery this arena reuses.</summary>
+        public const string CaveBossRoomKey =
+            "Assets/_Core/Prefabs/LevelGeneration/Chunks/Caves/CaveCousinNew.prefab";
+
+        public const string MudPoolMarkerPrefix = "Prop_MudPool";
+
+        public const string MudPoolPath = "Enemies/CousinSludgePool";
+
+        /// <summary>
+        /// <b>GeometryNoNavMesh, not the prop's own StaticDoodad.</b> The donor room carries the pool on a layer the
+        /// recast scan rasterizes, so cloning it as-is would quietly turn a decorative basin into terrain and let
+        /// it reshape — or split — the arena's navigation. On this layer it stays solid to physics and to the
+        /// boss's thrown destructibles while the scan never sees it, which is exactly how the sculpted cave shell
+        /// is handled.
+        /// </summary>
+        public const string LayerName = "GeometryNoNavMesh";
+
+        /// <summary>Removed from the clone: the donor boss's teleport anchor, and the damage volume. The pool's
+        /// hazard is a gameplay decision of its own and is not smuggled in with the scenery.</summary>
+        public static readonly IReadOnlyList<string> MudPoolStripChildren = new[] { "CousinPosition", "PoolBlocker" };
+
+        /// <summary>Removed from the clone: the donor boss's pool controller. It is inert without that boss —
+        /// it only caches its damage volume and waits to be told to bubble — but an unused game component has no
+        /// business running in our room.</summary>
+        public static readonly IReadOnlyList<string> MudPoolStripComponents = new[] { "CousinPool" };
+    }
+
     /// <summary>Where the local arena load stands. Failure at any step returns the flow to
     /// <see cref="NotLoaded"/> with everything it had acquired released.</summary>
     public enum ArenaLoadStage
@@ -316,6 +356,12 @@ namespace FalseGods.Application.Arena
                 return Fail($"arena wall-shell paint failed: {wallPaint.Error ?? "unknown"}");
             }
 
+            var props = CloneVanillaProps();
+            if (!props.Success)
+            {
+                return Fail($"arena vanilla scenery failed: {props.Error ?? "unknown"}");
+            }
+
             var nav = _navigation.Apply();
             if (!nav.Success)
             {
@@ -393,6 +439,19 @@ namespace FalseGods.Application.Arena
                 carrierGuid,
                 RockDecoration.MaterialName));
         }
+
+        /// <summary>Place the vanilla scenery the room authored markers for. Runs before navigation so the clones
+        /// are already standing — and already on their intended layer — when the level scans; an arena that
+        /// authored no prop markers places nothing and succeeds.</summary>
+        private VanillaPropResult CloneVanillaProps() =>
+            _vanillaAssets.CloneProps(new VanillaPropClone(
+                VanillaPropDecoration.ParentPath,
+                VanillaPropDecoration.MudPoolMarkerPrefix,
+                VanillaPropDecoration.CaveBossRoomKey,
+                VanillaPropDecoration.MudPoolPath,
+                VanillaPropDecoration.MudPoolStripChildren,
+                VanillaPropDecoration.MudPoolStripComponents,
+                VanillaPropDecoration.LayerName));
 
         /// <summary>Paint the sculpted cave shell's surfaces with the vanilla cave materials, reusing the same
         /// carrier the surfaces borrow from. The sculpt arrives in two objects — the solid shell and the walkable

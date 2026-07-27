@@ -57,6 +57,50 @@ namespace FalseGods.Application.Arena
         string CarrierGuid,
         IReadOnlyList<SubmeshMaterialRule> Rules);
 
+    /// <summary>
+    /// A piece of vanilla room scenery to clone into the arena. Where the material borrows take a <i>material</i>
+    /// off a donor room and put it on our own mesh, this takes a whole authored <i>subtree</i> — mesh, sub-objects
+    /// and all — and places a copy of it at each marker the arena authored for it. The prop's own materials come
+    /// with it, so nothing needs borrowing.
+    /// </summary>
+    /// <remarks>
+    /// Like the other décor this is targeted by naming convention and excluded from the content hash: markers are
+    /// empty objects the author places freely, so a prop can be moved, turned or duplicated without a rehash or a
+    /// re-export. Each marker owns its clone's position, rotation and scale; the clone keeps the source's own scale
+    /// as its base, so a marker at scale 1 reproduces the prop at its vanilla proportions.
+    /// <para><b>A vanilla prop is not automatically safe to drop in.</b> It carries the layers, colliders, triggers
+    /// and gameplay components the donor room needed, and two of those matter here: a prop left on a layer the
+    /// navigation scan rasterizes silently becomes terrain, and a gameplay component cloned along with it starts
+    /// running in a room it was not written for. So the recipe names what to remove and which layer the whole
+    /// subtree ends up on, and the implementation must apply both <i>before</i> the clone ever becomes active —
+    /// a stripped component must never have run its lifecycle.</para>
+    /// </remarks>
+    /// <param name="ParentPath">Where the markers live in the realized arena.</param>
+    /// <param name="MarkerNamePrefix">Markers whose name starts with this get a clone; anything else is left alone.</param>
+    /// <param name="RoomKey">The donor room's <em>runtime</em> addressable key. Discovered from the running game
+    /// (the reverse-engineered export's GUIDs are not the game's keys), so it is a pinned constant here.</param>
+    /// <param name="PropPath">The prop's path inside the donor room — the clone selector.</param>
+    /// <param name="StripChildNames">Child objects removed from the clone, by name, at any depth.</param>
+    /// <param name="StripComponentNames">Components removed from the clone, by type name, at any depth.</param>
+    /// <param name="LayerName">The layer the whole clone subtree is moved to. A name, never an index — indices are
+    /// not stable across builds.</param>
+    public sealed record VanillaPropClone(
+        string ParentPath,
+        string MarkerNamePrefix,
+        string RoomKey,
+        string PropPath,
+        IReadOnlyList<string> StripChildNames,
+        IReadOnlyList<string> StripComponentNames,
+        string LayerName);
+
+    /// <summary>The outcome of cloning one prop recipe: how many clones were placed, or the fail-closed reason.</summary>
+    public sealed record VanillaPropResult(bool Success, string? Error, int Cloned)
+    {
+        public static VanillaPropResult Placed(int cloned) => new VanillaPropResult(true, null, cloned);
+
+        public static VanillaPropResult Failed(string error) => new VanillaPropResult(false, error, 0);
+    }
+
     /// <summary>The outcome of resolving the material borrows: how many were applied, or the fail-closed reason.
     /// Failure is an outcome, not an exception — the load flow tears down on it.</summary>
     public sealed record MaterialBorrowResult(bool Success, string? Error, int Applied)
@@ -104,6 +148,15 @@ namespace FalseGods.Application.Arena
         /// is fail-closed, exactly as in <see cref="Resolve"/>. Shares the carrier cache and <see cref="Release"/>
         /// lifetime with the other paints.</summary>
         MaterialBorrowResult PaintSubmeshes(SubmeshBorrow borrow);
+
+        /// <summary>Clone one piece of vanilla scenery onto every marker the arena authored for it (see
+        /// <see cref="VanillaPropClone"/>). No markers — or no marker parent at all — is a success with zero
+        /// clones: the décor is optional. A donor room that will not load, or a prop path, layer name or marker
+        /// that does not resolve, is fail-closed, exactly as in <see cref="Resolve"/>: an arena missing the
+        /// scenery it asked for should say so rather than quietly ship without it. Shares the donor cache and
+        /// <see cref="Release"/> lifetime with the paints; the clones themselves belong to the realized
+        /// hierarchy and die with it.</summary>
+        VanillaPropResult CloneProps(VanillaPropClone request);
 
         void Release();
     }
