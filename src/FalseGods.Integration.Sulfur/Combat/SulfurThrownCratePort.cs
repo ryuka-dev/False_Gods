@@ -627,17 +627,11 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 var crate = _crates[index];
 
-                // The game broke it without us asking — a player shooting it is the expected case, and the only
-                // one that pays. Reported when a crate that was NOT the boss's throw goes this way, because that
-                // is loot leaving by a route we did not intend and cannot see from the outside.
+                // The game broke it without us asking: a player shot it, in whatever phase it was in. Ordinary,
+                // and already correct on its own — a crate that has not been thrown was never granted a payout,
+                // so shooting one off the pile costs the boss its ammunition and pays nothing.
                 if (crate.Unit == null)
                 {
-                    if (crate.Phase != Phase.Flying)
-                    {
-                        _logger?.Log($"[crate] one broke on its own while {crate.Phase} on {crate.Pile} "
-                            + $"(would have paid: {crate.LootWhenFired}).");
-                    }
-
                     _crates.RemoveAt(index);
                     continue;
                 }
