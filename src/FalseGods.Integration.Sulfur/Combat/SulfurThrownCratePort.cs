@@ -96,6 +96,10 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// coin's, so which crates pay is independent of where they land and what they aim at.</summary>
         private const int LootSalt = 70001;
 
+        /// <summary>How far a surface must face downwards before a crate treats it as a ceiling to be ignored
+        /// rather than a wall to burst on. Comfortably past vertical, so an overhanging wall still stops a crate.</summary>
+        private const float CeilingFacing = -0.3f;
+
         /// <summary>How a set-down load lands: a ring around the spot, a short drop onto it, and the little arc it
         /// rides out of the carrier's hands to get there. Constants rather than wire fields — every peer runs the
         /// same build, so the same seed lays the same load out on all of them.</summary>
@@ -593,10 +597,10 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var from = crate.Unit.transform.position;
                 crate.BeginLift(from, from + Vector3.up * shape.LiftHeight, target, shape, index);
 
-                // Off the pile and aimed at somebody: from here it is worth shooting down — some of the time.
-                // Seeded from the volley, so every peer agrees which crates of it pay.
-                SetLootAllowed(
-                    crate.Breakable, SeededRandom.Unit01(shape.Seed, LootSalt + index) < LootChance);
+                // Whether this one pays if a player shoots it down is decided here, seeded from the volley so
+                // every peer agrees — but it is not granted until the crate is actually released. A crate still
+                // hovering is part of the telegraph, and nothing that happens to it there should pay.
+                crate.LootWhenFired = SeededRandom.Unit01(shape.Seed, LootSalt + index) < LootChance;
 
                 // We drive it from here on, so it leaves the physics engine's hands — and, like a thrown crate, it
                 // must not shatter on contact or on its own speed while we carry it.
@@ -622,10 +626,17 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 var crate = _crates[index];
 
-                // Shot out of the air (or off the pile): the game already broke it, dropped its loot, and
-                // destroyed it, in whatever phase it was in.
+                // The game broke it without us asking — a player shooting it is the expected case, and the only
+                // one that pays. Reported when a crate that was NOT the boss's throw goes this way, because that
+                // is loot leaving by a route we did not intend and cannot see from the outside.
                 if (crate.Unit == null)
                 {
+                    if (crate.Phase != Phase.Flying)
+                    {
+                        _logger?.Log($"[crate] one broke on its own while {crate.Phase} on {crate.Pile} "
+                            + $"(would have paid: {crate.LootWhenFired}).");
+                    }
+
                     _crates.RemoveAt(index);
                     continue;
                 }
@@ -730,7 +741,7 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         /// <summary>Raise a crate off the pile to its hover point, hold it there a beat, then hand it to the arc.
         /// Returns nothing — a lift never resolves the crate; it becomes a flight, which the next tick advances.</summary>
-        private static void AdvanceLift(ManagedCrate crate, float deltaSeconds)
+        private void AdvanceLift(ManagedCrate crate, float deltaSeconds)
         {
             crate.Elapsed += deltaSeconds;
 
@@ -749,6 +760,8 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             // Fire: the arc starts from where the crate now hovers and ends at the scattered target chosen at lift.
+            // Only now is it the boss's throw, and only now can shooting it down pay.
+            SetLootAllowed(crate.Breakable, crate.LootWhenFired);
             crate.BeginFlight(crate.Hover, crate.Target, crate.FlightSeconds, crate.ApexHeight);
         }
 
@@ -780,13 +793,22 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return false;
             }
 
-            if (Physics.Raycast(from, delta / distance, out var hit, distance, mask, QueryTriggerInteraction.Ignore))
+            if (!Physics.Raycast(from, delta / distance, out var hit, distance, mask, QueryTriggerInteraction.Ignore))
             {
-                point = hit.point;
-                return true;
+                return false;
             }
 
-            return false;
+            // A surface facing downwards is a ceiling, and clipping one is our arc overshooting, not the crate
+            // flying into something. A cave's roof is part of the same shell as its walls, so the mask cannot tell
+            // them apart — but their facing can. Without this a volley thrown from the high pile burst in mid-air
+            // on the way up, which read as crates exploding for no reason.
+            if (hit.normal.y < CeilingFacing)
+            {
+                return false;
+            }
+
+            point = hit.point;
+            return true;
         }
 
         /// <summary>The physics layer mask of the arena's solid walls and props — built once from the game's own
@@ -1438,6 +1460,10 @@ namespace FalseGods.Integration.Sulfur.Combat
             /// <summary>Which heap this crate belongs to while it rests, and therefore whether the boss may fire
             /// it. Meaningless once it is in the air — it is nobody's pile then, and it never rests again.</summary>
             public CratePileId Pile { get; set; }
+
+            /// <summary>Whether shooting this crate down will pay, once it has actually been thrown. Decided when
+            /// it is lifted and granted when it is released, so the telegraph never pays.</summary>
+            public bool LootWhenFired { get; set; }
 
             /// <summary>Time spent in the current phase's motion; reset when a phase begins.</summary>
             public float Elapsed { get; set; }

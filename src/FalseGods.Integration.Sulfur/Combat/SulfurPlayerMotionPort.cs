@@ -74,13 +74,13 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var controller = player.movement;
                 if (controller == null)
                 {
-                    into.Add(new PlayerAim(player.playerIndex, ground, SimVector2.Zero, false));
+                    into.Add(new PlayerAim(player.playerIndex, ground, position.y, SimVector2.Zero, false));
                     continue;
                 }
 
                 var velocity = controller.GetVelocity();
                 into.Add(new PlayerAim(
-                    player.playerIndex, ground, new SimVector2(velocity.x, velocity.z), true));
+                    player.playerIndex, ground, position.y, new SimVector2(velocity.x, velocity.z), true));
             }
         }
     }

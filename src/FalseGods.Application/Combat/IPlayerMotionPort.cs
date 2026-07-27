@@ -15,10 +15,11 @@ namespace FalseGods.Application.Combat
     /// </remarks>
     public readonly struct PlayerAim
     {
-        public PlayerAim(int index, SimVector2 position, SimVector2 velocity, bool velocityKnown)
+        public PlayerAim(int index, SimVector2 position, float height, SimVector2 velocity, bool velocityKnown)
         {
             Index = index;
             Position = position;
+            Height = height;
             Velocity = velocity;
             VelocityKnown = velocityKnown;
         }
@@ -26,6 +27,14 @@ namespace FalseGods.Application.Combat
         public int Index { get; }
 
         public SimVector2 Position { get; }
+
+        /// <summary>The height this player is standing at — their feet, not the ground under the boss.</summary>
+        /// <remarks>
+        /// Carried per player because a room with terraces has players at different heights, and a throw aimed at
+        /// one height for everybody lands short of whoever climbed. The ground plane is where the fight is
+        /// reasoned about; this rides along as placement, exactly as a boss anchor's height does.
+        /// </remarks>
+        public float Height { get; }
 
         /// <summary>Meaningful only when <see cref="VelocityKnown"/>.</summary>
         public SimVector2 Velocity { get; }

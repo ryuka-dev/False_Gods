@@ -720,13 +720,11 @@ namespace FalseGods.Plugin
             var hold = SeededRandom.Range(seed, VolleyHoldSalt, VolleyHoldMin, VolleyHoldMax);
 
             // A crate's whole airtime is fixed by the shape, not the distance, so the lead is a single step: aim
-            // where the player will be after they rise, hover, and fly. The foot height comes from the camera; only
-            // the ground position is led.
+            // where each player will be after the crates rise, hover, and fly. Only the ground position is led;
+            // each aim keeps the height its own player is standing at.
             var airtime = (VolleyLiftSeconds + hold + VolleyFlightSeconds) * VolleyLeadFraction;
-            var eye = camera.transform.position;
-            var footY = eye.y - LocalEncounterController.EyeToFootDrop;
 
-            var aims = BuildVolleyAims(airtime, footY);
+            var aims = BuildVolleyAims(airtime);
             if (aims.Count == 0)
             {
                 _log.Log("[crate] nobody to throw at — every player is down or out of the level.");
@@ -767,7 +765,7 @@ namespace FalseGods.Plugin
         /// position move — one smoothed tracker per player, for the same reason the local one is smoothed: a
         /// jitter must not fling the lead across the arena.</para>
         /// </remarks>
-        private List<CrateVolleyAim> BuildVolleyAims(float airtime, float footY)
+        private List<CrateVolleyAim> BuildVolleyAims(float airtime)
         {
             _playerMotion.ReadPlayersToThrowAt(_playersToThrowAt);
 
@@ -780,10 +778,12 @@ namespace FalseGods.Plugin
                     continue; // seen for the first time this frame; it is aimed at from the next volley on
                 }
 
+                // Each player's OWN height: a room with terraces has them standing at different levels, and one
+                // height for everybody threw short of whoever had climbed.
                 var lead = LeadAim.Predict(player.Position, tracked.SmoothedVelocity, airtime);
                 _volleyAims.Add(new CrateVolleyAim(
-                    new ArenaWorldPoint(player.Position.X, footY, player.Position.Z),
-                    new ArenaWorldPoint(lead.X, footY, lead.Z)));
+                    new ArenaWorldPoint(player.Position.X, player.Height, player.Position.Z),
+                    new ArenaWorldPoint(lead.X, player.Height, lead.Z)));
             }
 
             return _volleyAims;
