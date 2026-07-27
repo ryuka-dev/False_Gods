@@ -46,7 +46,8 @@ namespace FalseGods.ProtocolTests
                 HoldSeconds: 0.83f,
                 FlightSeconds: 1.2f,
                 ApexHeight: 4f,
-                LeadShare: 0.5f);
+                LeadShare: 0.5f,
+                FireIntervalSeconds: 0.333f);
 
             Assert.Equal(original, WireCodec.DeserializeCrateVolleyFired(WireCodec.Serialize(original)));
         }

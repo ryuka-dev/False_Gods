@@ -91,6 +91,13 @@ namespace FalseGods.Plugin
         private const float VolleyFlightSeconds = 1.2f;
         private const float VolleyApex = 4f;
 
+        // Rate of fire: the crates rise together and are then released one at a time, so a volley is a barrage the
+        // player has to keep moving through rather than one instant they either are or are not standing in.
+        // Three a second is the opening rate; a later phase's boss is meant to fire faster, which is a thing the
+        // boss's attack design will choose once the volley belongs to the boss rather than to this key.
+        private const float VolleyCratesPerSecond = 3f;
+        private const float VolleyFireInterval = 1f / VolleyCratesPerSecond;
+
         // How much of a crate's airtime to lead the player by. 1.0 aims where the player would be if they held their
         // course for the whole flight; dialling it back softens the lead if the full prediction over-commits. Tuned
         // in-game together with the random telegraph above.
@@ -689,7 +696,8 @@ namespace FalseGods.Plugin
 
             var shape = new CrateVolleyShape(
                 seed, VolleyCount, VolleySpreadMin, VolleySpreadMax,
-                VolleyLiftHeight, VolleyLiftSeconds, hold, VolleyFlightSeconds, VolleyApex, VolleyLeadShare);
+                VolleyLiftHeight, VolleyLiftSeconds, hold, VolleyFlightSeconds, VolleyApex, VolleyLeadShare,
+                VolleyFireInterval);
 
             var launched = _crates.LaunchVolley(pile, currentCenter, leadCenter, shape);
             if (launched > 0)
@@ -698,7 +706,8 @@ namespace FalseGods.Plugin
                 // players dodge is the same volley rather than a description of one.
                 _crateFlow?.BroadcastVolley(pile, currentCenter, leadCenter, shape);
                 _log.Log($"[crate] volley of {launched} lifted off {pile}; {_crates.RestingOn(pile)} left there. "
-                    + $"Hold {hold:0.00}s; some aimed here ({current.X:0.0}, {current.Z:0.0}), "
+                    + $"Hold {hold:0.00}s, then {VolleyCratesPerSecond:0.#}/s for {launched * VolleyFireInterval:0.00}s; "
+                    + $"some aimed here ({current.X:0.0}, {current.Z:0.0}), "
                     + $"some led {airtime:0.00}s to ({lead.X:0.0}, {lead.Z:0.0}). Shoot them for loot.");
             }
             else

@@ -20,7 +20,8 @@ namespace FalseGods.Application.Combat
             float holdSeconds,
             float flightSeconds,
             float apexHeight,
-            float leadShare)
+            float leadShare,
+            float fireIntervalSeconds = 0f)
         {
             Seed = seed;
             Count = count;
@@ -32,6 +33,7 @@ namespace FalseGods.Application.Combat
             FlightSeconds = flightSeconds;
             ApexHeight = apexHeight;
             LeadShare = leadShare;
+            FireIntervalSeconds = fireIntervalSeconds;
         }
 
         /// <summary>Seeds the scatter pattern; the same seed lays the crates out the same way on every peer.</summary>
@@ -69,5 +71,19 @@ namespace FalseGods.Application.Combat
         /// 1 always does.
         /// </summary>
         public float LeadShare { get; }
+
+        /// <summary>
+        /// Seconds between one crate leaving the hover and the next — the volley's <i>rate of fire</i>. Zero flings
+        /// the whole hover at once, which is one loud moment the player either is or is not standing in; a positive
+        /// interval turns the same crates into a barrage that has to be kept moving through, and makes "three a
+        /// second" or "six a second" a thing the boss can be given rather than a thing the count implies.
+        /// </summary>
+        /// <remarks>
+        /// The crates all rise together and hover as one telegraph; only their release is staggered. A consequence
+        /// worth knowing: the volley's lead is aimed once, for the whole barrage, so crates released later are led
+        /// from a slightly older reading. That is a spread in aim as well as in time, which suits an attack whose
+        /// point is that no single movement dodges all of it.
+        /// </remarks>
+        public float FireIntervalSeconds { get; }
     }
 }

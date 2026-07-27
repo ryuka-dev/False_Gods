@@ -429,7 +429,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var target = new Vector3(center.X + offset.X, center.Y, center.Z + offset.Z);
 
                 var from = crate.Unit.transform.position;
-                crate.BeginLift(from, from + Vector3.up * shape.LiftHeight, target, shape);
+                crate.BeginLift(from, from + Vector3.up * shape.LiftHeight, target, shape, index);
 
                 // We drive it from here on, so it leaves the physics engine's hands — and, like a thrown crate, it
                 // must not shatter on contact or on its own speed while we carry it.
@@ -1113,13 +1113,19 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             /// <summary>Enter the lifting phase: the rise off the pile, remembering the scattered
             /// <paramref name="target"/> the crate will be fired at once it has lifted and held.</summary>
-            public void BeginLift(Vector3 liftFrom, Vector3 hover, Vector3 target, CrateVolleyShape shape)
+            /// <param name="place">This crate's place in the volley, which is how long past the shared telegraph
+            /// it waits before being released — the whole hover rises together and is then fired at the shape's
+            /// rate rather than all in one instant.</param>
+            public void BeginLift(Vector3 liftFrom, Vector3 hover, Vector3 target, CrateVolleyShape shape, int place)
             {
                 LiftFrom = liftFrom;
                 Hover = hover;
                 Target = target;
                 LiftSeconds = shape.LiftSeconds > 0f ? shape.LiftSeconds : 0.01f;
-                HoldSeconds = shape.HoldSeconds > 0f ? shape.HoldSeconds : 0f;
+
+                var stagger = shape.FireIntervalSeconds > 0f ? shape.FireIntervalSeconds * place : 0f;
+                var hold = (shape.HoldSeconds > 0f ? shape.HoldSeconds : 0f) + stagger;
+                HoldSeconds = hold;
                 FlightSeconds = shape.FlightSeconds > 0f ? shape.FlightSeconds : 0.01f;
                 ApexHeight = shape.ApexHeight;
                 Elapsed = 0f;

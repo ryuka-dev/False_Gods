@@ -116,9 +116,11 @@ namespace FalseGods.Core.Bosses.Combat
 
                 if (resting >= _shape.SourceCapacity)
                 {
-                    // Full: hold the clock at the ready mark rather than letting it bank, so clearing a long-full
-                    // point yields one crate and then the ordinary wait.
-                    _sinceProduced[source] = _shape.SecondsPerCrate;
+                    // Full: the clock restarts rather than waiting poised at the ready mark. Holding it there made
+                    // a full point refill the instant anything was broken off it, so shooting a crate off a full
+                    // pile achieved nothing — measured in game, and the reason breaking one must now cost the
+                    // room a whole interval.
+                    _sinceProduced[source] = 0f;
                     continue;
                 }
 

@@ -50,21 +50,21 @@ namespace FalseGods.CoreTests
         }
 
         [Fact]
-        public void Clearing_a_long_full_point_yields_one_crate_not_the_whole_backlog()
+        public void Breaking_a_crate_off_a_full_point_costs_the_room_a_whole_interval()
         {
             var line = new SupplyLine(Shape, sourceCount: 1);
 
-            // Full and ignored for a long time: the clock must not bank all of it.
+            // Sat full and untouched for a long time: no backlog is banked while it waits.
             line.Advance(600f, new[] { Shape.SourceCapacity });
             Assert.Empty(line.DrainProductionRequests());
 
-            // A player clears the pile. One crate comes immediately, because the point was already due...
-            line.Advance(0.1f, Empty(1));
-            Assert.Equal(new[] { 0 }, line.DrainProductionRequests());
-
-            // ...and then the ordinary wait resumes rather than another burst.
-            line.Advance(0.1f, Empty(1));
+            // A player breaks one off it. That must not refill instantly — otherwise the shot achieved nothing.
+            line.Advance(0.1f, new[] { Shape.SourceCapacity - 1 });
             Assert.Empty(line.DrainProductionRequests());
+
+            // It comes back only after the ordinary wait.
+            line.Advance(Shape.SecondsPerCrate, new[] { Shape.SourceCapacity - 1 });
+            Assert.Equal(new[] { 0 }, line.DrainProductionRequests());
         }
 
         [Fact]

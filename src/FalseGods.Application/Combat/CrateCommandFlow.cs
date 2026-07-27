@@ -32,6 +32,10 @@ namespace FalseGods.Application.Combat
         /// destructibles. Far above any volley the boss actually fires.</summary>
         public const int MaxVolleyCount = 64;
 
+        /// <summary>A ceiling on the gap between two crates of one barrage, so a forged command cannot leave the
+        /// pile hanging in the air indefinitely. Far above any rate the boss actually fires at.</summary>
+        public const float MaxFireIntervalSeconds = 5f;
+
         private readonly IEncounterChannel _channel;
         private readonly IMultiplayerSession _session;
 
@@ -96,7 +100,8 @@ namespace FalseGods.Application.Combat
                 shape.HoldSeconds,
                 shape.FlightSeconds,
                 shape.ApexHeight,
-                shape.LeadShare)));
+                shape.LeadShare,
+                shape.FireIntervalSeconds)));
         }
 
         private bool IsHosting => _session.IsActive && _session.Role == SessionRole.Host;
@@ -152,7 +157,8 @@ namespace FalseGods.Application.Combat
                             volley.HoldSeconds,
                             volley.FlightSeconds,
                             volley.ApexHeight,
-                            volley.LeadShare));
+                            volley.LeadShare,
+                            volley.FireIntervalSeconds));
                     break;
             }
         }
@@ -174,7 +180,12 @@ namespace FalseGods.Application.Combat
             && IsFinite(v.ApexHeight)
             && IsFinite(v.LeadShare)
             && v.LeadShare >= 0f
-            && v.LeadShare <= 1f;
+            && v.LeadShare <= 1f
+            && IsFinite(v.FireIntervalSeconds)
+            && v.FireIntervalSeconds >= 0f
+            // A barrage cannot outlast the fight: the last crate waits Count * interval, so a forged command
+            // cannot park the whole pile in the air for an hour.
+            && v.FireIntervalSeconds <= MaxFireIntervalSeconds;
 
         private static bool IsPositive(float value) => IsFinite(value) && value > 0f;
 

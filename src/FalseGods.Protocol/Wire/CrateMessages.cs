@@ -52,5 +52,6 @@ namespace FalseGods.Protocol.Wire
         float HoldSeconds,
         float FlightSeconds,
         float ApexHeight,
-        float LeadShare);
+        float LeadShare,
+        float FireIntervalSeconds);
 }

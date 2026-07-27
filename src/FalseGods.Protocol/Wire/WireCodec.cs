@@ -294,6 +294,7 @@ namespace FalseGods.Protocol.Wire
             w.WriteSingle(message.FlightSeconds);
             w.WriteSingle(message.ApexHeight);
             w.WriteSingle(message.LeadShare);
+            w.WriteSingle(message.FireIntervalSeconds);
             return w.ToArray();
         }
 
@@ -307,6 +308,7 @@ namespace FalseGods.Protocol.Wire
                 r.ReadInt32(),
                 r.ReadInt32(),
                 r.ReadInt32(),
+                r.ReadSingle(),
                 r.ReadSingle(),
                 r.ReadSingle(),
                 r.ReadSingle(),
