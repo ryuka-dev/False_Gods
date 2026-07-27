@@ -31,7 +31,7 @@ namespace FalseGods.Probe
     {
         public const string PluginGuid = "ryuka_labs.falsegods.probe";
         public const string PluginName = "False Gods Probe";
-        public const string PluginVersion = "0.28.0";
+        public const string PluginVersion = "0.29.0";
 
         private ConfigEntry<bool> _runAfterEachScan;
         private ConfigEntry<Key> _hotkey;
@@ -45,6 +45,9 @@ namespace FalseGods.Probe
         private ConfigEntry<Key> _navTeardownHotkey;
         private ConfigEntry<Key> _arenaContentHotkey;
         private ConfigEntry<Key> _matSelectorHotkey;
+        private ConfigEntry<Key> _propSurveyHotkey;
+        private ConfigEntry<string> _propSurveyRoom;
+        private ConfigEntry<string> _propSurveyFragment;
         private ConfigEntry<Key> _p9Hotkey;
         private ConfigEntry<P9ClientMode> _p9ClientMode;
         private ConfigEntry<float> _p9TimeoutSeconds;
@@ -179,6 +182,23 @@ namespace FalseGods.Probe
                 + "graph and no game state; releases every Addressables handle. Bound to ';' (F4-F12, '-', '=', "
                 + "'[', ']', '\\' are taken).");
 
+            _propSurveyHotkey = Config.Bind("Probe", "PropSurveyHotkey", Key.Quote,
+                "Vanilla PROP survey (READ-ONLY): stand in the level that uses the donor room and press it. It "
+                + "finds that room's RUNTIME addressable key two ways (a live-catalog path search, and the GUIDs on "
+                + "the loaded LevelBlocks' room lists — the export's meta GUIDs are NOT the game's keys), then dumps "
+                + "every object in the room whose name carries PropSurveyFragment: its path from the room root (the "
+                + "clone selector), local transform, layer, components, and its subtree. Loads prefabs without "
+                + "instantiating them and releases every handle; touches no nav graph and no game state. Bound to "
+                + "''' (F4-F12, '-', '=', '[', ']', '\\', ';' are taken).");
+
+            _propSurveyRoom = Config.Bind("Probe", "PropSurveyRoom", "CaveCousinNew",
+                "Vanilla prop survey: the donor room prefab's NAME (not a GUID — the whole point is to discover "
+                + "its runtime key). Default is the vanilla cave boss room, which holds the sludge pools.");
+
+            _propSurveyFragment = Config.Bind("Probe", "PropSurveyFragment", "CousinSludgePool",
+                "Vanilla prop survey: objects inside the donor room whose name CONTAINS this fragment are dumped "
+                + "in full. Widen it (e.g. 'Pool', 'Mushroom') when the exact authored name is not known yet.");
+
             _p9Hotkey = Config.Bind("Probe", "P9Hotkey", Key.LeftBracket,
                 "P9 host+client arena parity over the SULFUR Together public bridge (NetExternalChannel / "
                 + "NetSessionInfo — no reflection). Needs the bridge-enabled ST on BOTH instances, one hosting and "
@@ -251,6 +271,8 @@ namespace FalseGods.Probe
                               $"P8 arena-content hotkey: {_arenaContentHotkey.Value} " +
                               $"(fight+leave: {_p8RunFightAndLeave.Value}). " +
                               $"P1a material-selector hotkey: {_matSelectorHotkey.Value}. " +
+                              $"Vanilla prop survey hotkey: {_propSurveyHotkey.Value} " +
+                              $"(room: {_propSurveyRoom.Value}, prop: {_propSurveyFragment.Value}). " +
                               $"P9 host+client hotkey: {_p9Hotkey.Value} " +
                               $"(client mode: {_p9ClientMode.Value}, timeout: {_p9TimeoutSeconds.Value}s). " +
                               $"B0 boss hotkey: {_bossHotkey.Value} (damage: {_bossDamageHotkey.Value}, " +
@@ -356,6 +378,12 @@ namespace FalseGods.Probe
             if (HotkeyPressed(_matSelectorHotkey.Value))
             {
                 StartCoroutine(RunVanillaMaterial());
+                return;
+            }
+
+            if (HotkeyPressed(_propSurveyHotkey.Value))
+            {
+                StartCoroutine(RunVanillaProp());
                 return;
             }
 
@@ -788,6 +816,36 @@ namespace FalseGods.Probe
             catch (Exception exception)
             {
                 Logger.LogError($"Could not write P1a report: {exception}");
+            }
+
+            _running = false;
+        }
+
+        /// <summary>
+        /// Vanilla prop survey: discover a donor room's runtime addressable key and the exact selector, layer and
+        /// component inventory of the props inside it — the discovery step before cloning vanilla scenery into our
+        /// arena. Read-only, exactly like P1a: loads prefabs without instantiating them and releases every handle.
+        /// A fresh <see cref="VanillaPropProbe"/> per run. Shares the _running guard.
+        /// </summary>
+        private IEnumerator RunVanillaProp()
+        {
+            _running = true;
+
+            var report = new ProbeReport(Logger);
+            report.Line("False Gods — probe (vanilla prop survey: donor room key + clone selector)");
+            report.Line($"utc:     {DateTime.UtcNow:O}");
+            report.Line(new string('═', 78));
+
+            yield return new VanillaPropProbe(_propSurveyRoom.Value, _propSurveyFragment.Value).Run(report);
+
+            try
+            {
+                var path = report.WriteToDisk();
+                Logger.LogMessage($"Vanilla prop survey done. Report: {path}");
+            }
+            catch (Exception exception)
+            {
+                Logger.LogError($"Could not write the vanilla prop report: {exception}");
             }
 
             _running = false;
