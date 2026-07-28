@@ -29,7 +29,14 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// Set the current level's fog distances, keeping its own fog colour. Returns false (and changes nothing)
         /// when the game's managers are not up, so a fog tweak can never be the reason a level fails to load.
         /// </summary>
-        public static bool TryApply(float startDistance, float endDistance, ILogger logger = null)
+        /// <param name="lerpSeconds">
+        /// How long the change should take. Zero is immediate. <b>The game animates this itself</b> — the effects
+        /// manager keeps the start and target values and interpolates both distances (and the colour) across its
+        /// own update on unscaled time — so a room opening out over several seconds needs nothing of ours driving
+        /// it frame by frame.
+        /// </param>
+        public static bool TryApply(
+            float startDistance, float endDistance, ILogger logger = null, float lerpSeconds = 0f)
         {
             if (endDistance <= 0f || endDistance <= startDistance)
             {
@@ -51,10 +58,12 @@ namespace FalseGods.Integration.Sulfur.Arena
                 var wasStart = RenderSettings.fogStartDistance;
                 var wasEnd = RenderSettings.fogEndDistance;
 
-                effects.RequestFogValues(gameManager.currentEnvironment.fogColor, startDistance, endDistance);
+                effects.RequestFogValues(
+                    gameManager.currentEnvironment.fogColor, startDistance, endDistance, lerpSeconds);
 
-                logger?.Log($"[fog] level fog range {wasStart:0.#}..{wasEnd:0.#} -> {startDistance:0.#}..{endDistance:0.#} "
-                    + "(the level's own fog colour is kept).");
+                var over = lerpSeconds > 0f ? $" over {lerpSeconds:0.#}s" : string.Empty;
+                logger?.Log($"[fog] level fog range {wasStart:0.#}..{wasEnd:0.#} -> {startDistance:0.#}..{endDistance:0.#}"
+                    + $"{over} (the level's own fog colour is kept).");
                 return true;
             }
             catch (Exception exception)
