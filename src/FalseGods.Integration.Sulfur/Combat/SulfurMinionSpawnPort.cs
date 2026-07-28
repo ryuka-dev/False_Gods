@@ -59,6 +59,16 @@ namespace FalseGods.Integration.Sulfur.Combat
         // renderers may already be gone, and an entry left in that list outlives the fight.
         private readonly Dictionary<Unit, Renderer[]> _outlines = new Dictionary<Unit, Renderer[]>();
 
+        /// <summary>The unit shader's own highlight overlay. Named here rather than inline so the one place to
+        /// change is obvious if it reads badly in game — it is a shader-graph property, so what it looks like can
+        /// only be judged by looking.</summary>
+        private const string HighlightEnabled = "_Holo_Enabled";
+        private const string HighlightColour = "_Holo_Color";
+        private const string HighlightTime = "_Holo_Unscaled_Time";
+
+        /// <summary>What "kill this one first" looks like. Warm and bright against a cave.</summary>
+        private static readonly Color PriorityColour = new Color(1f, 0.45f, 0.15f, 1f);
+
         /// <param name="host">The behaviour whose lifetime scopes the asynchronous load — the game cancels the
         /// spawn if it is destroyed first, which is exactly the behaviour we want on a plugin unload.</param>
         /// <param name="outlined">Whether these minions are drawn with the game's own outline, the one the church
@@ -210,6 +220,51 @@ namespace FalseGods.Integration.Sulfur.Combat
             catch (Exception exception)
             {
                 _logger?.LogWarning($"[minion] one could not be outlined ({exception.Message}); it fights unmarked.");
+            }
+
+            Highlight(unit);
+        }
+
+        /// <summary>
+        /// Light the creature itself up, so it is marked when looked at and not only when something is in the way.
+        /// </summary>
+        /// <remarks>
+        /// <para>The game's outline is an <i>occlusion</i> cue — it draws the silhouette that a wall is hiding.
+        /// That is exactly right for finding furniture through a building and exactly wrong on its own here: these
+        /// enemies are usually in plain sight, and in plain sight the outline has nothing to draw. Worse, they are
+        /// camera-facing cutouts rather than solid meshes, so an outline grown along the surface's normals comes
+        /// out behind the picture it was meant to ring.</para>
+        /// <para>So the marking is on the creature: the shader the game gives its units carries a highlight overlay
+        /// of its own, and it is turned on here with a colour. The material is instanced first — writing the shared
+        /// one would light up every goblin of that kind in the level, including the ones nobody has to kill.</para>
+        /// </remarks>
+        private void Highlight(Unit unit)
+        {
+            try
+            {
+                if (!_outlines.TryGetValue(unit, out var renderers))
+                {
+                    return;
+                }
+
+                foreach (var renderer in renderers)
+                {
+                    if (renderer == null)
+                    {
+                        continue;
+                    }
+
+                    // .material, not .sharedMaterial: this creature's own copy, which dies with it. Writing the
+                    // shared one would light up every goblin of that kind in the level.
+                    var material = renderer.material;
+                    material.SetFloat(HighlightEnabled, 1f);
+                    material.SetColor(HighlightColour, PriorityColour);
+                    material.SetFloat(HighlightTime, Time.unscaledTime);
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[minion] one could not be lit up ({exception.Message}); it fights unmarked.");
             }
         }
 
