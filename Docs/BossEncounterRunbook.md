@@ -265,6 +265,28 @@ on it — the ceiling material is `CaveCeilingOther`, and it uses the texture na
 Tilings differ per material and must be matched in the authoring tool's preview or the UVs will be authored
 against the wrong density: **walls 0.33, floor 0.35, ceiling 0.3**.
 
+### 2.8 What an opening is made of
+
+*How to re-take: decompile `EffectsManager`, `MusicTrigger` and `MusicPlayer` from the live install; read the
+room prefab out of an AssetRipper export.*
+
+- **The fog animates itself.** `EffectsManager.RequestFogValues(colour, start, cutoff, lerpTime)` keeps the
+  current values as a start and the arguments as a target, and interpolates colour and both distances across its
+  own update on **unscaled** time. A room that opens out over several seconds is one call, not a coroutine.
+- **The cave boss's battle music is not on the cave boss.** `Unit_Boss_Goblin_Cousin_Base.prefab` carries no
+  `MusicTrigger` at all — measured by listing its components. The trigger is on the boss instance **inside
+  `CaveCousinNew`**, the same donor room this arena borrows its scenery from, and names
+  `Music_Playlist_Boss_Cousin`. `CousinHelper.PlayBossMusic()` reaches it with `GetComponent<MusicTrigger>()`
+  because the component only exists on the room's copy.
+- **A `MusicTrigger` can be told to start without being instantiated.** `StartMusic()` is three calls into
+  game-wide singletons (`AudioSettingsManager.SetSnapshot`, `MusicPlayer.SetPlaylist`, `StartPlaying`) plus two
+  serialized references; it never touches its own object. Instantiating the donor room to play music would put a
+  second cave boss in the arena.
+- **`MusicPlayer` is where the music lives** (`StaticInstance<MusicPlayer>`); `MusicTrigger` is a thin wrapper.
+  Ending a boss fight is `StopMusic(10f)` — the cave boss's own number, from `CousinHelper.EndBossMusic()`.
+- Playing the game's own playlist through the game's own player is what makes §3.14 hold for free: the mixer
+  snapshot and the player's music volume both apply, and the mod adds no audio setting.
+
 ---
 
 ## 3. Traps
