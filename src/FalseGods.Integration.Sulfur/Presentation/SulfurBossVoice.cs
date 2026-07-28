@@ -24,6 +24,13 @@ namespace FalseGods.Integration.Sulfur.Presentation
     /// <para><b>Reflection for exactly one field.</b> The helper's sound fields are private — the game plays them
     /// from its own animation events and never had a reason to expose them. Everything else here is compile-time
     /// typed against the game's own assemblies.</para>
+    /// <para><b>Played from an object standing where the boss is, which is not the same as played at the boss's
+    /// position.</b> The obvious call takes an owner and a position and looks like it needs no object of its own —
+    /// but the middleware treats the owner as where the voice <i>is</i> for the purpose of deciding whether anyone
+    /// is close enough to hear it, and this sound carries about twenty-five metres. Owned by a plugin object left
+    /// at the world origin, a roar from a boss thirty metres away was thrown away before it played. The game
+    /// itself never does this: it plays the roar from the boss's own transform. So we keep an object of our own
+    /// and move it to the boss first.</para>
     /// <para><b>Fetched ahead of time, and never waited for.</b> Loading a prefab is asynchronous, and a roar is a
     /// moment in a fight rather than a loading beat: the fetch is started when an encounter starts, and a roar that
     /// arrives before it lands is simply not heard. Silence is the failure mode throughout — a build that cannot
@@ -39,7 +46,7 @@ namespace FalseGods.Integration.Sulfur.Presentation
         /// <summary>The helper field the vanilla boss keeps its roar in, played from its own intro animation.</summary>
         private const string RoarFieldName = "roarSoundEvent";
 
-        private readonly Transform _owner;
+        private readonly Transform _mouth;
         private readonly ILogger? _logger;
 
         /// <summary>How many times to go looking before accepting that the sound is not there. Each rage that
@@ -50,12 +57,20 @@ namespace FalseGods.Integration.Sulfur.Presentation
         private bool _fetching;
         private int _attempts;
 
-        /// <param name="owner">The transform the sound is played under. Sonity uses it as the owner of the voice
-        /// rather than as its position, so anything with the plugin's lifetime does — the position is given per
-        /// roar.</param>
-        public SulfurBossVoice(Transform owner, ILogger? logger = null)
+        /// <param name="lifetime">What the voice's own object hangs from, so it lives and dies with the plugin
+        /// rather than with a level.</param>
+        public SulfurBossVoice(Transform lifetime, ILogger? logger = null)
         {
-            _owner = owner != null ? owner : throw new ArgumentNullException(nameof(owner));
+            if (lifetime == null)
+            {
+                throw new ArgumentNullException(nameof(lifetime));
+            }
+
+            // The boss's mouth: an object of our own that is moved to wherever the boss is before it is made to
+            // speak. See the note on the class about why the sound is not simply played at a position.
+            var mouth = new GameObject("FalseGodsBossVoice");
+            mouth.transform.SetParent(lifetime, worldPositionStays: false);
+            _mouth = mouth.transform;
             _logger = logger;
         }
 
@@ -72,7 +87,8 @@ namespace FalseGods.Integration.Sulfur.Presentation
 
             try
             {
-                roar.PlayAtPosition(_owner, new Vector3(at.X, at.Y, at.Z));
+                _mouth.position = new Vector3(at.X, at.Y, at.Z);
+                roar.Play(_mouth);
             }
             catch (Exception exception)
             {
