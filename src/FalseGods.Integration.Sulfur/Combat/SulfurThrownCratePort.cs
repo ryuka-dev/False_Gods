@@ -1,4 +1,4 @@
-// Heavy Unity / game-type interop (none of those APIs carry nullable annotations), so this file opts out of
+﻿// Heavy Unity / game-type interop (none of those APIs carry nullable annotations), so this file opts out of
 // the nullable-reference context like the other game-facing implementations.
 #nullable disable
 
@@ -128,6 +128,20 @@ namespace FalseGods.Integration.Sulfur.Combat
         private readonly List<DestructibleTemplate> _templates = new List<DestructibleTemplate>();
         private bool _prepared;
         private int _nextKind;
+
+        // Counts the destructibles this peer has made, so each gets the number its twin has on every other peer.
+        // Never reset while a session runs: the peers' counters only agree because they count the same commands.
+        private int _cratesMade;
+
+        // True while a destruction that arrived from another peer is being carried out, so applying it does not
+        // report it straight back out again.
+        private bool _applyingRemoteDeath;
+
+        // Crates this peer reported the death of. A host's answer to a client's request comes back to the client
+        // that asked, naming a crate it has already destroyed — expected, and told apart here from the one thing
+        // worth noticing: a destruction naming a crate this peer never had, which is the two peers' piles having
+        // drifted apart.
+        private readonly HashSet<int> _reportedDeaths = new HashSet<int>();
         private FieldInfo _preventDroppingLoot;
         private bool _warnedAboutLootFlag;
         private int _wallMask;
@@ -423,7 +437,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // Thrown at somebody, so it can pay — on the same odds as a crate out of a volley.
                 SetLootAllowed(breakable, SeededRandom.Unit01(_nextThrowSeed++, LootSalt) < LootChance);
 
-                var crate = new ManagedCrate(unit, breakable);
+                var crate = new ManagedCrate(unit, breakable, NextCrateId());
                 crate.BeginFlight(start, target, flightSeconds, apexHeight);
                 _crates.Add(crate);
                 return true;
@@ -467,7 +481,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // to the pile it was dropped onto, which is what decides whether the boss may ever fire it.
                 // Standing on a pile it is worth nothing to shoot; only what the boss sends can pay.
                 SetLootAllowed(breakable, false);
-                _crates.Add(new ManagedCrate(unit, breakable) { Pile = pile });
+                _crates.Add(new ManagedCrate(unit, breakable, NextCrateId()) { Pile = pile });
                 if (pile.Kind == CratePileKind.Loose)
                 {
                     CapLooseCrates();
@@ -530,7 +544,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // On its way to a pile, so worth nothing to shoot — the same rule as one already standing there.
                 SetLootAllowed(breakable, false);
 
-                var crate = new ManagedCrate(unit, breakable);
+                var crate = new ManagedCrate(unit, breakable, NextCrateId());
                 crate.BeginToss(start, new Vector3(to.X, to.Y, to.Z), flightSeconds, apexHeight, pile);
                 _crates.Add(crate);
                 return true;
@@ -621,6 +635,90 @@ namespace FalseGods.Integration.Sulfur.Combat
             return chosen.Count;
         }
 
+        /// <summary>The number the next destructible made here will carry.</summary>
+        private int NextCrateId() => ++_cratesMade;
+
+        /// <summary>
+        /// A destructible died in a way the other peers cannot work out for themselves — a player broke it, or it
+        /// burst on one. Everything else (a landing, a wall, a lift into a volley) follows the same arc from the
+        /// same seed everywhere and is already agreed on.
+        /// </summary>
+        /// <remarks>Set by the composition root, which knows whether this peer settles the shared world: a host
+        /// broadcasts what it saw, a client asks for it. Never raised while a destruction that arrived from
+        /// somewhere else is being carried out.</remarks>
+        public Action<int, CrateDeath> Died { get; set; }
+
+        /// <summary>
+        /// Carry out a destruction decided elsewhere: destroy the crate numbered <paramref name="crateId"/> the
+        /// way <paramref name="death"/> says. A number this peer does not have is nothing to do — piles settle
+        /// under physics rather than under the commands alone, so two peers can disagree about which crate a
+        /// carrier picked up, and destroying nothing is the right answer to that disagreement. Returns whether
+        /// anything was destroyed, which is the measurement of how often they disagree.
+        /// </summary>
+        public bool Destroy(int crateId, CrateDeath death)
+        {
+            for (var index = _crates.Count - 1; index >= 0; index--)
+            {
+                var crate = _crates[index];
+                if (crate.Id != crateId)
+                {
+                    continue;
+                }
+
+                _crates.RemoveAt(index);
+                if (crate.Unit == null)
+                {
+                    return false; // already gone here; the two peers agree, just not about when
+                }
+
+                _applyingRemoteDeath = true;
+                try
+                {
+                    if (death == CrateDeath.Shot)
+                    {
+                        BreakAsShot(crate);
+                    }
+                    else
+                    {
+                        BreakNoLoot(crate);
+                    }
+                }
+                finally
+                {
+                    _applyingRemoteDeath = false;
+                }
+
+                return true;
+            }
+
+            if (!_reportedDeaths.Remove(crateId))
+            {
+                // Not ours, and never here: the peers disagree about which crates they hold. Harmless in itself —
+                // there is nothing to destroy — but it is the tell that the piles have drifted, so it is said
+                // plainly rather than swallowed.
+                _logger?.LogWarning($"[crate] a destruction named crate {crateId}, which this peer never had.");
+            }
+
+            return false;
+        }
+
+        /// <summary>Say that a crate died in a way the peers have to be told about, unless we are carrying out
+        /// somebody else's word for it.</summary>
+        private void Report(ManagedCrate crate, CrateDeath death)
+        {
+            if (_applyingRemoteDeath)
+            {
+                return;
+            }
+
+            _reportedDeaths.Add(crate.Id);
+            try { Died?.Invoke(crate.Id, death); }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] a destruction could not be reported ({exception.Message}); skipped.");
+            }
+        }
+
         public void Advance(float deltaSeconds)
         {
             for (var index = _crates.Count - 1; index >= 0; index--)
@@ -630,9 +728,13 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // The game broke it without us asking: a player shot it, in whatever phase it was in. Ordinary,
                 // and already correct on its own — a crate that has not been thrown was never granted a payout,
                 // so shooting one off the pile costs the boss its ammunition and pays nothing.
+                // This is also the only place a player-caused break can be noticed: the shot goes through the
+                // game's own damage path, which destroys the object without telling us. Nobody else can work it
+                // out, so it is said out loud.
                 if (crate.Unit == null)
                 {
                     _crates.RemoveAt(index);
+                    Report(crate, CrateDeath.Shot);
                     continue;
                 }
 
@@ -690,11 +792,13 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                         crate.Unit.transform.position = to;
 
-                        // Reached a player's body in the air: detonate on them.
+                        // Reached a player's body in the air: detonate on them. Where a player is standing is the
+                        // other thing no peer can derive, so this one is said out loud too.
                         if (_impact != null && _impact.Contact(ToPoint(to)))
                         {
                             _crates.RemoveAt(index);
                             BreakNoLoot(crate);
+                            Report(crate, CrateDeath.Struck);
                         }
 
                         break;
@@ -1119,6 +1223,42 @@ namespace FalseGods.Integration.Sulfur.Combat
             BreakNoLoot(crate);
         }
 
+        /// <summary>
+        /// Break a crate the way a player's shot would have: the game's own break, with the loot rule left exactly
+        /// as the commands that made this crate left it.
+        /// </summary>
+        /// <remarks>
+        /// The rule is not decided here, and deliberately not carried on the wire either. Whether a particular
+        /// crate pays was settled when it was thrown, from the volley's seed — so every peer already set the same
+        /// flag on its own copy, and the peer that watched a player shoot it broke it under that same flag. Sending
+        /// the answer as well would be sending something both ends already agree on, with the added risk of
+        /// disagreeing.
+        /// <para>What the break then <i>does</i> is the session's business, not ours: with loot shared, a client's
+        /// roll is suppressed and the host's mirrors down; without, each peer rolls its own, exactly as it would
+        /// for any barrel in the game.</para>
+        /// </remarks>
+        private void BreakAsShot(ManagedCrate crate)
+        {
+            try
+            {
+                if (crate.Breakable != null)
+                {
+                    crate.Breakable.Break();
+                    return;
+                }
+
+                UnityEngine.Object.Destroy(crate.Unit.gameObject);
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] a crate could not be broken cleanly: {exception}");
+                if (crate.Unit != null)
+                {
+                    UnityEngine.Object.Destroy(crate.Unit.gameObject);
+                }
+            }
+        }
+
         /// <summary>Break a crate where it is — its real break, sound and debris — but without paying out loot.
         /// This is what both a quiet landing and a hit on a player do: only shooting a crate out of the air pays.</summary>
         private void BreakNoLoot(ManagedCrate crate)
@@ -1428,11 +1568,18 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </summary>
         private sealed class ManagedCrate
         {
-            public ManagedCrate(Unit unit, Breakable breakable)
+            public ManagedCrate(Unit unit, Breakable breakable, int id)
             {
                 Unit = unit;
                 Breakable = breakable;
+                Id = id;
             }
+
+            /// <summary>Which destructible this is, counted in the order they were made. Every peer makes the
+            /// same ones from the same commands in the same order, so the number means the same crate on all of
+            /// them — the identity a session layer matching by spawn position cannot have for crates that are all
+            /// heaped in the same few spots.</summary>
+            public int Id { get; }
 
             public Unit Unit { get; }
 

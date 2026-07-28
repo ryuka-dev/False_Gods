@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using FalseGods.Protocol.Wire;
 using Xunit;
@@ -46,7 +46,7 @@ namespace FalseGods.ProtocolTests
         [Fact]
         public void A_destruction_round_trips()
         {
-            var original = new CrateDestroyed(CrateId: 4242, Death: (int)CrateDeath.Struck);
+            var original = new CrateDestroyed(CrateId: 4242, Death: 1);
 
             Assert.Equal(original, WireCodec.DeserializeCrateDestroyed(WireCodec.Serialize(original)));
         }
@@ -54,7 +54,7 @@ namespace FalseGods.ProtocolTests
         [Fact]
         public void A_destruction_request_round_trips()
         {
-            var original = new CrateDestroyRequested(CrateId: 7, Death: (int)CrateDeath.Shot);
+            var original = new CrateDestroyRequested(CrateId: 7, Death: 0);
 
             Assert.Equal(original, WireCodec.DeserializeCrateDestroyRequested(WireCodec.Serialize(original)));
         }

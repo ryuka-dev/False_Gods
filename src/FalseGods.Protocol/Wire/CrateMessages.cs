@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace FalseGods.Protocol.Wire
 {
@@ -73,25 +73,6 @@ namespace FalseGods.Protocol.Wire
     /// </remarks>
     public sealed record CrateVolleyTarget(WorldPosition Current, WorldPosition Lead);
 
-    /// <summary>Why a destructible stopped existing, when that is something the peers have to be told.</summary>
-    /// <remarks>
-    /// Only deaths a <i>player</i> caused travel. The rest — a crate reaching its landing spot, one bursting
-    /// against a wall, one lifted into a volley — are decided by the same arc from the same seed on every peer,
-    /// so they have already happened identically everywhere and saying so would be repeating what both ends
-    /// already know. Where a player is standing and what they are shooting at is the one thing no peer can derive
-    /// from the commands it was sent.
-    /// </remarks>
-    public enum CrateDeath
-    {
-        /// <summary>A player broke it — shot it off a pile, or out of the air. Runs the game's own break, so the
-        /// loot follows whatever rules the session has for sharing it.</summary>
-        Shot = 0,
-
-        /// <summary>It reached a player in flight and burst on them. Breaks without paying: only shooting a crate
-        /// down pays.</summary>
-        Struck = 1,
-    }
-
     /// <summary>
     /// Host → all peers, reliable-ordered: the destructible numbered <see cref="CrateId"/> is gone, and how.
     /// </summary>
@@ -103,6 +84,9 @@ namespace FalseGods.Protocol.Wire
     /// commands alone, so two peers can disagree about which crate a carrier picked up; an unknown number is that
     /// disagreement showing, and destroying nothing is the right answer to it.</para>
     /// </remarks>
+    /// <param name="Death">How it died, as <c>CrateDeath</c>'s numbering. Like the pile, it travels as a plain
+    /// number rather than as the domain type: it arrives from another machine, so it is a claim to be checked
+    /// before it becomes a cause of death (Docs/DependencyRules.md §12).</param>
     public sealed record CrateDestroyed(int CrateId, int Death);
 
     /// <summary>

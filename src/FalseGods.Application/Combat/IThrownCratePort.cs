@@ -1,3 +1,4 @@
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Core.Bosses.Combat;
 using FalseGods.RuntimeContracts.Arena;
@@ -112,6 +113,28 @@ namespace FalseGods.Application.Combat
         /// keeps a long fight from silting up with abandoned cargo without anything having to vanish.
         /// </remarks>
         bool TryFindNearestResting(CratePileId pile, ArenaWorldPoint near, out ArenaWorldPoint at);
+
+        /// <summary>
+        /// A destructible died in a way the other peers cannot work out for themselves: a player broke it, or it
+        /// burst on one. Everything else — a landing, a wall, a lift into a volley — follows the same arc from the
+        /// same seed everywhere and is already agreed on without anybody saying anything.
+        /// </summary>
+        /// <remarks>Answered by whoever is composing this port, because what to do with it depends on who this
+        /// peer is: a host says so to everyone, a client asks the host to settle it. Never raised while carrying
+        /// out a destruction that arrived from somewhere else.</remarks>
+        Action<int, CrateDeath>? Died { get; set; }
+
+        /// <summary>
+        /// Carry out a destruction decided elsewhere: destroy the destructible numbered <paramref name="crateId"/>
+        /// the way <paramref name="death"/> says. Returns whether anything was destroyed.
+        /// </summary>
+        /// <remarks>
+        /// A number this peer does not have is nothing to do. The peers count the same crates from the same
+        /// commands, but piles settle under physics rather than under the commands alone, so they can disagree
+        /// about which of a heap a carrier picked up; destroying nothing is the right answer to that, and the
+        /// false return is how often it happens — worth watching rather than assuming.
+        /// </remarks>
+        bool Destroy(int crateId, CrateDeath death);
 
         /// <summary>Move every crate still in the air, and resolve the ones that have arrived or been broken.</summary>
         void Advance(float deltaSeconds);

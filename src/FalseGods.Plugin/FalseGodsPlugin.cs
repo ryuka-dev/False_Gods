@@ -242,6 +242,11 @@ namespace FalseGods.Plugin
                     CrateHitDamage, CrateContactRadius, CrateSplashRadius, CrateKnockbackSpeed, CrateKnockbackLift, _log));
             _crates = cratePort;
 
+            // A destructible that a player destroyed is the one thing about a crate the other peers cannot work
+            // out from the commands they were sent, so it is the one thing said out loud. Where it goes depends on
+            // who this peer is, which the flow knows; with no session there is nobody to tell.
+            cratePort.Died = (crateId, death) => _crateFlow?.ReportDestroyed(crateId, death);
+
             // Only ever used on a client: it puts the host's loads on the backs of the goblins this peer mirrored,
             // which the carry commands cannot do because they carry no idea of which goblin is which.
             _carriedLoads = new SulfurCarriedLoadMirror(cratePort, _log);
@@ -453,10 +458,30 @@ namespace FalseGods.Plugin
                         _log.Log($"[crate] host fired a volley of {shape.Count} off {pile} (seed {shape.Seed}) "
                             + $"spread over {aims.Count} player(s); {launched} lifted here.");
                     },
+                    OnDestroyed = (crateId, death) =>
+                    {
+                        var destroyed = _crates.Destroy(crateId, death);
+                        _log.Log($"[crate] host settled that crate {crateId} was {Describe(death)}; "
+                            + (destroyed ? "destroyed here too." : "this peer no longer had it."));
+                    },
+                    OnDestroyRequested = (crateId, death) =>
+                    {
+                        // A client saw one of its own crates destroyed. The host destroys the same one and then
+                        // says so to everyone, the client included: settled once, in the one place where the
+                        // session layer expects the loot to be rolled.
+                        var destroyed = _crates.Destroy(crateId, death);
+                        _crateFlow?.BroadcastDestroyed(crateId, death);
+                        _log.Log($"[crate] a client's player {Describe(death)} crate {crateId}; "
+                            + (destroyed ? "destroyed here and settled for everyone." : "the host no longer had it."));
+                    },
                 };
                 _crateFlowIntegration = integration;
             }
         }
+
+        /// <summary>How a destruction reads in the log, so the two peers' lines can be compared at a glance.</summary>
+        private static string Describe(CrateDeath death) =>
+            death == CrateDeath.Shot ? "shot" : "burst on a player";
 
         /// <summary>
         /// Declare this plugin a host-authoritative spawner for as long as an integration is live. The boss's

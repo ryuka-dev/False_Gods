@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Bosses.Combat;
@@ -72,6 +72,14 @@ namespace FalseGods.Application.Combat
 
         /// <summary>A load was set down or spilled on the host; lay the same ring out here.</summary>
         public Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int>? OnSetDown { get; set; }
+
+        /// <summary>The host settled that a destructible is gone; destroy the same one here, the same way.</summary>
+        public Action<int, CrateDeath>? OnDestroyed { get; set; }
+
+        /// <summary>Host only: a client's player destroyed one of its own destructibles and is asking for it to
+        /// count. The host destroys its own copy and broadcasts the result, which is what makes the loot roll on
+        /// the machine the session layer expects it to.</summary>
+        public Action<int, CrateDeath>? OnDestroyRequested { get; set; }
 
         public void Dispose() => _channel.Received -= OnReceived;
 
@@ -148,6 +156,46 @@ namespace FalseGods.Application.Combat
             }
         }
 
+        /// <summary>
+        /// A destructible died on this peer in a way the others cannot work out: settle it for everyone if this
+        /// peer settles the world, otherwise ask the host to. With no session there is nobody to tell.
+        /// </summary>
+        public void ReportDestroyed(int crateId, CrateDeath death)
+        {
+            if (IsHosting)
+            {
+                BroadcastDestroyed(crateId, death);
+            }
+            else
+            {
+                RequestDestroy(crateId, death);
+            }
+        }
+
+        /// <summary>Host: tell every client that a destructible is gone, and how it died.</summary>
+        public void BroadcastDestroyed(int crateId, CrateDeath death)
+        {
+            if (IsHosting)
+            {
+                Broadcast(EncounterCodec.Encode(new CrateDestroyed(crateId, (int)death)));
+            }
+        }
+
+        /// <summary>Client: ask the host to settle that this peer's player destroyed a destructible. A host or a
+        /// peer with no session sends nothing — it settles its own world.</summary>
+        public void RequestDestroy(int crateId, CrateDeath death)
+        {
+            if (!_session.IsActive || _session.Role == SessionRole.Host)
+            {
+                return;
+            }
+
+            _channel.Send(
+                EncounterCodec.Encode(new CrateDestroyRequested(crateId, (int)death)),
+                MessageDelivery.ReliableOrdered,
+                MessageTarget.Host);
+        }
+
         private bool IsHosting => _session.IsActive && _session.Role == SessionRole.Host;
 
         private void Broadcast(EncodedPayload payload) =>
@@ -155,19 +203,31 @@ namespace FalseGods.Application.Combat
 
         private void OnReceived(SessionPeerId sender, EncodedPayload payload)
         {
-            // Only the host decides what the world does; and a host never applies its own broadcast, having
-            // already done the thing it is describing.
-            if (sender != _session.HostPeer || IsHosting)
-            {
-                return;
-            }
-
             DecodedMessage message;
             try
             {
                 message = EncounterCodec.Decode(payload);
             }
             catch (Exception)
+            {
+                return;
+            }
+
+            // The one message that travels the other way: a client asking for a destruction it saw. Only a host
+            // reads it, and never from itself.
+            if (message.Value is CrateDestroyRequested request)
+            {
+                if (IsHosting && sender != _session.HostPeer && IsKnownDeath(request.Death))
+                {
+                    OnDestroyRequested?.Invoke(request.CrateId, (CrateDeath)request.Death);
+                }
+
+                return;
+            }
+
+            // Everything else is the host's word. A host never applies its own broadcast, having already done the
+            // thing it is describing.
+            if (sender != _session.HostPeer || IsHosting)
             {
                 return;
             }
@@ -192,6 +252,10 @@ namespace FalseGods.Application.Combat
                     && taken.Radius <= MaxPickUpReach
                     && CratePileId.TryFrom(taken.PileKind, taken.PileIndex, out var takenPile):
                     OnTaken?.Invoke(FromWire(taken.At), takenPile, taken.Count, taken.Radius);
+                    break;
+
+                case CrateDestroyed destroyed when IsKnownDeath(destroyed.Death):
+                    OnDestroyed?.Invoke(destroyed.CrateId, (CrateDeath)destroyed.Death);
                     break;
 
                 case CratesSetDown down when IsFinite(down.From)
@@ -277,6 +341,12 @@ namespace FalseGods.Application.Combat
 
             return true;
         }
+
+        /// <summary>Whether a reported cause of death is one this build knows. A number from another machine is a
+        /// claim, not a <see cref="CrateDeath"/>: an unknown one is dropped rather than cast into the enum, where
+        /// it would silently fall through to whichever branch happens to be the else.</summary>
+        private static bool IsKnownDeath(int death) =>
+            death == (int)CrateDeath.Shot || death == (int)CrateDeath.Struck;
 
         private static bool IsPositive(float value) => IsFinite(value) && value > 0f;
 
