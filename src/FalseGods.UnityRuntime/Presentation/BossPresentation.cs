@@ -146,6 +146,7 @@ namespace FalseGods.UnityRuntime.Presentation
         private float _phasePulseTimer;
         private float _appearPulseTimer;
         private float _roarTimer;
+        private bool _reportedFog;
         private bool _dead;
 
         private bool _telegraphActive;
@@ -695,35 +696,41 @@ namespace FalseGods.UnityRuntime.Presentation
         /// textured quad correctly is a sprite shader, and sprite shaders have no fog stage — so the boss stayed
         /// at full brightness in a room where every one of the game's own creatures dimmed with distance, which
         /// reads as the boss being pasted on top of the scene rather than standing in it.</para>
-        /// <para><b>The game's own numbers, applied per object instead of per pixel.</b> This is Unity's linear
-        /// fog worked out from the same <c>RenderSettings</c> the arena sets and the game drives, so the boss
-        /// dims on exactly the curve everything around it dims on. Per object is the approximation: a billboard
-        /// is one flat thing at one distance, so there is nothing across its face for a per-pixel fog to vary.
-        /// </para>
+        /// <para><b>The game's own numbers, applied per object instead of per pixel.</b> The distances and the
+        /// colour come from the same <c>RenderSettings</c> the game writes for every level and the arena writes
+        /// for itself, so the boss fades into the same darkness at the same range as the room around it. Per
+        /// object is the approximation: a billboard is one flat thing at one distance, so there is nothing across
+        /// its face for a per-pixel fog to vary.</para>
+        /// <para><b>Do not gate this on <c>RenderSettings.fog</c>.</b> Measured: that flag is <i>off</i> in this
+        /// game and the fog is still there — the creature shader reads the distances itself rather than letting
+        /// the engine do it, which is exactly why our sprite-shaded boss was the one thing in the room that never
+        /// dimmed. Reading the flag and believing it is what made the first attempt at this do nothing at all.
+        /// The distances are always the current level's, because the game sets them per level whether the engine's
+        /// own fog is switched on or not.</para>
         /// <para>Only the creature is fogged. The health bar deliberately is not — a bar you cannot read at the
         /// far side of the room is not telling you anything.</para>
         /// </remarks>
         private Color Fogged(Color color)
         {
-            if (!RenderSettings.fog)
-            {
-                return color;
-            }
-
             var camera = Camera.main;
-            if (camera == null)
-            {
-                return color;
-            }
-
             var start = RenderSettings.fogStartDistance;
             var end = RenderSettings.fogEndDistance;
-            if (end <= start)
+            var distance = camera != null
+                ? Vector3.Distance(camera.transform.position, _bodyBillboard.position)
+                : 0f;
+
+            if (camera == null || end <= start)
             {
                 return color;
             }
 
-            var distance = Vector3.Distance(camera.transform.position, _bodyBillboard.position);
+            if (!_reportedFog)
+            {
+                _reportedFog = true;
+                _logger?.Log($"[boss-fog] the level fades to {RenderSettings.fogColor} between {start:0.#}m and "
+                    + $"{end:0.#}m; the boss now fades with it.");
+            }
+
             var clear = Mathf.Clamp01((end - distance) / (end - start));
 
             // Alpha is the sprite's own cut-out and has nothing to do with distance; fogging it would dissolve the
