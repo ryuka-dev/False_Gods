@@ -1,4 +1,4 @@
-using FalseGods.Core.Simulation;
+﻿using FalseGods.Core.Simulation;
 using FalseGods.RuntimeContracts.Arena;
 
 namespace FalseGods.Application.Combat
@@ -11,8 +11,9 @@ namespace FalseGods.Application.Combat
     /// level happens to be — under a prop, on the floor beneath a pool, in a rock. The boss already stands
     /// somewhere the room authored for it, at a height the room authored for it, so taking the arm's place from
     /// the boss inherits both and needs to measure nothing.</para>
-    /// <para>The three offsets are boss design and are expected to be tuned; they are carried per call rather
-    /// than fixed in the adapter so the same port serves whatever a boss asks for.</para>
+    /// <para>The offsets and the size are boss design and are expected to be tuned; they are carried per call
+    /// rather than fixed in the adapter, so the same port serves whatever a boss asks for and a change reaches
+    /// arms that are already standing.</para>
     /// </remarks>
     /// <param name="BossAt">Where the boss is standing, in world space.</param>
     /// <param name="BossFacing">Which way it is facing on the ground plane; a zero vector means "not facing
@@ -21,12 +22,16 @@ namespace FalseGods.Application.Combat
     /// <param name="ForwardOffset">How far in front of it (negative is behind).</param>
     /// <param name="Lift">How far above the boss's own footing, so an arm can be sunk into the ground or raised
     /// out of it without moving the boss.</param>
+    /// <param name="Scale">How large the arm is drawn, against the size the game authored it at. A boss shown
+    /// larger than the one these arms were drawn for needs them enlarged to match, or they read as a different
+    /// creature's; a non-positive value leaves whatever size the game gave them.</param>
     public readonly record struct ArmPlacement(
         ArenaWorldPoint BossAt,
         SimVector2 BossFacing,
         float SideDistance,
         float ForwardOffset,
-        float Lift);
+        float Lift,
+        float Scale);
 
     /// <summary>
     /// The arms a starved boss puts up beside itself, which lob mud at everyone while it has nothing to throw.

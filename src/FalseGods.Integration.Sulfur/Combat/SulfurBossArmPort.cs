@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using FalseGods.Application.Combat;
 using PerfectRandom.Sulfur.Core;
@@ -18,7 +18,7 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// an animation event, and sinks again when the clip ends — so appearing, throwing and sinking are the game's,
     /// repeating for as long as it has someone to aim at. The tree is already running when the unit is spawned
     /// (<c>SpawnUnit</c> activates it), and its only condition is a target within the creature's own ranged attack
-    /// range (30 m, line of sight). So the whole of this class is <i>where</i>.</para>
+    /// range (30 m, line of sight). So the whole of this class is <i>where</i>, and <i>how big</i>.</para>
     /// <para><b>And where is the boss.</b> The creature has no navigation agent at all — it cannot take one step —
     /// so its position is set here every frame from the boss's own. Reading the level instead was measured to be
     /// wrong twice over: the arena's scenery is deliberately kept off the navigation layers, so snapping to
@@ -34,6 +34,20 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// </remarks>
     public sealed class SulfurBossArmPort : IBossArmPort
     {
+        /// <summary>
+        /// The child everything the creature draws hangs from, and therefore where it really is.
+        /// </summary>
+        /// <remarks>
+        /// <b>This prefab's origin is not where it stands.</b> Measured on v0.18.5: the whole rig sits about 2.45 m
+        /// along local X of the unit's own transform, while the references the game reads for its feet
+        /// (<c>FeetFlat</c>, <c>FeetPitched</c>) sit at the origin. So placing two arms symmetrically about the
+        /// boss puts their <i>origins</i> either side of it and every visible arm the same 2.45 m off — which is
+        /// exactly how it looked in game: two arms evenly spaced about a point that was not the boss. The offset is
+        /// read off the live object rather than written down here, so it survives the prefab changing and comes out
+        /// already multiplied by whatever scale the arm is wearing.
+        /// </remarks>
+        private const string ArtRootName = "Root";
+
         private readonly MonoBehaviour _host;
         private readonly ILogger? _logger;
         private readonly List<Unit> _raised = new List<Unit>();
@@ -44,6 +58,15 @@ namespace FalseGods.Integration.Sulfur.Combat
         // they were when it rose. An arm's station is decided when it is asked for, not when it lands, so a slow
         // load cannot put two on the same side.
         private readonly List<int> _stations = new List<int>();
+
+        // Each arm's art root, so the standing-point correction costs one transform read rather than a search.
+        // Null for an arm whose prefab has no such child: it is then placed by its origin, which is the old
+        // behaviour and visibly off, but not broken.
+        private readonly List<Transform?> _artRoots = new List<Transform?>();
+
+        // Where the arms were last told to be, so one that finishes loading after the others can be put in its
+        // place immediately rather than standing at its spawn point until the next frame.
+        private ArmPlacement _placement;
 
         // Which raising the arms in flight belong to. An arm is loaded asynchronously, so a rage that ends while
         // one is still on its way would otherwise leave it standing and throwing after the boss had calmed: the
@@ -82,33 +105,24 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return;
             }
 
+            _placement = placement;
             var generation = ++_generation;
             for (var i = 0; i < count; i++)
             {
-                RaiseOne(definition, PlaceOf(placement, i), i, generation);
+                RaiseOne(definition, StandingPoint(placement, i), i, generation);
             }
 
             _logger?.Log($"[arm] {count} arm(s) rising at the boss's sides ({placement.SideDistance:0.#}m out, "
-                + $"{placement.ForwardOffset:0.#}m forward, {placement.Lift:0.#}m up); they follow it until it is "
-                + "supplied again.");
+                + $"{placement.ForwardOffset:0.#}m forward, {placement.Lift:0.#}m up, {placement.Scale:0.##}x); "
+                + "they follow it until it is supplied again.");
         }
 
         public void Follow(ArmPlacement placement)
         {
-            if (_raised.Count == 0)
-            {
-                return;
-            }
-
+            _placement = placement;
             for (var i = 0; i < _raised.Count; i++)
             {
-                var arm = _raised[i];
-                if (arm == null)
-                {
-                    continue;
-                }
-
-                arm.transform.position = PlaceOf(placement, _stations[i]);
+                Put(_raised[i], _artRoots[i], _stations[i], placement);
             }
         }
 
@@ -135,12 +149,14 @@ namespace FalseGods.Integration.Sulfur.Combat
                 }
                 catch (Exception exception)
                 {
+                    // Routine while the game is shutting down: the managers Die() reports to are gone by then.
                     _logger?.LogWarning($"[arm] an arm could not be taken down ({exception.Message}); leaving it.");
                 }
             }
 
             _raised.Clear();
             _stations.Clear();
+            _artRoots.Clear();
             if (lowered > 0)
             {
                 _logger?.Log($"[arm] {lowered} arm(s) sink back into the ground.");
@@ -183,36 +199,72 @@ namespace FalseGods.Integration.Sulfur.Combat
                 _logger?.LogWarning($"[arm] an arm could not be made invulnerable ({exception.Message}).");
             }
 
+            var artRoot = FindArtRoot(unit);
             _raised.Add(unit);
             _stations.Add(station);
+            _artRoots.Add(artRoot);
+
+            // Put it where it belongs now rather than a frame late: a big arm dropped at its spawn point and
+            // corrected next frame is a visible jump.
+            Put(unit, artRoot, station, _placement);
         }
 
         /// <summary>
-        /// Where the arm holding station <paramref name="station"/> belongs, in the boss's own frame: right or
-        /// left in turn, stepping outwards, so two arms flank it and four make two ranks.
+        /// Size an arm and stand it at its station, correcting for the fact that this creature is not drawn at its
+        /// own origin.
+        /// </summary>
+        /// <remarks>
+        /// <para>The scale goes on first, because the art offset that follows has to be read at the size the arm
+        /// is actually wearing — scaling the rig scales how far off-origin it is drawn.</para>
+        /// <para>Only the horizontal part of the offset is taken out. The vertical belongs to how deep in the
+        /// ground the creature should sit, which is what the placement's lift is for and is set by eye.</para>
+        /// </remarks>
+        private static void Put(Unit? arm, Transform? artRoot, int station, ArmPlacement placement)
+        {
+            if (arm == null)
+            {
+                return;
+            }
+
+            var transform = arm.transform;
+            if (placement.Scale > 0f)
+            {
+                transform.localScale = new Vector3(placement.Scale, placement.Scale, placement.Scale);
+            }
+
+            var drift = Vector3.zero;
+            if (artRoot != null)
+            {
+                drift = artRoot.position - transform.position;
+                drift.y = 0f;
+            }
+
+            transform.position = StandingPoint(placement, station) - drift;
+        }
+
+        /// <summary>The creature's own rig root, or null when this prefab does not have one — in which case the
+        /// arm is placed by its origin and nothing is corrected.</summary>
+        private static Transform? FindArtRoot(Unit unit)
+        {
+            var found = unit.transform.Find(ArtRootName);
+            return found != null ? found : null;
+        }
+
+        /// <summary>
+        /// Where the arm holding <paramref name="station"/> should be seen standing: its offset in the boss's own
+        /// frame, rotated by whichever way the boss is facing, so the arms stay at its sides as it turns.
         /// </summary>
         /// <remarks>
         /// Worked out from the placement every time it is asked for rather than once when the arm rose, which is
-        /// what lets the distances be moved while the arms are standing.
+        /// what lets the distances be moved while the arms are standing. A boss facing nowhere — which is what a
+        /// dead or newly spawned one reports — leaves the offset in world axes rather than collapsing both arms
+        /// onto the boss.
         /// </remarks>
-        private static Vector3 StationOffset(int station, ArmPlacement placement)
+        private static Vector3 StandingPoint(ArmPlacement placement, int station)
         {
             var side = (station % 2 == 0) ? 1f : -1f;
             var rank = (station / 2) + 1;
-            return new Vector3(side * placement.SideDistance * rank, placement.Lift, placement.ForwardOffset);
-        }
 
-        /// <summary>
-        /// Turn a station into a world position: its offset in the boss's frame, rotated by whichever way the boss
-        /// is facing, so the arms stay at its sides as it turns.
-        /// </summary>
-        /// <remarks>
-        /// A boss facing nowhere — which is what a dead or newly spawned one reports — leaves the offset in world
-        /// axes rather than collapsing both arms onto the boss.
-        /// </remarks>
-        private static Vector3 PlaceOf(ArmPlacement placement, int station)
-        {
-            var offset = StationOffset(station, placement);
             var forward = new Vector3(placement.BossFacing.X, 0f, placement.BossFacing.Z);
             var right = Vector3.right;
             if (forward.sqrMagnitude > 1e-4f)
@@ -226,13 +278,13 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             return new Vector3(placement.BossAt.X, placement.BossAt.Y, placement.BossAt.Z)
-                + right * offset.x
-                + Vector3.up * offset.y
-                + forward * offset.z;
+                + right * (side * placement.SideDistance * rank)
+                + Vector3.up * placement.Lift
+                + forward * placement.ForwardOffset;
         }
 
         /// <summary>Drop the arms that are gone — taken down by us, or taken with a level — keeping the stations
-        /// index-aligned with them.</summary>
+        /// and art roots index-aligned with them.</summary>
         private void Forget()
         {
             for (var i = _raised.Count - 1; i >= 0; i--)
@@ -242,6 +294,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 {
                     _raised.RemoveAt(i);
                     _stations.RemoveAt(i);
+                    _artRoots.RemoveAt(i);
                 }
             }
         }

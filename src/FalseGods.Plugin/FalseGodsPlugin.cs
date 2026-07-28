@@ -150,6 +150,7 @@ namespace FalseGods.Plugin
         private ConfigEntry<float> _armSideDistance = null!;
         private ConfigEntry<float> _armForwardOffset = null!;
         private ConfigEntry<float> _armLift = null!;
+        private ConfigEntry<float> _armScale = null!;
 
         private float _appliedFogStart;
         private float _appliedFogEnd;
@@ -225,9 +226,14 @@ namespace FalseGods.Plugin
             _armForwardOffset = Config.Bind("Boss", "ArmForwardOffset", 0f,
                 "[DEV/TEMPORARY - removed before release] How far in front of the boss its rage arms stand, in "
                 + "metres, along the way it is facing. Negative puts them behind it.");
-            _armLift = Config.Bind("Boss", "ArmLift", 0f,
+            _armLift = Config.Bind("Boss", "ArmLift", 1.5f,
                 "[DEV/TEMPORARY - removed before release] How far above the boss's own footing the rage arms sit, "
                 + "in metres. Negative sinks them into the ground.");
+            _armScale = Config.Bind("Boss", "ArmScale", 1.5f,
+                "[DEV/TEMPORARY - removed before release] How large the rage arms are drawn, against the size the "
+                + "game authored them at. The boss is shown larger than the one these arms belong to, so they need "
+                + "enlarging to read as its own; note that this also scales how deep they sit, so ArmLift may want "
+                + "adjusting with it.");
 
             // TEMPORARY bring-up affordance for the thrown-destructible mechanic: throw one crate at the player,
             // with no boss involved, so the flight, the shoot-it-down, and the landing can be judged on their own.
@@ -337,6 +343,7 @@ namespace FalseGods.Plugin
             _boss.ArmSideDistance = _armSideDistance.Value;
             _boss.ArmForwardOffset = _armForwardOffset.Value;
             _boss.ArmLift = _armLift.Value;
+            _boss.ArmScale = _armScale.Value;
 
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
             MaintainSpawnOwnership(FalseGodsIntegrations.Current);

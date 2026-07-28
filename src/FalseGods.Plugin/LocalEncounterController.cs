@@ -211,7 +211,9 @@ namespace FalseGods.Plugin
 
         public float ArmForwardOffset { get; set; }
 
-        public float ArmLift { get; set; }
+        public float ArmLift { get; set; } = 1.5f;
+
+        public float ArmScale { get; set; } = 1.5f;
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
@@ -1054,7 +1056,7 @@ namespace FalseGods.Plugin
                 ? default
                 : new ArenaWorldPoint(_boss.Position.X, _boss.PositionHeight, _boss.Position.Z);
             var facing = _boss?.Facing ?? default;
-            return new ArmPlacement(at, facing, ArmSideDistance, ArmForwardOffset, ArmLift);
+            return new ArmPlacement(at, facing, ArmSideDistance, ArmForwardOffset, ArmLift, ArmScale);
         }
 
         private void Summon(SummonRequest request)
