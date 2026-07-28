@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using FalseGods.RuntimeContracts.Multiplayer;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.Units;
@@ -72,6 +73,36 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// everyone, on a host as well as in single-player. The singleton would quietly make every such decision
         /// about the host's own player and no one else's.
         /// </remarks>
+        /// <summary>
+        /// Refill <paramref name="into"/> with every player still in the fight. Fills a list the caller owns
+        /// rather than returning one, so something asking every frame allocates nothing.
+        /// </summary>
+        public static void FillFighting(List<Unit> into)
+        {
+            if (into == null)
+            {
+                return;
+            }
+
+            into.Clear();
+            var gameManager = StaticInstance<GameManager>.Instance;
+            var players = gameManager != null ? gameManager.Players : null;
+            if (players == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < players.Count; i++)
+            {
+                var player = players[i];
+                var playerUnit = player != null ? player.playerUnit : null;
+                if (playerUnit != null && IsFighting(player))
+                {
+                    into.Add(playerUnit);
+                }
+            }
+        }
+
         public static Unit? NearestTo(Vector3 from)
         {
             var gameManager = StaticInstance<GameManager>.Instance;

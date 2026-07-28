@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Application.Combat;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.Units;
+using PerfectRandom.Sulfur.Core.Units.AI;
 using UnityEngine;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 
@@ -18,7 +19,7 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// an animation event, and sinks again when the clip ends — so appearing, throwing and sinking are the game's,
     /// repeating for as long as it has someone to aim at. The tree is already running when the unit is spawned
     /// (<c>SpawnUnit</c> activates it), and its only condition is a target within the creature's own ranged attack
-    /// range (30 m, line of sight). So the whole of this class is <i>where</i>, and <i>how big</i>.</para>
+    /// range of 30 m. So this class is <i>where</i>, <i>how big</i>, and <i>at whom</i> — never how.</para>
     /// <para><b>And where is the boss.</b> The creature has no navigation agent at all — it cannot take one step —
     /// so its position is set here every frame from the boss's own. Reading the level instead was measured to be
     /// wrong twice over: the arena's scenery is deliberately kept off the navigation layers, so snapping to
@@ -63,6 +64,10 @@ namespace FalseGods.Integration.Sulfur.Combat
         // Null for an arm whose prefab has no such child: it is then placed by its origin, which is the old
         // behaviour and visibly off, but not broken.
         private readonly List<Transform?> _artRoots = new List<Transform?>();
+
+        // Each arm's own list of who it may throw at, handed to its agent once and refilled in place afterwards.
+        // One list per arm and never shared, because the game takes the reference and prunes it as it reads it.
+        private readonly List<List<Unit>> _quarry = new List<List<Unit>>();
 
         // Where the arms were last told to be, so one that finishes loading after the others can be put in its
         // place immediately rather than standing at its spawn point until the next frame.
@@ -123,6 +128,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var i = 0; i < _raised.Count; i++)
             {
                 Put(_raised[i], _artRoots[i], _stations[i], placement);
+                FightingPlayers.FillFighting(_quarry[i]);
             }
         }
 
@@ -157,6 +163,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             _raised.Clear();
             _stations.Clear();
             _artRoots.Clear();
+            _quarry.Clear();
             if (lowered > 0)
             {
                 _logger?.Log($"[arm] {lowered} arm(s) sink back into the ground.");
@@ -200,9 +207,14 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             var artRoot = FindArtRoot(unit);
+            var quarry = new List<Unit>(4);
+            FightingPlayers.FillFighting(quarry);
+            AimWithoutSight(unit, quarry);
+
             _raised.Add(unit);
             _stations.Add(station);
             _artRoots.Add(artRoot);
+            _quarry.Add(quarry);
 
             // Put it where it belongs now rather than a frame late: a big arm dropped at its spawn point and
             // corrected next frame is a visible jump.
@@ -240,6 +252,45 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             transform.position = StandingPoint(placement, station) - drift;
+        }
+
+        /// <summary>
+        /// Tell an arm who it may throw at, without asking whether it can see them.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why it needs telling.</b> Left to itself the creature acquires a target through the game's
+        /// ordinary detection, which is line-of-sight gated: a player standing lower than the arm, or behind the
+        /// lip of a terrace, is simply not there as far as it is concerned, and it stands with nothing to do.
+        /// That is right for a goblin that has to notice you and wrong for a boss's own limb, which is not
+        /// searching for anyone — the players are already in the fight with it.</para>
+        /// <para><b>Through the game's own seam, not by flipping its sight off.</b> <c>overridetargets</c> is what
+        /// the game itself uses to hand a creature a fixed set of enemies (endless mode does it every wave, the
+        /// crypt spawner does it on spawn), and the agent consults it <i>before</i> anything about sight. The
+        /// obvious-looking alternative — clearing <c>useLineOfSight</c> and setting <c>onlyTargetPlayer</c> — is a
+        /// trap already paid for once: the agent reads that pair as "the target is the local player singleton",
+        /// so on a host every arm would throw at the host's own player and at nobody else's.</para>
+        /// <para>The list is handed over once and refilled in place from then on: the agent keeps the reference
+        /// and prunes it as it reads, so each arm gets its own and nothing allocates per frame. The creature's own
+        /// range still applies — this says who, never how far.</para>
+        /// </remarks>
+        private void AimWithoutSight(Unit arm, List<Unit> quarry)
+        {
+            try
+            {
+                var agent = (arm as Npc)?.AiAgent;
+                if (agent == null)
+                {
+                    return;
+                }
+
+                agent.overridetargets.AddUnits(quarry, AiAgent.OverrideTarget.TargetType.Closest);
+            }
+            catch (Exception exception)
+            {
+                // An arm that has to see you before it throws is a worse fight, not a broken one.
+                _logger?.LogWarning($"[arm] an arm could not be told who to throw at ({exception.Message}); "
+                    + "it will only answer players it can see.");
+            }
         }
 
         /// <summary>The creature's own rig root, or null when this prefab does not have one — in which case the
@@ -295,6 +346,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                     _raised.RemoveAt(i);
                     _stations.RemoveAt(i);
                     _artRoots.RemoveAt(i);
+                    _quarry.RemoveAt(i);
                 }
             }
         }
