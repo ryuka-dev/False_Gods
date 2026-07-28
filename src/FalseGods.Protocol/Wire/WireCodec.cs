@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using FalseGods.Core.Arena;
@@ -278,6 +278,38 @@ namespace FalseGods.Protocol.Wire
             var r = new WireReader(payload);
             var message = new CratesTaken(
                 ReadWorldPosition(r), r.ReadInt32(), r.ReadInt32(), r.ReadInt32(), r.ReadSingle());
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(CrateDestroyed message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.CrateId);
+            WriteInt(w, message.Death);
+            return w.ToArray();
+        }
+
+        public static CrateDestroyed DeserializeCrateDestroyed(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new CrateDestroyed(r.ReadInt32(), r.ReadInt32());
+            RequireEnd(r);
+            return message;
+        }
+
+        public static byte[] Serialize(CrateDestroyRequested message)
+        {
+            var w = new WireWriter();
+            WriteInt(w, message.CrateId);
+            WriteInt(w, message.Death);
+            return w.ToArray();
+        }
+
+        public static CrateDestroyRequested DeserializeCrateDestroyRequested(byte[] payload)
+        {
+            var r = new WireReader(payload);
+            var message = new CrateDestroyRequested(r.ReadInt32(), r.ReadInt32());
             RequireEnd(r);
             return message;
         }

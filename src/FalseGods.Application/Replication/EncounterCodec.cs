@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using FalseGods.Protocol.Wire;
 using FalseGods.RuntimeContracts.Transport;
@@ -27,6 +27,8 @@ namespace FalseGods.Application.Replication
         CrateVolleyFired = 17,
         CratesTaken = 18,
         CratesSetDown = 19,
+        CrateDestroyed = 20,
+        CrateDestroyRequested = 21,
     }
 
     /// <summary>One decoded replication message: its <see cref="Kind"/> and the deserialized DTO as <see cref="Value"/>.</summary>
@@ -98,6 +100,10 @@ namespace FalseGods.Application.Replication
 
         public static EncodedPayload Encode(CratesSetDown message) => Wrap(ReplicationKind.CratesSetDown, WireCodec.Serialize(message));
 
+        public static EncodedPayload Encode(CrateDestroyed message) => Wrap(ReplicationKind.CrateDestroyed, WireCodec.Serialize(message));
+
+        public static EncodedPayload Encode(CrateDestroyRequested message) => Wrap(ReplicationKind.CrateDestroyRequested, WireCodec.Serialize(message));
+
         /// <summary>Decode an opaque payload back into its DTO. Treats the payload as untrusted input.</summary>
         public static DecodedMessage Decode(EncodedPayload payload)
         {
@@ -151,6 +157,10 @@ namespace FalseGods.Application.Replication
                     return new DecodedMessage(kind, WireCodec.DeserializeCratesTaken(body));
                 case ReplicationKind.CratesSetDown:
                     return new DecodedMessage(kind, WireCodec.DeserializeCratesSetDown(body));
+                case ReplicationKind.CrateDestroyed:
+                    return new DecodedMessage(kind, WireCodec.DeserializeCrateDestroyed(body));
+                case ReplicationKind.CrateDestroyRequested:
+                    return new DecodedMessage(kind, WireCodec.DeserializeCrateDestroyRequested(body));
                 default:
                     throw new InvalidDataException($"Unknown replication kind tag {bytes[0]}.");
             }

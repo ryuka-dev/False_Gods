@@ -44,6 +44,22 @@ namespace FalseGods.ProtocolTests
         }
 
         [Fact]
+        public void A_destruction_round_trips()
+        {
+            var original = new CrateDestroyed(CrateId: 4242, Death: (int)CrateDeath.Struck);
+
+            Assert.Equal(original, WireCodec.DeserializeCrateDestroyed(WireCodec.Serialize(original)));
+        }
+
+        [Fact]
+        public void A_destruction_request_round_trips()
+        {
+            var original = new CrateDestroyRequested(CrateId: 7, Death: (int)CrateDeath.Shot);
+
+            Assert.Equal(original, WireCodec.DeserializeCrateDestroyRequested(WireCodec.Serialize(original)));
+        }
+
+        [Fact]
         public void A_throw_round_trips()
         {
             var original = new CrateThrown(

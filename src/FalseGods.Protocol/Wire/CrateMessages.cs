@@ -73,6 +73,51 @@ namespace FalseGods.Protocol.Wire
     /// </remarks>
     public sealed record CrateVolleyTarget(WorldPosition Current, WorldPosition Lead);
 
+    /// <summary>Why a destructible stopped existing, when that is something the peers have to be told.</summary>
+    /// <remarks>
+    /// Only deaths a <i>player</i> caused travel. The rest — a crate reaching its landing spot, one bursting
+    /// against a wall, one lifted into a volley — are decided by the same arc from the same seed on every peer,
+    /// so they have already happened identically everywhere and saying so would be repeating what both ends
+    /// already know. Where a player is standing and what they are shooting at is the one thing no peer can derive
+    /// from the commands it was sent.
+    /// </remarks>
+    public enum CrateDeath
+    {
+        /// <summary>A player broke it — shot it off a pile, or out of the air. Runs the game's own break, so the
+        /// loot follows whatever rules the session has for sharing it.</summary>
+        Shot = 0,
+
+        /// <summary>It reached a player in flight and burst on them. Breaks without paying: only shooting a crate
+        /// down pays.</summary>
+        Struck = 1,
+    }
+
+    /// <summary>
+    /// Host → all peers, reliable-ordered: the destructible numbered <see cref="CrateId"/> is gone, and how.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A number, not a place.</b> Every peer builds the same destructibles from the same commands in the
+    /// same order, so the <i>n</i>th one made is the same crate on all of them — which is the identity a session
+    /// layer matching by spawn position cannot have, since ours are all heaped in the same few spots.</para>
+    /// <para>A peer that no longer has that crate does nothing. Piles are settled by physics rather than by the
+    /// commands alone, so two peers can disagree about which crate a carrier picked up; an unknown number is that
+    /// disagreement showing, and destroying nothing is the right answer to it.</para>
+    /// </remarks>
+    public sealed record CrateDestroyed(int CrateId, int Death);
+
+    /// <summary>
+    /// Client → host, reliable-ordered: this peer's player destroyed the destructible numbered
+    /// <see cref="CrateId"/>.
+    /// </summary>
+    /// <remarks>
+    /// A request, not a statement, like a client's hits on the boss: what happens in the shared world is the
+    /// host's to settle, and it answers with a <see cref="CrateDestroyed"/> that every peer including this one
+    /// acts on. It matters beyond consistency — with shared loot on, a client's own loot roll is suppressed by the
+    /// session layer, so a crate a client broke by itself would pay nobody. Broken on the host, it pays properly
+    /// and the pickup mirrors back down.
+    /// </remarks>
+    public sealed record CrateDestroyRequested(int CrateId, int Death);
+
     public sealed record CrateVolleyFired(
         IReadOnlyList<CrateVolleyTarget> Targets,
         int PileKind,
