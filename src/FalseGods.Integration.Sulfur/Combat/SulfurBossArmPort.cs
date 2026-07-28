@@ -18,8 +18,8 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// in <c>Submerged</c>, rises into <c>Shoot</c> the moment its behaviour tree raises <c>Attack</c>, throws on
     /// an animation event, and sinks again when the clip ends — so appearing, throwing and sinking are the game's,
     /// repeating for as long as it has someone to aim at. The tree is already running when the unit is spawned
-    /// (<c>SpawnUnit</c> activates it), and its only condition is a target within the creature's own ranged attack
-    /// range of 30 m. So this class is <i>where</i>, <i>how big</i>, and <i>at whom</i> — never how.</para>
+    /// (<c>SpawnUnit</c> activates it), and its only condition is a target inside its throwing range. So this
+    /// class is <i>where</i>, <i>how big</i>, <i>at whom</i> and <i>how far</i> — never how.</para>
     /// <para><b>And where is the boss.</b> The creature has no navigation agent at all — it cannot take one step —
     /// so its position is set here every frame from the boss's own. Reading the level instead was measured to be
     /// wrong twice over: the arena's scenery is deliberately kept off the navigation layers, so snapping to
@@ -48,6 +48,19 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// already multiplied by whatever scale the arm is wearing.
         /// </remarks>
         private const string ArtRootName = "Root";
+
+        /// <summary>
+        /// How far an arm will throw, replacing the range the creature was authored with.
+        /// </summary>
+        /// <remarks>
+        /// The 30 m it ships with is the size of the room the vanilla cave boss is fought in. Ours is eighty
+        /// metres across, so a player who simply walked to the far side stood outside the arms' reach and the
+        /// rage stopped costing anything — which is the one thing it exists to do. Set past the far corner rather
+        /// than to it, so the answer does not depend on where in the room the boss happens to be standing.
+        /// <para>This is the only number of the creature's own that is overridden, and it is a room fact rather
+        /// than a boss one: the arm still decides everything about how it throws.</para>
+        /// </remarks>
+        private const float ThrowRange = 100f;
 
         private readonly MonoBehaviour _host;
         private readonly ILogger? _logger;
@@ -206,6 +219,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                 _logger?.LogWarning($"[arm] an arm could not be made invulnerable ({exception.Message}).");
             }
 
+            ReachAcrossTheRoom(unit);
+
             var artRoot = FindArtRoot(unit);
             var quarry = new List<Unit>(4);
             FightingPlayers.FillFighting(quarry);
@@ -252,6 +267,24 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             transform.position = StandingPoint(placement, station) - drift;
+        }
+
+        /// <summary>Let an arm throw the length of this room rather than the length of the one it was drawn
+        /// for. Failing is a shorter-ranged arm, not a broken one.</summary>
+        private void ReachAcrossTheRoom(Unit arm)
+        {
+            try
+            {
+                if (arm is Npc npc)
+                {
+                    npc.rangedAttackRange = ThrowRange;
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[arm] an arm kept its own throwing range ({exception.Message}); it will "
+                    + "only answer players close to the boss.");
+            }
         }
 
         /// <summary>
