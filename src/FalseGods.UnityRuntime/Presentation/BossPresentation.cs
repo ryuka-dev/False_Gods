@@ -374,6 +374,12 @@ namespace FalseGods.UnityRuntime.Presentation
                 case BossMoved e:
                     _logger?.Log($"[cue] BossMoved to ({e.Position.X:0.0}, {e.PositionHeight:0.0}, {e.Position.Z:0.0})");
                     break;
+                case BossRoared _:
+                    // The same gesture the rage uses, asked for on its own: the boss rears up and bellows without
+                    // any of the rage's look, because this one is an announcement rather than a state.
+                    _roarTimer = RoarSeconds;
+                    _logger?.Log("[cue] BossRoared");
+                    break;
                 case RageChanged e:
                     // The look itself is continuous and comes from state; this is the moment it changes, which
                     // is where the roar goes. Calming down is not roared - that is a boss going quiet.

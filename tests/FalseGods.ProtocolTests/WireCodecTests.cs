@@ -30,6 +30,7 @@ namespace FalseGods.ProtocolTests
             MaxHealth: 100,
             WeakPointExposed: true,
             Enraged: true,
+            Begun: true,
             LastProcessedBossEventSequence: new Sequence(9));
 
         private static ArenaSnapshot SampleArena() => new ArenaSnapshot(
@@ -132,6 +133,7 @@ namespace FalseGods.ProtocolTests
             new object[] { new BossRelocatedEvent(new Sequence(7), new SimulationTick(8), 3, 1, new SimVector2(0.24f, -7.69f), 8.1f) },
             new object[] { new BossEnragedEvent(new Sequence(8), new SimulationTick(9), true) },
             new object[] { new BossEnragedEvent(new Sequence(9), new SimulationTick(10), false) },
+            new object[] { new BossBeganEvent(new Sequence(10), new SimulationTick(11)) },
         };
 
         [Theory]

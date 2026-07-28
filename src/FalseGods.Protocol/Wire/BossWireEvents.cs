@@ -7,6 +7,16 @@ namespace FalseGods.Protocol.Wire
     public sealed record BossAppearedEvent(Sequence Sequence, SimulationTick Tick, int PhaseId) : IBossWireEvent;
 
     /// <summary>
+    /// The fight began — the reliable transition behind the continuous <c>BossSnapshot.Begun</c>.
+    /// </summary>
+    /// <remarks>
+    /// The same pair as the rage, for the same reason: the snapshot is what a peer that missed this corrects itself
+    /// from, and the event is what a peer <i>plays</i> the opening with, so every peer roars, opens its room and
+    /// starts its music at the moment the host's boss began rather than the first frame a snapshot arrived.
+    /// </remarks>
+    public sealed record BossBeganEvent(Sequence Sequence, SimulationTick Tick) : IBossWireEvent;
+
+    /// <summary>
     /// The host selected an attack and began telegraphing it. <see cref="Attack"/> ties the whole
     /// telegraph→commit chain together and is the anchor for attack-effect idempotence (§9.7/§9.9).
     /// </summary>

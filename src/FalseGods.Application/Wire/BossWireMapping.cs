@@ -65,6 +65,7 @@ namespace FalseGods.Application.Wire
                 boss.MaxHealth,
                 boss.IsWeakPointExposed,
                 boss.IsEnraged,
+                boss.HasBegun,
                 lastProcessedBossEventSequence);
         }
 
@@ -75,6 +76,8 @@ namespace FalseGods.Application.Wire
             {
                 case BossSpawned e:
                     return new BossAppearedEvent(sequence, tick, (int)e.Phase);
+                case BossBegan _:
+                    return new BossBeganEvent(sequence, tick);
                 case AttackTelegraphed e:
                     return new BossAttackTelegraphedEvent(sequence, tick, e.Attack, (int)e.Kind, e.AimPoint, e.TelegraphSeconds);
                 case AttackCommitted e:

@@ -46,13 +46,29 @@ namespace FalseGods.ApplicationTests
         public void Present_maps_a_spawn_into_a_BossAppeared_cue()
         {
             var f = new BossFixture();
-            f.Boss.Spawn(SimVector2.Zero);
+            // Waiting, so this is the spawn on its own: a boss put into a fight also begins it, and that is a
+            // second cue with its own test.
+            f.Boss.Spawn(SimVector2.Zero, waitToBegin: true);
             var events = f.Boss.DrainEvents();
 
             var sink = new RecordingPresentation();
             new BossPresenter(sink).Present(f.Boss, events);
 
             Assert.IsType<BossAppeared>(Assert.Single(sink.Events));
+        }
+
+        [Fact]
+        public void Present_maps_the_fight_beginning_into_a_BossRoared_cue()
+        {
+            var f = new BossFixture();
+            f.Boss.Spawn(SimVector2.Zero, waitToBegin: true);
+            f.Boss.DrainEvents();
+            f.Boss.Begin();
+
+            var sink = new RecordingPresentation();
+            new BossPresenter(sink).Present(f.Boss, f.Boss.DrainEvents());
+
+            Assert.IsType<BossRoared>(Assert.Single(sink.Events));
         }
 
         [Fact]

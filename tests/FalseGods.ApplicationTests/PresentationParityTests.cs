@@ -23,6 +23,7 @@ namespace FalseGods.ApplicationTests
         public static object[][] DomainEvents() => new[]
         {
             new object[] { new BossSpawned(Boss, BossPhase.Two, 80) },
+            new object[] { new BossBegan(Boss) },
             new object[] { new AttackTelegraphed(Boss, new AttackInstanceId(3), BossAttackKind.AimedProjectile, Aim, 1.25f) },
             new object[] { new AttackCommitted(Boss, new AttackInstanceId(3), BossAttackKind.AreaTelegraph, Aim) },
             new object[] { new BossPhaseChanged(Boss, BossPhase.Two) },

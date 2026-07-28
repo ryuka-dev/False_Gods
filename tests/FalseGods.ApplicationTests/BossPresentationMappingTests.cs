@@ -56,6 +56,7 @@ namespace FalseGods.ApplicationTests
             MaxHealth: 1,
             WeakPointExposed: false,
             Enraged: false,
+            Begun: true,
             LastProcessedBossEventSequence: new Sequence(0));
     }
 

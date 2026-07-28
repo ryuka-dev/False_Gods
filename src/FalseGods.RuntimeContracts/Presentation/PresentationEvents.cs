@@ -49,6 +49,16 @@ namespace FalseGods.RuntimeContracts.Presentation
     /// </remarks>
     public sealed record RageChanged(BossInstanceId Boss, bool Enraged) : IPresentationEvent;
 
+    /// <summary>
+    /// The fight began — the boss announces itself, and the room opens around the players.
+    /// </summary>
+    /// <remarks>
+    /// One-shot, and the only cue there is for the opening: a renderer that missed it shows a boss simply standing
+    /// there, which is what the boss looks like either way. What the cue buys is the <i>ceremony</i> — the roar,
+    /// the fog pulling back, the music — so it is played rather than derived from state.
+    /// </remarks>
+    public sealed record BossRoared(BossInstanceId Boss) : IPresentationEvent;
+
     /// <summary>The boss was defeated — play the death. Terminal, like its domain counterpart.</summary>
     public sealed record BossDefeated(BossInstanceId Boss) : IPresentationEvent;
 

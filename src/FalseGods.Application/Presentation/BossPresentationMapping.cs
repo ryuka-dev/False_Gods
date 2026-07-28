@@ -59,6 +59,8 @@ namespace FalseGods.Application.Presentation
             {
                 case BossSpawned e:
                     return new BossAppeared(e.Boss, ToPhaseVisualId(e.Phase));
+                case BossBegan e:
+                    return new BossRoared(e.Boss);
                 case AttackTelegraphed e:
                     return new AttackTelegraphStarted(e.Boss, e.Attack, ToVisualKind(e.Kind), e.AimPoint, e.TelegraphSeconds);
                 case AttackCommitted e:
