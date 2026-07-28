@@ -140,6 +140,12 @@ namespace FalseGods.Plugin
         /// them is half of what it takes to calm it.</summary>
         private const int EmergencyBandSize = 4;
 
+        /// <summary>
+        /// How long the boss spends announcing itself before the fight runs, matched to the roar the presentation
+        /// plays so that "the boss has finished roaring" and "the fight has started" are the same moment.
+        /// </summary>
+        private const float OpeningSeconds = 1.9f;
+
         /// <summary>How long a carrier spends loading and again setting down, mirroring the carrier port's own
         /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
         private const float CarrierHandlingSeconds = 0.75f;
@@ -190,6 +196,14 @@ namespace FalseGods.Plugin
         private readonly IBossArmPort _rageArms;
         private readonly IBattlefieldCleanupPort _battlefield;
         private readonly IBossVoicePort _voice;
+        private readonly IArenaAtmospherePort _atmosphere;
+
+        /// <summary>Where every player in the room is, so the host can tell when one has reached the boss's
+        /// doorstep. The host answers for the whole session — a client's own arrival is not its to decide.</summary>
+        private readonly IPlayerMotionPort _players;
+
+        /// <summary>Reused every frame so watching the door costs no allocation.</summary>
+        private readonly List<PlayerAim> _atTheDoor = new List<PlayerAim>();
 
         /// <summary>Puts the boss on the list the game's own weapon systems read, so homing shots follow it and
         /// aim assist holds on it. Reads the boss's solid body at call time, since it is made per raise.</summary>
@@ -266,6 +280,9 @@ namespace FalseGods.Plugin
         /// one room for a long time, with waves summoned into it deliberately, buries the things the players are
         /// meant to be reading under everything they have already killed.</param>
         /// <param name="voice">What the boss is heard doing. Presentation, and made on every peer for itself.</param>
+        /// <param name="atmosphere">What the room does when the fight starts — how far it can be seen through, and
+        /// what is playing. Presentation as well, and made on every peer for itself for the same reason.</param>
+        /// <param name="players">Where the players are, for deciding that somebody has walked into the room.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
@@ -273,6 +290,8 @@ namespace FalseGods.Plugin
             IBossArmPort rageArms,
             IBattlefieldCleanupPort battlefield,
             IBossVoicePort voice,
+            IArenaAtmospherePort atmosphere,
+            IPlayerMotionPort players,
             IThrownCratePort crates,
             ICarrierPort carriers,
             Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
@@ -286,6 +305,8 @@ namespace FalseGods.Plugin
             _rageArms = rageArms ?? throw new ArgumentNullException(nameof(rageArms));
             _battlefield = battlefield ?? throw new ArgumentNullException(nameof(battlefield));
             _voice = voice ?? throw new ArgumentNullException(nameof(voice));
+            _atmosphere = atmosphere ?? throw new ArgumentNullException(nameof(atmosphere));
+            _players = players ?? throw new ArgumentNullException(nameof(players));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
             _carriers = carriers ?? throw new ArgumentNullException(nameof(carriers));
             _announceProduced = announceProduced;
@@ -352,8 +373,10 @@ namespace FalseGods.Plugin
             _encounter = encounter;
             _hostIntegration = hostIntegration;
 
-            // A fight is starting, so the game is loaded and the boss's voice can be fetched before it is wanted.
+            // A fight is starting, so the game is loaded and what the opening is played with can be fetched before
+            // it is wanted: both the boss's voice and its music are game assets that are not there at plugin load.
             _voice.Warm();
+            _atmosphere.Warm();
 
             // ── The arena may already be here. A hijacked level load realized our arena AS the level, through
             // this same load flow — same content hash, same parity check, same borrowed materials — so the
@@ -510,14 +533,66 @@ namespace FalseGods.Plugin
                 return;
             }
 
+            WatchTheDoor();
             _boss.Advance();
             ReportActivityChange();
-            AdvanceSupplyLine(deltaSeconds);
-            AdvanceStarvation(deltaSeconds);
-            CarryTheArmsWithTheBoss();
-            FireWhateverWasBrought(deltaSeconds);
+
+            // None of the room's own machinery runs until the fight does. The supply line especially: its carriers
+            // would walk the crates across an arena nobody has entered, and the starvation watch would call a
+            // route that has not been asked to run yet a route that has been cut.
+            if (_boss.HasBegun)
+            {
+                AdvanceSupplyLine(deltaSeconds);
+                AdvanceStarvation(deltaSeconds);
+                CarryTheArmsWithTheBoss();
+                FireWhateverWasBrought(deltaSeconds);
+            }
+
             Present();
             _presentation.Render(deltaSeconds);
+        }
+
+        /// <summary>
+        /// Start the fight when a player reaches the room's authored start trigger.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>The host answers for the session.</b> Every player's position is already known here — it is the
+        /// same reading the boss's barrage is aimed with — so one peer decides that somebody has walked in and
+        /// everybody plays the same opening off the replicated result. A client deciding for itself would start the
+        /// fight at a different moment on each machine.</para>
+        /// <para><b>A sphere, not a collider.</b> Only the local player has colliders a trigger volume could catch;
+        /// remote players are figures the session keeps up to date. A distance test asks the same question of all
+        /// of them, and it is the whole of the mechanism — there is nothing to keep in step and nothing to clean up.
+        /// </para>
+        /// <para>Players who are down are not counted: the port already leaves them out, and a body sliding into
+        /// the room is not somebody arriving.</para>
+        /// </remarks>
+        private void WatchTheDoor()
+        {
+            var trigger = _arenaContent?.StartTrigger;
+            if (_boss is null || _boss.HasBegun || trigger is null)
+            {
+                return;
+            }
+
+            var at = trigger.Value;
+            var radius = _arenaContent!.StartTriggerRadius;
+            _players.ReadPlayersToThrowAt(_atTheDoor);
+            for (var i = 0; i < _atTheDoor.Count; i++)
+            {
+                var player = _atTheDoor[i];
+                var dx = player.Position.X - at.X;
+                var dy = player.Height - at.Y;
+                var dz = player.Position.Z - at.Z;
+                if ((dx * dx) + (dy * dy) + (dz * dz) > radius * radius)
+                {
+                    continue;
+                }
+
+                _logger?.Log($"[opening] player {player.Index} reached the room; the fight starts.");
+                _boss.Begin();
+                return;
+            }
         }
 
         /// <summary>
@@ -759,6 +834,9 @@ namespace FalseGods.Plugin
             // nothing rather than mid-tantrum.
             _emergencyMinions.DespawnAll();
             _rageArms.LowerAll();
+            // The fight's music belongs to the fight, and an encounter torn down mid-fight has to take it with it —
+            // a boss that died fades its own out, but one that was dropped never does.
+            _atmosphere.StopBattleMusic();
             _starvation.Reset();
             _pileLastSeen = 0;
             // The supply line stops with the fight. The destructibles it already produced are left where they are:
@@ -812,7 +890,8 @@ namespace FalseGods.Plugin
                 attackDamage: 20,
                 aimedHitRadius: 2.0f,
                 areaHitRadius: 5.0f,
-                stations: anchors.Count > 0 ? Itinerary : null);
+                stations: anchors.Count > 0 ? Itinerary : null,
+                openingSeconds: OpeningSeconds);
 
             _boss = new BossSimulation(
                 new BossInstanceId(1),
@@ -828,7 +907,15 @@ namespace FalseGods.Plugin
             // presentation and replication are both attached.
             _arenaContent = arena;
             var bossSpawn = arena.BossSpawn;
-            _boss.Spawn(new SimVector2(bossSpawn.X, bossSpawn.Z), bossSpawn.Y);
+
+            // A room that authored a way to start the fight keeps its boss waiting for it; one that did not is
+            // started by being raised, which is what every room did before there was a trigger to author.
+            var waitsForSomebody = arena.StartTrigger.HasValue;
+            _boss.Spawn(new SimVector2(bossSpawn.X, bossSpawn.Z), bossSpawn.Y, waitToBegin: waitsForSomebody);
+
+            // The room goes dark for the wait — including on a re-raise, where it is still standing open from the
+            // last fight, so the opening plays the same way every time.
+            _atmosphere.SetRoomDepth(ArenaDepth.OpeningStart, ArenaDepth.OpeningEnd);
 
             // The authored enemy spawn's height stays the arena's ground, where telegraphs and impacts are drawn.
             _presentation = new BossPresentation(
@@ -890,10 +977,15 @@ namespace FalseGods.Plugin
                 ? $"{arena.NavWalkableNodes} walkable nav node(s) applied"
                 : "navigation built by the level itself";
 
+            var waiting = waitsForSomebody
+                ? $"waiting, untouchable, for a player to reach ({arena.StartTrigger!.Value.X:0.0}, "
+                    + $"{arena.StartTrigger.Value.Y:0.0}, {arena.StartTrigger.Value.Z:0.0}) within "
+                    + $"{arena.StartTriggerRadius:0.#}m"
+                : "in the fight already — the room authored no start trigger";
             _logger?.Log($"Encounter {_encounter} started: arena '{manifest.ArenaId}' at "
                 + $"({_originWire.X:0.0}, {_originWire.Y:0.0}, {_originWire.Z:0.0}), {navigation}, "
                 + $"boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on "
-                + "the arena floor. Shoot or melee it; weak-window hits are amplified.");
+                + $"the arena floor, {waiting}. Shoot or melee it; weak-window hits are amplified.");
 
             // The supply line runs for as long as the fight does: production is a thing the boss's room does while
             // the boss is in it, not a property of the level.
@@ -1054,6 +1146,50 @@ namespace FalseGods.Plugin
             }
         }
 
+        /// <summary>
+        /// Play the opening: the boss bellows, the room opens around the players, and the fight's music starts.
+        /// </summary>
+        /// <remarks>
+        /// <b>Off the boss's own event, exactly as the rage's roar is</b> — not off the trigger being crossed. The
+        /// two are the same instant here, but only one of them is a fact a client also has, and there must not be
+        /// two different accounts of when the fight began. The roar animation is the presenter's, from the same
+        /// event; this is the part of the ceremony that is not the boss's body.
+        /// </remarks>
+        private void PlayTheOpening(IReadOnlyList<IBossDomainEvent> bossEvents)
+        {
+            for (var i = 0; i < bossEvents.Count; i++)
+            {
+                if (!(bossEvents[i] is BossBegan))
+                {
+                    continue;
+                }
+
+                _voice.Roar(BossStandsAt());
+                _atmosphere.SetRoomDepth(
+                    ArenaDepth.FightStart,
+                    ArenaDepth.FightEnd,
+                    ArenaDepth.RevealHoldSeconds,
+                    ArenaDepth.RevealSeconds);
+                _atmosphere.StartBattleMusic();
+                _logger?.Log($"[opening] the boss roars; the room opens to {ArenaDepth.FightEnd:0}m after "
+                    + $"{ArenaDepth.RevealHoldSeconds:0.#}s, and the fight runs in {OpeningSeconds:0.#}s.");
+                return;
+            }
+        }
+
+        /// <summary>Let the music go when the boss does, the way the game ends its own boss fights.</summary>
+        private void EndTheMusicWithTheBoss(IReadOnlyList<IBossDomainEvent> bossEvents)
+        {
+            for (var i = 0; i < bossEvents.Count; i++)
+            {
+                if (bossEvents[i] is BossDied)
+                {
+                    _atmosphere.StopBattleMusic();
+                    return;
+                }
+            }
+        }
+
         /// <summary>Where the boss is standing this frame, in world space.</summary>
         private ArenaWorldPoint BossStandsAt() => _boss is null
             ? default
@@ -1199,6 +1335,14 @@ namespace FalseGods.Plugin
 
             // Say so out loud: a refused hit otherwise looks exactly like a hit that never arrived, which makes
             // "is it invulnerable?" unanswerable from the log.
+            if (_boss.IsOutsideTheFight)
+            {
+                _logger?.Log($"[weapon-damage] refused: the fight has not started "
+                    + $"({(_boss.HasBegun ? "the boss is still roaring" : "nobody has walked in yet")}); "
+                    + $"health stays {_boss.Health}.");
+                return;
+            }
+
             if (_boss.IsRelocating)
             {
                 _logger?.Log($"[weapon-damage] refused: the boss is {_boss.Activity} (invulnerable while it moves); "
@@ -1241,6 +1385,8 @@ namespace FalseGods.Plugin
             _presenter.Present(_boss, bossEvents);
             _coordinator.Process(bossEvents);
             ClearTheFloorOnRelocation(bossEvents);
+            PlayTheOpening(bossEvents);
+            EndTheMusicWithTheBoss(bossEvents);
 
             var damageRequests = _boss.DrainDamageRequests();
             if (damageRequests.Count > 0)

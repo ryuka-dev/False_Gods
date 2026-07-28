@@ -63,21 +63,6 @@ namespace FalseGods.Plugin
 
         private const int TestBossDefinition = 1;
 
-        /// <summary>
-        /// How far the boss arena can be seen through.
-        /// </summary>
-        /// <remarks>
-        /// <para>The cave environment's own fog is tuned for corridor-sized rooms and leaves an eighty-metre arena
-        /// pitch black from the middle of it, so the arena sets its own. Found by eye in the room, and settled:
-        /// the far side goes before the wall does, which is what makes it read as a cave rather than as a box.
-        /// Only the distances are ours — the level's own fog colour is kept.</para>
-        /// <para><b>Not only a look.</b> The game clamps its aim assist to the fog cutoff, so pulling the fog in
-        /// pulls in how far a player's aim is helped.</para>
-        /// </remarks>
-        private const float ArenaFogStart = 10f;
-
-        private const float ArenaFogEnd = 72f;
-
         // Bring-up throw shape: far enough ahead to read as incoming, high enough and slow enough to be shot.
         private const float ThrowDistance = 14f;
         private const float ThrowHeight = 1.5f;
@@ -175,6 +160,12 @@ namespace FalseGods.Plugin
         private SulfurArenaHazard _hazard = null!;
         private LocalEncounterController _boss = null!;
         private IBossVoicePort _voice = null!;
+        private IArenaAtmospherePort _atmosphere = null!;
+
+        // Which arena-building generation run this peer's automatic raise belongs to. One arena, one automatic
+        // raise: dropping the boss by hand must not be undone by the next frame, and the next visit to the arena
+        // is a new run and so gets a new one.
+        private int _raisedForRun;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
 
@@ -271,13 +262,19 @@ namespace FalseGods.Plugin
                 VanillaPropDecoration.MudPoolHazardInterval,
                 _log);
             LevelGenerationHijack.ArenaRooms = _levelArena.CreateRoomSource();
-            LevelGenerationHijack.Fog = new ArenaFogRange(ArenaFogStart, ArenaFogEnd);
+
+            // The arena is built dark. The players walk into a room they cannot see across, and it opens around
+            // them when the fight starts — so what the level applies is the opening depth, not the fight's.
+            LevelGenerationHijack.Fog = new ArenaFogRange(ArenaDepth.OpeningStart, ArenaDepth.OpeningEnd);
 
             _hijack = new SulfurArenaHijackPort(_log);
 
             // Warmed when an encounter starts rather than here: taking the vanilla boss's roar means reading the
-            // game's creature database, which it loads asynchronously and has not built yet at plugin load.
+            // game's creature database, which it loads asynchronously and has not built yet at plugin load. The
+            // room's own atmosphere is fetched the same way and for the same reason — its music comes off the
+            // vanilla boss's room.
             _voice = new SulfurBossVoice(transform, _log);
+            _atmosphere = new SulfurArenaAtmosphere(this, _log);
 
             // When a hijacked level left our arena standing, a raise fights in that one instead of loading a
             // second copy of the same content on top of itself.
@@ -299,6 +296,8 @@ namespace FalseGods.Plugin
                 // floor ends the fight buried under everything the players have killed.
                 new SulfurBattlefieldCleanup(_log),
                 _voice,
+                _atmosphere,
+                _playerMotion,
                 _crates,
                 new SulfurCarrierPort(
                     this,
@@ -959,6 +958,7 @@ namespace FalseGods.Plugin
             _crateFlow?.Dispose();
             _crateFlow = null;
             _crateFlowIntegration = null;
+            _atmosphere?.Dispose();
         }
 
         private enum CompositionRole
@@ -983,6 +983,8 @@ namespace FalseGods.Plugin
         /// <summary>Single-player and host: the local simulation stack, with replication attached iff hosting.</summary>
         private void RunLocalComposition(IFalseGodsIntegration? integration, CompositionRole role)
         {
+            RaiseWithTheArena(integration, role);
+
             if (KeyPressed(_raiseKey.Value))
             {
                 if (_boss.IsActiveEncounter)
@@ -994,8 +996,7 @@ namespace FalseGods.Plugin
                     // A host raise hands the controller the integration: the controller realizes locally, then
                     // gates the whole roster over the channel and starts (with replication attached) only when
                     // the gate resolves. A single-player raise gates the one local peer and starts immediately.
-                    _currentEncounter = new EncounterId(_nextEncounter++);
-                    _boss.Raise(_currentEncounter, role == CompositionRole.Host ? integration : null);
+                    Raise(integration, role);
                 }
             }
 
@@ -1011,6 +1012,50 @@ namespace FalseGods.Plugin
             }
 
             _boss.Tick(UnityEngine.Time.deltaTime); // also drives a waiting host gate; a no-op when idle
+        }
+
+        /// <summary>
+        /// The boss belongs to the room, so it is raised with the room: the moment a hijacked level finishes
+        /// building the arena, the encounter starts and the boss stands in it, waiting for somebody to walk in.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>When the level is finished, not when the arena appears.</b> The arena is instantiated a third
+        /// of the way through generation — before navigation is scanned and before the player is placed — so a
+        /// raise triggered by its existence would gate a roster with nobody in it and, on a host, announce the
+        /// arena to the session before its own level was habitable. The end of the generation run is the moment
+        /// the players are really in the room.</para>
+        /// <para><b>Once per arena.</b> Dropping the boss by hand has to stay dropped, so the automatic raise is
+        /// tied to the run that built the arena rather than to the absence of a boss; leaving and coming back is a
+        /// new run and gets a new raise, which is exactly what a fresh visit should be.</para>
+        /// <para><b>Not on a client.</b> This is only reached from the local composition; a client's encounter
+        /// arrives from the host, as everything else about the fight does.</para>
+        /// </remarks>
+        private void RaiseWithTheArena(IFalseGodsIntegration? integration, CompositionRole role)
+        {
+            var run = LevelGenerationHijack.ArenaRunsFinished;
+            if (run == 0 || run == _raisedForRun || !_levelArena.IsLive)
+            {
+                return;
+            }
+
+            _raisedForRun = run;
+
+            // A new arena replaced the one the previous fight stood in — the level destroyed it on its way out —
+            // so that fight is over whether or not anybody said so.
+            if (_boss.IsActiveEncounter)
+            {
+                _boss.Drop();
+            }
+
+            Logger.LogMessage("The boss arena is standing; raising the boss in it. It waits, untouchable, until a "
+                + "player walks into the room.");
+            Raise(integration, role);
+        }
+
+        private void Raise(IFalseGodsIntegration? integration, CompositionRole role)
+        {
+            _currentEncounter = new EncounterId(_nextEncounter++);
+            _boss.Raise(_currentEncounter, role == CompositionRole.Host ? integration : null);
         }
 
         private void RunClientComposition(IFalseGodsIntegration integration)
@@ -1031,7 +1076,18 @@ namespace FalseGods.Plugin
             {
                 // Same hand-off the local controller gets: when a hijacked level left our arena standing on this
                 // peer, the client fights in that one instead of realizing a second copy of it.
-                _client = new ClientBossController(_log, this, integration) { LevelArena = _levelArena };
+                _client = new ClientBossController(
+                    _log,
+                    this,
+                    integration,
+                    _atmosphere,
+                    // The host raises as soon as its own level is up, which is routinely before this peer has
+                    // finished generating the same level. While that is true, the announcement is waited on rather
+                    // than answered by loading a second copy of an arena the level is about to hand us.
+                    () => _hijack.IsArenaModeOn && !_levelArena.IsLive)
+                {
+                    LevelArena = _levelArena,
+                };
                 _clientIntegration = integration;
             }
 

@@ -43,6 +43,19 @@ namespace FalseGods.Application.Arena
         /// supply line is only interesting if it can be cut.</summary>
         public const string CrateSourceGroupPath = "GameplayRoot/CrateSources";
 
+        /// <summary>
+        /// Where the fight starts: a sphere at this marker's position, as wide as its <b>scale</b>, that the boss
+        /// waits behind. The first player to walk into it starts the encounter.
+        /// </summary>
+        /// <remarks>
+        /// <para>A sphere rather than a shaped volume, and a distance test rather than a physics trigger, because
+        /// what has to be answered is "has anyone in this session reached the room" — and the peer that answers it
+        /// is the host, which has every player's position but only its own player's colliders.</para>
+        /// <para>Optional. A room that authors none has a boss that starts fighting as soon as it is raised, which
+        /// is what every room did before there was a way to say otherwise.</para>
+        /// </remarks>
+        public const string StartTriggerPath = "GameplayRoot/StartTrigger";
+
         /// <summary>Every child is where carriers set destructibles down for the boss, <b>index-aligned with
         /// <see cref="AnchorGroupPath"/></b>: the boss standing at anchor <i>n</i> is supplied by pile <i>n</i>. A
         /// room that authors fewer piles than anchors reuses the last one, and a room that authors none has no
@@ -242,6 +255,9 @@ namespace FalseGods.Application.Arena
     /// room authored none, in which case nothing is produced and the boss has no supply line.</param>
     /// <param name="CratePiles">The authored places carriers deliver to, index-aligned with
     /// <paramref name="BossAnchors"/>; empty when the room authored none.</param>
+    /// <param name="StartTrigger">The centre of the sphere a player has to reach to start the fight, or null when
+    /// the room authored none — in which case raising the boss is starting the fight.</param>
+    /// <param name="StartTriggerRadius">How far that sphere reaches, in metres. Zero when there is no trigger.</param>
     public sealed record LoadedArena(
         ArenaWorldPoint Origin,
         ArenaWorldPoint PlayerSpawn,
@@ -251,7 +267,9 @@ namespace FalseGods.Application.Arena
         float BossSize,
         IReadOnlyList<ArenaWorldPoint> MinionSpawns,
         IReadOnlyList<ArenaWorldPoint> CrateSources,
-        IReadOnlyList<ArenaWorldPoint> CratePiles);
+        IReadOnlyList<ArenaWorldPoint> CratePiles,
+        ArenaWorldPoint? StartTrigger,
+        float StartTriggerRadius);
 
     /// <summary>The outcome of <see cref="ArenaLoadFlow.Realize"/>: the peer's own validated
     /// <see cref="ArenaManifest"/> (the <c>ArenaReady</c> payload) and the realized arena, or the fail-closed
@@ -387,7 +405,7 @@ namespace FalseGods.Application.Arena
             var realized = _realization.Realize(
                 origin,
                 parityPaths,
-                new[] { playerPath, bossPath, BossRoomContent.BodyPath },
+                new[] { playerPath, bossPath, BossRoomContent.BodyPath, BossRoomContent.StartTriggerPath },
                 new[]
                 {
                     BossRoomContent.AnchorGroupPath,
@@ -465,7 +483,9 @@ namespace FalseGods.Application.Arena
                 ReadBossSize(realized.Markers),
                 CollectGroup(realized.Markers, BossRoomContent.MinionSpawnGroupPath),
                 CollectGroup(realized.Markers, BossRoomContent.CrateSourceGroupPath),
-                CollectGroup(realized.Markers, BossRoomContent.CratePileGroupPath));
+                CollectGroup(realized.Markers, BossRoomContent.CratePileGroupPath),
+                ReadStartTrigger(realized.Markers, out var triggerRadius),
+                triggerRadius);
             Stage = ArenaLoadStage.Realized;
             return new ArenaRealizeResult(true, null, Manifest, Arena);
         }
@@ -635,6 +655,37 @@ namespace FalseGods.Application.Arena
             }
 
             return scale.X;
+        }
+
+        /// <summary>
+        /// The authored start trigger: where it is, and how far it reaches. The <b>scale</b> is the sphere's
+        /// diameter, so a marker authored as an ordinary unit sphere reaches half a metre and one scaled to twelve
+        /// reaches six — which is what an author sees in the editor rather than a number they have to convert.
+        /// </summary>
+        /// <remarks>
+        /// Absent, non-uniform or non-positive reads as "no trigger" rather than as an error, exactly like the boss
+        /// size: a room is allowed not to have one, and a squashed marker is not a sphere.
+        /// </remarks>
+        private static ArenaWorldPoint? ReadStartTrigger(IReadOnlyList<RealizedMarker> markers, out float radius)
+        {
+            radius = 0f;
+            var trigger = FindMarker(markers, BossRoomContent.StartTriggerPath);
+            if (trigger is null)
+            {
+                return null;
+            }
+
+            var scale = trigger.LocalScale;
+            const float tolerance = 1e-3f;
+            if (scale.X <= 0f
+                || Math.Abs(scale.X - scale.Y) > tolerance
+                || Math.Abs(scale.X - scale.Z) > tolerance)
+            {
+                return null;
+            }
+
+            radius = scale.X * 0.5f;
+            return trigger.WorldPosition;
         }
 
         private static string? FindMarkerPath(ArenaContentArtifact artifact, string kind)

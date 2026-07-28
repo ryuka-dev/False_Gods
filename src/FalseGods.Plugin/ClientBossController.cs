@@ -59,6 +59,11 @@ namespace FalseGods.Plugin
         private readonly IBattlefieldCleanupPort _battlefield;
         private readonly IBossArmPort _rageArms;
         private readonly IBossVoicePort _voice;
+        private readonly IArenaAtmospherePort _atmosphere;
+
+        /// <summary>Whether this peer has declared the level it is in (or is loading) to be the boss arena, so an
+        /// arena of its own is on its way and a second copy must not be loaded on top of it.</summary>
+        private readonly Func<bool> _levelWillBringTheArena;
 
         /// <summary>The same declaration the host makes, made here too: aim assist and homing run on the machine
         /// doing the aiming, so each peer has to show its own game its own puppet.</summary>
@@ -82,14 +87,30 @@ namespace FalseGods.Plugin
         private bool _lateJoinArenaFailed;
         private bool _arenaSnapshotReplayed;
 
+        // Whether this peer has already played (or caught up on) the opening for the encounter it is watching.
+        private bool _openingPlayed;
+        private bool _waitingForOwnArenaLogged;
+
         // False while the encounter is fought in an arena the LEVEL owns (Strategy A): the arena outlives the
         // fight there, so tearing the encounter down must not take the level's start area with it.
         private bool _ownsArena;
 
-        public ClientBossController(ILogger logger, MonoBehaviour host, IFalseGodsIntegration integration)
+        /// <param name="atmosphere">What the room does when the fight starts. Built by the composition root and
+        /// shared with the local controller: only one of the two is ever driving a room.</param>
+        /// <param name="levelWillBringTheArena">Whether this peer is in — or on its way into — the level it has
+        /// declared to be the boss arena. While that is true and no arena is standing yet, the host's announcement
+        /// is waited on rather than answered with a load of our own.</param>
+        public ClientBossController(
+            ILogger logger,
+            MonoBehaviour host,
+            IFalseGodsIntegration integration,
+            IArenaAtmospherePort atmosphere,
+            Func<bool> levelWillBringTheArena)
         {
             _logger = logger;
             _integration = integration ?? throw new ArgumentNullException(nameof(integration));
+            _atmosphere = atmosphere ?? throw new ArgumentNullException(nameof(atmosphere));
+            _levelWillBringTheArena = levelWillBringTheArena ?? throw new ArgumentNullException(nameof(levelWillBringTheArena));
             _contentDirectory = Path.GetDirectoryName(typeof(ClientBossController).Assembly.Location) ?? ".";
             _receiver = new ReplicationReceiver(integration.Channel, integration.Session);
             _hitReporter = new ClientHitReporter(integration.Channel, integration.Session);
@@ -100,6 +121,7 @@ namespace FalseGods.Plugin
             _presence = new SulfurBossPresence(() => _presentation?.CollisionCollider, logger);
             _voice = new SulfurBossVoice(host.transform, logger);
             _voice.Warm();
+            _atmosphere.Warm();
             _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
             {
                 OnEnterArena = HandleEnterArena,
@@ -134,6 +156,9 @@ namespace FalseGods.Plugin
         /// </summary>
         public void Tick(float deltaSeconds)
         {
+            // An announcement this peer was not ready for is retried here, not on the channel thread: what it is
+            // waiting for is the level finishing its own generation.
+            _controlFlow.Tick(deltaSeconds);
             TryRealizeFromBaseline();
 
             var snapshot = _receiver.LatestBossSnapshot;
@@ -172,7 +197,17 @@ namespace FalseGods.Plugin
                     _voice.Roar(new ArenaWorldPoint(
                         snapshot.Position.X, snapshot.PositionHeight, snapshot.Position.Z));
                 }
+                else if (bossEvent is BossBeganEvent)
+                {
+                    PlayTheOpening(snapshot, withCeremony: true);
+                }
+                else if (bossEvent is BossDefeatedEvent)
+                {
+                    _atmosphere.StopBattleMusic();
+                }
             }
+
+            CatchUpOnTheOpening(snapshot);
 
             var arenaEvents = _receiver.AppliedArenaEvents;
             for (; _presentedArenaEvents < arenaEvents.Count; _presentedArenaEvents++)
@@ -215,6 +250,54 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>
+        /// Play the opening on this machine: the boss bellows, this peer's own room opens, and the music starts.
+        /// </summary>
+        /// <remarks>
+        /// <b>Nothing is sent for any of it.</b> The one fact that crossed is that the host's boss began; the roar,
+        /// the fog and the music are each peer's own account of it, made with the same numbers the host used. Which
+        /// is also why it is safe for a client to do this at all — none of it decides anything.
+        /// </remarks>
+        private void PlayTheOpening(BossSnapshot snapshot, bool withCeremony)
+        {
+            _openingPlayed = true;
+            if (withCeremony)
+            {
+                _voice.Roar(new ArenaWorldPoint(
+                    snapshot.Position.X, snapshot.PositionHeight, snapshot.Position.Z));
+                _atmosphere.SetRoomDepth(
+                    ArenaDepth.FightStart,
+                    ArenaDepth.FightEnd,
+                    ArenaDepth.RevealHoldSeconds,
+                    ArenaDepth.RevealSeconds);
+                _logger?.Log("[opening] the host's boss began; roaring and opening the room here.");
+            }
+            else
+            {
+                // Caught up rather than played: no pause, no roar. A peer that arrived after the fight started has
+                // nothing to be shown, and showing it anyway would be a second opening for a fight already running.
+                _atmosphere.SetRoomDepth(ArenaDepth.FightStart, ArenaDepth.FightEnd);
+                _logger?.Log("[opening] the fight was already under way; opening the room without the ceremony.");
+            }
+
+            _atmosphere.StartBattleMusic();
+        }
+
+        /// <summary>
+        /// Correct a peer that missed the beginning. The snapshot carries whether the fight is on, which is exactly
+        /// what a late joiner — or a peer whose reliable event arrived before it had an arena to show — needs to
+        /// stop standing in a dark, silent room while everyone else fights.
+        /// </summary>
+        private void CatchUpOnTheOpening(BossSnapshot snapshot)
+        {
+            if (_openingPlayed || !snapshot.Begun)
+            {
+                return;
+            }
+
+            PlayTheOpening(snapshot, withCeremony: false);
+        }
+
+        /// <summary>
         /// Clear this peer's own bodies when the host's boss moves on.
         /// </summary>
         /// <remarks>
@@ -248,6 +331,10 @@ namespace FalseGods.Plugin
             _presence.Withdraw();
             _presentation?.Dispose();
             _presentation = null;
+            _openingPlayed = false;
+            // The atmosphere itself belongs to the composition root and outlives this controller; what this leaves
+            // behind is only what it started.
+            _atmosphere.StopBattleMusic();
             TeardownArena();
             _logger?.Log("Client encounter composition torn down; nothing remains.");
         }
@@ -261,16 +348,34 @@ namespace FalseGods.Plugin
             _lateJoinArenaFailed = false;
 
             var outcome = RealizeArenaAt(enter.Origin, enter.Encounter);
+            if (outcome.NotYet)
+            {
+                // Said once, not every frame it is asked again.
+                if (!_waitingForOwnArenaLogged)
+                {
+                    _waitingForOwnArenaLogged = true;
+                    _logger?.Log($"The host announced {enter.Encounter}, but this peer's own arena is still being "
+                        + $"built by the level ({outcome.FailureReason}); waiting for it rather than loading a "
+                        + "second copy.");
+                }
+
+                return outcome;
+            }
+
+            _waitingForOwnArenaLogged = false;
             if (outcome.Manifest is null)
             {
                 _logger?.LogWarning($"Arena load for {enter.Encounter} failed: {outcome.FailureReason}. Reporting ArenaLoadFailed.");
-            }
-            else
-            {
-                _logger?.Log($"Arena for {enter.Encounter} ready at ({enter.Origin.X:0.0}, {enter.Origin.Y:0.0}, "
-                    + $"{enter.Origin.Z:0.0}); reporting ArenaReady.");
+                return outcome;
             }
 
+            _logger?.Log($"Arena for {enter.Encounter} ready at ({enter.Origin.X:0.0}, {enter.Origin.Y:0.0}, "
+                + $"{enter.Origin.Z:0.0}); reporting ArenaReady.");
+
+            // A fresh encounter starts in the dark here as it does on the host, so the opening reads the same on
+            // both machines. What lifts it is the host's boss beginning, which arrives on the wire.
+            _openingPlayed = false;
+            _atmosphere.SetRoomDepth(ArenaDepth.OpeningStart, ArenaDepth.OpeningEnd);
             return outcome;
         }
 
@@ -282,6 +387,17 @@ namespace FalseGods.Plugin
             if (levelArena != null && levelArena.IsLive)
             {
                 return AdoptLevelArena(levelArena, origin, encounter);
+            }
+
+            // This peer has declared the level it is in — or is still loading — to be the arena, so an arena of its
+            // own is coming. Loading one here would not merely duplicate it: a standing arena holds the bundle
+            // open, and whichever of the two came second would fail (Runbook §3.12). The host raises the moment its
+            // own level is up, which is routinely before a peer has finished generating the same level, so this is
+            // the ordinary case and not an unusual one.
+            if (_levelWillBringTheArena())
+            {
+                return ClientLoadOutcome.Deferred(
+                    "this peer's level is still building the arena it declared");
             }
 
             var realization = new BundleArenaRealization(
@@ -387,6 +503,11 @@ namespace FalseGods.Plugin
             }
 
             var outcome = RealizeArenaAt(baseline.ArenaOrigin, baseline.Encounter);
+            if (outcome.NotYet)
+            {
+                return; // the level is still building this peer's arena; try again next frame
+            }
+
             if (outcome.Manifest is null)
             {
                 _lateJoinArenaFailed = true;
@@ -495,6 +616,9 @@ namespace FalseGods.Plugin
             _encounter = null;
             _presentedEvents = 0;
             _presentedArenaEvents = 0;
+            // A new encounter gets its own opening, and the previous fight's music is not its.
+            _openingPlayed = false;
+            _atmosphere.StopBattleMusic();
             // The arena for the new encounter arrives via EnterArena (or the new baseline); a stale one is
             // replaced there. If the announcement already came, keep it.
             if (_arenaEncounter != null && _arenaEncounter != next)
@@ -516,6 +640,8 @@ namespace FalseGods.Plugin
             _encounter = null;
             _presentedEvents = 0;
             _presentedArenaEvents = 0;
+            _openingPlayed = false;
+            _atmosphere.StopBattleMusic();
             TeardownArena();
         }
 

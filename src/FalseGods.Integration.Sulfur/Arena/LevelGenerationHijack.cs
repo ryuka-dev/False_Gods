@@ -164,10 +164,30 @@ namespace FalseGods.Integration.Sulfur.Arena
             return true;
         }
 
+        /// <summary>
+        /// How many generation runs that built our arena have finished. Rises once per arena the players are put
+        /// into, and never falls.
+        /// </summary>
+        /// <remarks>
+        /// <b>The difference between "the arena object exists" and "the level around it is finished".</b> The arena
+        /// is instantiated at generation step 3 of seventeen — before navigation is scanned and before the player
+        /// is even placed — so anything that waits for the arena to <i>appear</i> starts far too early. The end of
+        /// the run is the canonical "the players are in the room" moment, and it is already a boundary this class
+        /// owns, so counting it here costs nothing and needs no observer of its own.
+        /// </remarks>
+        public static int ArenaRunsFinished { get; private set; }
+
         /// <summary>Disarm, whether the generation run completed, failed, or was abandoned. Idempotent. The arena
         /// <i>mode</i> is untouched — it outlives any one run, which is the whole point of it.</summary>
         public static void Disarm()
         {
+            if (IsArmed)
+            {
+                // Counted even for a run that failed: what a failed run leaves behind is a level with no arena in
+                // it, and IsLive answers that separately. This only says the generating is over.
+                ArenaRunsFinished++;
+            }
+
             IsArmed = false;
         }
 

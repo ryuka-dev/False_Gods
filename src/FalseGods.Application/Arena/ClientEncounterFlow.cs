@@ -9,11 +9,22 @@ namespace FalseGods.Application.Arena
 {
     /// <summary>The composition's answer to an <c>EnterArena</c>: the locally validated manifest on success, or
     /// the reason to report in <c>ArenaLoadFailed</c>.</summary>
-    public sealed record ClientLoadOutcome(ArenaManifest? Manifest, string? FailureReason)
+    /// <param name="NotYet">
+    /// The composition cannot answer <i>right now</i> but expects to be able to shortly, so nothing is reported to
+    /// the host yet. The case it exists for: this peer is on its way into the same level and its arena is still
+    /// being built as the announcement arrives. Answering then would make it load a second copy of the content it
+    /// is about to be standing in — which does not merely waste a load, it fails, because a standing arena holds
+    /// its bundle open (Docs/BossEncounterRunbook.md §3.12).
+    /// </param>
+    public sealed record ClientLoadOutcome(ArenaManifest? Manifest, string? FailureReason, bool NotYet = false)
     {
         public static ClientLoadOutcome Ready(ArenaManifest manifest) => new ClientLoadOutcome(manifest, null);
 
         public static ClientLoadOutcome Failed(string reason) => new ClientLoadOutcome(null, reason);
+
+        /// <summary>Ask again shortly. <paramref name="reason"/> is what gets reported if the wait runs out, so it
+        /// has to stand on its own as a failure.</summary>
+        public static ClientLoadOutcome Deferred(string reason) => new ClientLoadOutcome(null, reason, NotYet: true);
     }
 
     /// <summary>
@@ -31,8 +42,21 @@ namespace FalseGods.Application.Arena
     /// </remarks>
     public sealed class ClientEncounterFlow : IDisposable
     {
+        /// <summary>
+        /// How long a deferred load may keep saying "not yet" before it is reported as a failure.
+        /// </summary>
+        /// <remarks>
+        /// Comfortably inside the host's own gate timeout, so a peer that really cannot get into the arena tells
+        /// the host <i>why</i> instead of going silent and being timed out — a named reason is the difference
+        /// between a diagnosable abort and a mysterious one.
+        /// </remarks>
+        private const float DeferralLimitSeconds = 25f;
+
         private readonly IEncounterChannel _channel;
         private readonly IMultiplayerSession _session;
+
+        private EnterArena? _waiting;
+        private float _waited;
 
         public ClientEncounterFlow(IEncounterChannel channel, IMultiplayerSession session)
         {
@@ -53,6 +77,22 @@ namespace FalseGods.Application.Arena
 
         /// <summary>The boss's attack hit this client's player — apply the host-decided damage to the local player.</summary>
         public Action<BossHitPlayer>? OnBossHitPlayer { get; set; }
+
+        /// <summary>
+        /// Retry an announcement the composition was not ready for, and give up on one it has been holding too
+        /// long. A no-op when there is nothing waiting, which is almost always.
+        /// </summary>
+        public void Tick(float deltaSeconds)
+        {
+            var waiting = _waiting;
+            if (waiting is null)
+            {
+                return;
+            }
+
+            _waited += deltaSeconds;
+            Answer(waiting, Load(waiting), giveUp: _waited >= DeferralLimitSeconds);
+        }
 
         public void Dispose() => _channel.Received -= OnReceived;
 
@@ -93,29 +133,49 @@ namespace FalseGods.Application.Arena
 
         private void HandleEnterArena(EnterArena enter)
         {
-            ClientLoadOutcome outcome;
+            // A fresh announcement replaces whatever was being waited on: the host has moved on.
+            _waiting = null;
+            _waited = 0f;
+            Answer(enter, Load(enter), giveUp: false);
+        }
+
+        private ClientLoadOutcome Load(EnterArena enter)
+        {
             if (!IsFinite(enter.Origin))
             {
-                outcome = ClientLoadOutcome.Failed("EnterArena carried a non-finite origin");
+                return ClientLoadOutcome.Failed("EnterArena carried a non-finite origin");
             }
-            else if (OnEnterArena is null)
+
+            if (OnEnterArena is null)
             {
-                outcome = ClientLoadOutcome.Failed("client has no arena composition to load with");
+                return ClientLoadOutcome.Failed("client has no arena composition to load with");
             }
-            else
+
+            return OnEnterArena(enter);
+        }
+
+        /// <summary>Report the outcome to the host, or hold the announcement for another go. Nothing is said out
+        /// loud while a load is deferred — the host is waiting at its gate either way, and a peer that answered
+        /// "failed" would abort an encounter it is seconds away from being ready for.</summary>
+        private void Answer(EnterArena enter, ClientLoadOutcome outcome, bool giveUp)
+        {
+            if (outcome.NotYet && !giveUp)
             {
-                outcome = OnEnterArena(enter);
+                _waiting = enter;
+                return;
             }
+
+            _waiting = null;
+            _waited = 0f;
 
             if (outcome.Manifest != null)
             {
                 Reply(EncounterCodec.Encode(new ArenaReady(enter.Encounter, outcome.Manifest)));
+                return;
             }
-            else
-            {
-                Reply(EncounterCodec.Encode(new ArenaLoadFailed(
-                    enter.Encounter, outcome.FailureReason ?? "unspecified load failure")));
-            }
+
+            Reply(EncounterCodec.Encode(new ArenaLoadFailed(
+                enter.Encounter, outcome.FailureReason ?? "unspecified load failure")));
         }
 
         private void Reply(EncodedPayload payload) =>
