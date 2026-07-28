@@ -76,7 +76,7 @@ namespace FalseGods.Plugin
         /// </remarks>
         private const float ArenaFogStart = 10f;
 
-        private const float ArenaFogEnd = 65f;
+        private const float ArenaFogEnd = 72f;
 
         // Bring-up throw shape: far enough ahead to read as incoming, high enough and slow enough to be shot.
         private const float ThrowDistance = 14f;
