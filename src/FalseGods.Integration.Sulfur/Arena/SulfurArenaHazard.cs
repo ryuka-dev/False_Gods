@@ -1,4 +1,4 @@
-#nullable disable
+﻿#nullable disable
 
 using System;
 using System.Collections.Generic;
@@ -205,12 +205,39 @@ namespace FalseGods.Integration.Sulfur.Arena
             {
                 // Normal damage from a non-player source, as the donor's own volume dealt it: the game then
                 // applies its own armour and resistance rules on top.
-                player.playerUnit.ReceiveDamage(
+                var before = Health(player);
+                var accepted = player.playerUnit.ReceiveDamage(
                     _damage, DamageTypes.Normal, new SludgeDamager(player.transform), Hitmesh.Data.Default);
+                var after = Health(player);
+
+                // Reported rather than assumed. Asking the game to damage somebody and watching it happen are two
+                // different things: the hit can be refused outright, or accepted and then reduced to nothing by
+                // the player's own resistances — and from the outside both look identical to a player who says
+                // the mud does not hurt.
+                if (!accepted || after >= before)
+                {
+                    _logger?.Log($"[hazard] the game did not take {_damage} off a player: accepted={accepted}, "
+                        + $"health {before:0.##} -> {after:0.##}");
+                }
             }
             catch (Exception exception)
             {
                 _logger?.LogWarning($"[hazard] the sludge could not burn a player ({exception.Message}); skipped.");
+            }
+        }
+
+        /// <summary>A player's current health, or a negative number when it cannot be read — never mistaken for
+        /// a real reading.</summary>
+        private static float Health(Player player)
+        {
+            try
+            {
+                var stats = player.playerUnit.Stats;
+                return stats == null ? -1f : stats.GetStatus(EntityAttributes.Status_CurrentHealth);
+            }
+            catch (Exception)
+            {
+                return -1f;
             }
         }
 
