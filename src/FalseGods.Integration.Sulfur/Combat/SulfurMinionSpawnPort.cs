@@ -271,7 +271,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                     return; // not a unit that chases anything
                 }
 
-                var nearest = NearestPlayerUnitTo(unit.transform.position);
+                var nearest = FightingPlayers.NearestTo(unit.transform.position);
                 if (nearest != null)
                 {
                     agent.ReportLastSeen(nearest, nearest.transform.position, unit.transform.position, true);
@@ -283,47 +283,6 @@ namespace FalseGods.Integration.Sulfur.Combat
                 _logger?.LogWarning($"[minion] a minion could not be pointed at the fight ({exception.Message}); "
                     + "it will have to notice the players on its own.");
             }
-        }
-
-        /// <summary>
-        /// The player unit closest to <paramref name="from"/>, or null when the game lists none. Read from the
-        /// game's own player roster rather than its local-player singleton, because that roster is what a session
-        /// registers its remote players into — so "nearest player" means nearest of <i>everyone</i>.
-        /// </summary>
-        private static Unit? NearestPlayerUnitTo(Vector3 from)
-        {
-            var gameManager = StaticInstance<GameManager>.Instance;
-            if (gameManager == null)
-            {
-                return null;
-            }
-
-            var players = gameManager.Players;
-            if (players == null)
-            {
-                return null;
-            }
-
-            Unit? nearest = null;
-            var nearestDistance = float.MaxValue;
-            for (var i = 0; i < players.Count; i++)
-            {
-                var player = players[i];
-                var playerUnit = player != null ? player.playerUnit : null;
-                if (playerUnit == null || !FightingPlayers.IsFighting(player))
-                {
-                    continue; // nobody sends minions after someone already lying on the floor
-                }
-
-                var distance = (playerUnit.transform.position - from).sqrMagnitude;
-                if (distance < nearestDistance)
-                {
-                    nearestDistance = distance;
-                    nearest = playerUnit;
-                }
-            }
-
-            return nearest;
         }
 
         /// <summary>Drop the entries whose units have gone — destroyed by us, killed by a player, or taken with a

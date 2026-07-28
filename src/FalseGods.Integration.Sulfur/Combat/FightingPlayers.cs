@@ -61,6 +61,47 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// game's roster. A player without a unit is nobody to attack.</summary>
         public static bool IsFighting(Player? player) =>
             player != null && IsFighting(player.playerUnit);
+
+        /// <summary>
+        /// The unit of the player closest to <paramref name="from"/> who is still in the fight, or null when the
+        /// game lists nobody.
+        /// </summary>
+        /// <remarks>
+        /// Read from the game's own player <i>roster</i> rather than its local-player singleton, because that
+        /// roster is what a session registers its remote players into — so "nearest player" means nearest of
+        /// everyone, on a host as well as in single-player. The singleton would quietly make every such decision
+        /// about the host's own player and no one else's.
+        /// </remarks>
+        public static Unit? NearestTo(Vector3 from)
+        {
+            var gameManager = StaticInstance<GameManager>.Instance;
+            var players = gameManager != null ? gameManager.Players : null;
+            if (players == null)
+            {
+                return null;
+            }
+
+            Unit? nearest = null;
+            var nearestDistance = float.MaxValue;
+            for (var i = 0; i < players.Count; i++)
+            {
+                var player = players[i];
+                var playerUnit = player != null ? player.playerUnit : null;
+                if (playerUnit == null || !IsFighting(player))
+                {
+                    continue; // nobody aims at someone already lying on the floor
+                }
+
+                var distance = (playerUnit.transform.position - from).sqrMagnitude;
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = playerUnit;
+                }
+            }
+
+            return nearest;
+        }
     }
 
     /// <summary>

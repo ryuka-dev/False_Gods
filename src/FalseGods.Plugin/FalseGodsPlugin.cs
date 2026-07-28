@@ -288,6 +288,9 @@ namespace FalseGods.Plugin
                 // cannot share a roster with the ordinary waves that go on around it - and it is outlined, because
                 // a player has to be able to tell which of the goblins on the floor are the ones that matter.
                 new SulfurMinionSpawnPort(this, _log, outlined: true),
+                // The other half of the rage, and the half the players cannot finish: the cave boss's own arms,
+                // which rise beside it and keep throwing until the route feeds it again.
+                new SulfurBossArmPort(this, _log),
                 _crates,
                 new SulfurCarrierPort(
                     this,

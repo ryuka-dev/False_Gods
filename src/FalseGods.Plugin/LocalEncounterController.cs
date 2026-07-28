@@ -139,6 +139,19 @@ namespace FalseGods.Plugin
         /// them is half of what it takes to calm it.</summary>
         private const int EmergencyBandSize = 4;
 
+        /// <summary>
+        /// How many arms a starved boss puts up beside itself, and how far to either side they stand.
+        /// </summary>
+        /// <remarks>
+        /// Two, flanking it, because that is what the creature reads as: a boss reaching out of the sludge with
+        /// the hands it has left now that there is nothing on its pile to throw. The distance keeps them clear of
+        /// the boss's own body without putting them somewhere the players can ignore — the arm never moves, so
+        /// where it goes up is where it fights from for the whole rage.
+        /// </remarks>
+        private const int RageArmCount = 2;
+
+        private const float RageArmSideDistance = 3f;
+
         /// <summary>How long a carrier spends loading and again setting down, mirroring the carrier port's own
         /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
         private const float CarrierHandlingSeconds = 0.75f;
@@ -186,6 +199,7 @@ namespace FalseGods.Plugin
         private readonly float _maxClientHitDamage;
         private readonly IMinionSpawnPort _minionSpawns;
         private readonly IMinionSpawnPort _emergencyMinions;
+        private readonly IBossArmPort _rageArms;
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
@@ -251,10 +265,14 @@ namespace FalseGods.Plugin
         /// ordinary waves because the rage ends only when <i>this</i> band is dead. Counting them together would
         /// make an ordinary wave's stragglers hold the rage open, or an emergency band's death go unnoticed among
         /// them; kept apart, both can be on the floor at once, which is the point.</param>
+        /// <param name="rageArms">The arms the boss puts up while it is starved. Unlike the band they are not a job
+        /// the players can finish — they cannot be killed and they stand where the boss stands — so they are the
+        /// part of the rage that ends only by supplying it again.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
             IMinionSpawnPort emergencyMinions,
+            IBossArmPort rageArms,
             IThrownCratePort crates,
             ICarrierPort carriers,
             Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
@@ -265,6 +283,7 @@ namespace FalseGods.Plugin
             _logger = logger;
             _minionSpawns = minions ?? throw new ArgumentNullException(nameof(minions));
             _emergencyMinions = emergencyMinions ?? throw new ArgumentNullException(nameof(emergencyMinions));
+            _rageArms = rageArms ?? throw new ArgumentNullException(nameof(rageArms));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
             _carriers = carriers ?? throw new ArgumentNullException(nameof(carriers));
             _announceProduced = announceProduced;
@@ -732,6 +751,7 @@ namespace FalseGods.Plugin
             // Both bands leave with the fight, and the rage with them: a boss raised again starts hungry-for-
             // nothing rather than mid-tantrum.
             _emergencyMinions.DespawnAll();
+            _rageArms.LowerAll();
             _starvation.Reset();
             _pileLastSeen = 0;
             // The supply line stops with the fight. The destructibles it already produced are left where they are:
@@ -950,10 +970,12 @@ namespace FalseGods.Plugin
                     _logger?.Log($"[rage] nothing delivered for {_starvation.SinceDelivery:0.#}s: the boss comes at "
                         + $"you. Summoning {EmergencyBandSize}; it settles when they are dead AND the route runs.");
                     SummonEmergencyBand();
+                    RaiseRageArms();
                     break;
 
                 case StarvationChange.Calmed:
                     _logger?.Log("[rage] delivering again and its band is dead; the boss goes back to throwing.");
+                    _rageArms.LowerAll();
                     break;
             }
         }
@@ -977,6 +999,45 @@ namespace FalseGods.Plugin
             }
 
             _emergencyMinions.Summon(at);
+        }
+
+        /// <summary>
+        /// Put the starved boss's arms up beside where it is standing.
+        /// </summary>
+        /// <remarks>
+        /// <b>The anchor, not the boss's transform.</b> The boss teleports between the room's authored anchors, so
+        /// the anchor is where it will still be standing for the rest of this station — an arm placed against a
+        /// position read mid-relocation would be left throwing at nothing from the place it used to be. It is the
+        /// same reading the delivery pile uses, for the same reason.
+        /// </remarks>
+        private void RaiseRageArms()
+        {
+            if (!TryGetBossAnchor(out var at))
+            {
+                _logger?.LogWarning("[arm] the room authored no boss anchors, so there is nowhere beside the boss "
+                    + "to put an arm; it rages with its band only.");
+                return;
+            }
+
+            _rageArms.Raise(at, RageArmCount, RageArmSideDistance);
+        }
+
+        /// <summary>Where the boss is standing, by the room's authored anchor for its current station. False when
+        /// there is no fight or the room authored no anchors.</summary>
+        private bool TryGetBossAnchor(out ArenaWorldPoint at)
+        {
+            at = default;
+
+            var anchors = _arenaContent?.BossAnchors;
+            if (_boss is null || anchors is null || anchors.Count == 0)
+            {
+                return false;
+            }
+
+            var station = _boss.StationIndex;
+            var anchor = station >= 0 && station < Itinerary.Count ? Itinerary[station].AnchorIndex : 0;
+            at = anchors[anchor < anchors.Count ? anchor : anchors.Count - 1];
+            return true;
         }
 
         private void Summon(SummonRequest request)
