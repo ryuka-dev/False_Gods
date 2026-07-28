@@ -291,6 +291,9 @@ namespace FalseGods.Plugin
                 // The other half of the rage, and the half the players cannot finish: the cave boss's own arms,
                 // which rise beside it and keep throwing until the route feeds it again.
                 new SulfurBossArmPort(this, _log),
+                // One room, fought in for a long time, with waves summoned into it on purpose: without this the
+                // floor ends the fight buried under everything the players have killed.
+                new SulfurBattlefieldCleanup(_log),
                 _crates,
                 new SulfurCarrierPort(
                     this,

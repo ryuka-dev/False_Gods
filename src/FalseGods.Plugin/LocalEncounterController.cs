@@ -9,6 +9,7 @@ using FalseGods.Application.Replication;
 using FalseGods.Core.Arena;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Combat;
+using FalseGods.Core.Bosses.Events;
 using FalseGods.Core.Encounters;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Arena;
@@ -197,6 +198,7 @@ namespace FalseGods.Plugin
         private readonly IMinionSpawnPort _minionSpawns;
         private readonly IMinionSpawnPort _emergencyMinions;
         private readonly IBossArmPort _rageArms;
+        private readonly IBattlefieldCleanupPort _battlefield;
 
         /// <summary>
         /// Where the rage's arms stand relative to the boss, and how large they are drawn.
@@ -219,6 +221,17 @@ namespace FalseGods.Plugin
         private const float ArmLift = 1.5f;
 
         private const float ArmScale = 1.5f;
+
+        /// <summary>
+        /// How far from the arena's origin a corpse has to be lying before a sweep leaves it alone.
+        /// </summary>
+        /// <remarks>
+        /// <b>A fence, not an outline.</b> The room is about eighty metres across and the origin sits inside it,
+        /// so this reaches past every corner of it — which is the point. It is not trying to trace where the arena
+        /// ends; it is there so that a sweep can never reach into an ordinary level, which is possible whenever
+        /// the boss is raised somewhere other than its own arena.
+        /// </remarks>
+        private const float CorpseSweepRadius = 120f;
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
@@ -287,11 +300,15 @@ namespace FalseGods.Plugin
         /// <param name="rageArms">The arms the boss puts up while it is starved. Unlike the band they are not a job
         /// the players can finish — they cannot be killed and they stand where the boss stands — so they are the
         /// part of the rage that ends only by supplying it again.</param>
+        /// <param name="battlefield">Clears the bodies and the gore between the boss's stations. A fight held in
+        /// one room for a long time, with waves summoned into it deliberately, buries the things the players are
+        /// meant to be reading under everything they have already killed.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
             IMinionSpawnPort emergencyMinions,
             IBossArmPort rageArms,
+            IBattlefieldCleanupPort battlefield,
             IThrownCratePort crates,
             ICarrierPort carriers,
             Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
@@ -303,6 +320,7 @@ namespace FalseGods.Plugin
             _minionSpawns = minions ?? throw new ArgumentNullException(nameof(minions));
             _emergencyMinions = emergencyMinions ?? throw new ArgumentNullException(nameof(emergencyMinions));
             _rageArms = rageArms ?? throw new ArgumentNullException(nameof(rageArms));
+            _battlefield = battlefield ?? throw new ArgumentNullException(nameof(battlefield));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
             _carriers = carriers ?? throw new ArgumentNullException(nameof(carriers));
             _announceProduced = announceProduced;
@@ -1025,6 +1043,41 @@ namespace FalseGods.Plugin
             _emergencyMinions.Summon(at);
         }
 
+        /// <summary>
+        /// Clear the floor when the boss goes to its next station.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>The boss's own relocation is the moment</b>, taken from the event it already emits rather than
+        /// by watching its station index change: it is the same fact, said once, by the thing that decided it. And
+        /// it is a moment the fight already has — the boss sinks, is gone for a beat, and rises somewhere else — so
+        /// the bodies go while nobody is looking at them, and the clear floor reads as something the boss did
+        /// rather than as objects blinking out.</para>
+        /// <para><b>Everything in the room, not only what the boss summoned.</b> The user's call: a floor with the
+        /// waves cleared but the players' own kills still lying on it is not a cleared floor. So the sweep goes by
+        /// where a body is rather than by who made it, which is why it is bounded to the arena at all.</para>
+        /// </remarks>
+        private void ClearTheFloorOnRelocation(IReadOnlyList<IBossDomainEvent> bossEvents)
+        {
+            var arena = _arenaContent;
+            if (arena is null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < bossEvents.Count; i++)
+            {
+                if (!(bossEvents[i] is BossRelocated relocated))
+                {
+                    continue;
+                }
+
+                var swept = _battlefield.SweepCorpses(arena.Origin, CorpseSweepRadius);
+                _logger?.Log($"[cleanup] station {relocated.StationIndex}: {swept} body/bodies cleared from the "
+                    + "floor, and the gore with them.");
+                return; // one relocation is one sweep, however many events arrived together
+            }
+        }
+
         /// <summary>Put the starved boss's arms up at its sides.</summary>
         private void RaiseRageArms() => _rageArms.Raise(RageArmCount, ArmsAroundTheBoss());
 
@@ -1207,6 +1260,7 @@ namespace FalseGods.Plugin
             var bossEvents = _boss.DrainEvents();
             _presenter.Present(_boss, bossEvents);
             _coordinator.Process(bossEvents);
+            ClearTheFloorOnRelocation(bossEvents);
 
             var damageRequests = _boss.DrainDamageRequests();
             if (damageRequests.Count > 0)
