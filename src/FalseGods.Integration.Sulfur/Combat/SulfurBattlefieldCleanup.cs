@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using FalseGods.Application.Combat;
 using FalseGods.RuntimeContracts.Arena;
 using PerfectRandom.Sulfur.Core;
@@ -18,11 +18,14 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// dead unit to (everything but breakables) from <c>Unit.Die()</c>. It is the only record of the kind there is
     /// — and, measured on v0.18.5, <b>nothing in the game ever reads it</b>: the only other thing that touches it
     /// is the wholesale clear between levels. So it is a register kept for someone, and this is that someone.</para>
-    /// <para><b>How they are taken.</b> <c>Npc.DestroySelf()</c>, which is exactly what the game's own endless
-    /// mode does to its tracked units when it changes arena — it walks its list and destroys each, alive or dead.
-    /// The loose gore is a separate system with a separate call, <c>GibSystemNEW.DeactivateAllGibs()</c>, which is
-    /// what endless mode uses between waves. Two systems, two calls; clearing one leaves the other's mess behind,
-    /// which is what "the bodies are gone but the floor is still red" would look like.</para>
+    /// <para><b>How they are taken.</b> <c>Npc.SinkIntoGroundEndless()</c> — the game's own way of retiring a
+    /// body, and the one players have already seen: it waits for the death animation to finish, switches the
+    /// creature's physics and navigation off, waits, and then lowers it through the floor before destroying it.
+    /// Destroying outright is the obvious call and looks wrong, because a body vanishing where someone is looking
+    /// reads as a bug rather than as the room being cleared.</para>
+    /// <para>The loose gore is a separate system with a separate call, <c>GibSystemNEW.DeactivateAllGibs()</c>,
+    /// which is what endless mode uses between waves. Two systems, two calls; clearing one leaves the other's mess
+    /// behind, which is what "the bodies are gone but the floor is still red" would look like.</para>
     /// <para><b>What is deliberately never swept.</b> A player — alive, down, or dead — is a body the fight is
     /// still about, and removing one would take a rescuable team-mate out of the world. Anything still alive is
     /// not a corpse. Anything outside the caller's radius is not in this room.</para>
@@ -47,10 +50,13 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// Take the bodies, and drop them from the game's register as they go.
         /// </summary>
         /// <remarks>
-        /// <b>Pruning the register is part of the job, not tidiness.</b> Nothing else in the game removes from it,
-        /// so entries only ever accumulate — left alone, every later sweep would walk a list that keeps growing
-        /// with the destroyed objects it already dealt with. Walked backwards so removing an entry cannot skip the
-        /// next one.
+        /// <para><b>Pruning the register is part of the job, not tidiness.</b> Nothing else in the game removes
+        /// from it, so entries only ever accumulate — left alone, every later sweep would walk a list that keeps
+        /// growing with the bodies it already dealt with. Walked backwards so removing an entry cannot skip the
+        /// next one.</para>
+        /// <para>An entry is dropped as soon as the body has been <i>told</i> to go, not when it has finished
+        /// going: sinking takes the better part of a quarter of a minute, and a body counted again by the next
+        /// sweep would be sent down twice as fast and destroyed twice.</para>
         /// </remarks>
         private int SweepBodies(Vector3 around, float radius)
         {
@@ -86,7 +92,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 {
                     if (unit is Npc npc)
                     {
-                        npc.DestroySelf();
+                        npc.SinkIntoGroundEndless();
                     }
                     else
                     {

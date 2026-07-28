@@ -222,17 +222,6 @@ namespace FalseGods.Plugin
 
         private const float ArmScale = 1.5f;
 
-        /// <summary>
-        /// How far from the arena's origin a corpse has to be lying before a sweep leaves it alone.
-        /// </summary>
-        /// <remarks>
-        /// <b>A fence, not an outline.</b> The room is about eighty metres across and the origin sits inside it,
-        /// so this reaches past every corner of it — which is the point. It is not trying to trace where the arena
-        /// ends; it is there so that a sweep can never reach into an ordinary level, which is possible whenever
-        /// the boss is raised somewhere other than its own arena.
-        /// </remarks>
-        private const float CorpseSweepRadius = 120f;
-
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
 
@@ -1071,7 +1060,7 @@ namespace FalseGods.Plugin
                     continue;
                 }
 
-                var swept = _battlefield.SweepCorpses(arena.Origin, CorpseSweepRadius);
+                var swept = _battlefield.SweepCorpses(arena.Origin, BattlefieldSweep.ArenaReach);
                 _logger?.Log($"[cleanup] station {relocated.StationIndex}: {swept} body/bodies cleared from the "
                     + "floor, and the gore with them.");
                 return; // one relocation is one sweep, however many events arrived together

@@ -55,6 +55,7 @@ namespace FalseGods.Plugin
         private readonly ClientHitReporter _hitReporter;
         private readonly IDamagePort _damagePort;
         private readonly SulfurLocalPlayer _localPlayer;
+        private readonly IBattlefieldCleanupPort _battlefield;
 
         private ReplicationReceiver _receiver;
         private IDisposable? _hitBinding;
@@ -87,6 +88,7 @@ namespace FalseGods.Plugin
             _hitReporter = new ClientHitReporter(integration.Channel, integration.Session);
             _damagePort = new SulfurDamagePort(logger);
             _localPlayer = new SulfurLocalPlayer();
+            _battlefield = new SulfurBattlefieldCleanup(logger);
             _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
             {
                 OnEnterArena = HandleEnterArena,
@@ -147,7 +149,12 @@ namespace FalseGods.Plugin
             var events = _receiver.AppliedBossEvents;
             for (; _presentedEvents < events.Count; _presentedEvents++)
             {
-                _presentation!.Handle(WirePresentationMapping.ToEvent(snapshot.Boss, events[_presentedEvents]));
+                var bossEvent = events[_presentedEvents];
+                _presentation!.Handle(WirePresentationMapping.ToEvent(snapshot.Boss, bossEvent));
+                if (bossEvent is BossRelocatedEvent)
+                {
+                    ClearOurOwnFloor();
+                }
             }
 
             var arenaEvents = _receiver.AppliedArenaEvents;
@@ -158,6 +165,30 @@ namespace FalseGods.Plugin
 
             _presentation!.Apply(WirePresentationMapping.ToState(snapshot));
             _presentation.Render(deltaSeconds);
+        }
+
+        /// <summary>
+        /// Clear this peer's own bodies when the host's boss moves on.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Each peer sweeps for itself, and that is not a divergence.</b> The host does the same thing at
+        /// the same moment, off the same fact — its boss relocating is what produced the event this is reading —
+        /// and the bodies are already dead on both machines. Nothing is being decided here: a corpse is not a
+        /// thing anybody is still fighting, so removing this peer's copy of one cannot disagree with the host
+        /// about anything that matters.</para>
+        /// <para>It has to be done here because the session layer mirrors <i>spawns</i>, not removals: measured
+        /// in a two-peer session, the host's floor cleared and the client's stayed exactly as it was.</para>
+        /// </remarks>
+        private void ClearOurOwnFloor()
+        {
+            var arena = _loadedArena;
+            if (arena is null)
+            {
+                return;
+            }
+
+            var swept = _battlefield.SweepCorpses(arena.Origin, BattlefieldSweep.ArenaReach);
+            _logger?.Log($"[cleanup] the host's boss moved on; {swept} body/bodies going into the floor here.");
         }
 
         /// <summary>Tear everything down; nothing from the encounter remains in the level.</summary>
