@@ -65,7 +65,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         {
             get
             {
-                Forget(dead: true);
+                Forget();
                 return _spawned.Count;
             }
         }
@@ -244,11 +244,21 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         /// <summary>Drop the entries whose units have gone — destroyed by us, killed by a player, or taken with a
         /// level.</summary>
-        private void Forget(bool dead)
+        /// <summary>
+        /// Drop the ones that are no longer a threat.
+        /// </summary>
+        /// <remarks>
+        /// <b>Dead is not the same as gone.</b> A killed goblin leaves a body behind — the object outlives the
+        /// creature by a death animation at least — so counting whatever has not been destroyed yet counts
+        /// corpses. That reads as minions still standing: summons that should top a wave up are refused because
+        /// the wave looks full, and anything waiting for a band to be finished waits forever.
+        /// </remarks>
+        private void Forget()
         {
             for (var i = _spawned.Count - 1; i >= 0; i--)
             {
-                if (_spawned[i] == null)
+                var unit = _spawned[i];
+                if (unit == null || !unit.IsAlive)
                 {
                     _spawned.RemoveAt(i);
                 }
