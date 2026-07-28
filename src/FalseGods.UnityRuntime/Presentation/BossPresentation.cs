@@ -687,6 +687,52 @@ namespace FalseGods.UnityRuntime.Presentation
             return Mathf.SmoothStep(1f, 0f, (elapsed - held) / Mathf.Max(1e-4f, 1f - held));
         }
 
+        /// <summary>
+        /// Sink a colour into the level's fog by however much distance the boss is standing behind.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Because the shader will not do it.</b> The one shader the game ships that draws a plain
+        /// textured quad correctly is a sprite shader, and sprite shaders have no fog stage — so the boss stayed
+        /// at full brightness in a room where every one of the game's own creatures dimmed with distance, which
+        /// reads as the boss being pasted on top of the scene rather than standing in it.</para>
+        /// <para><b>The game's own numbers, applied per object instead of per pixel.</b> This is Unity's linear
+        /// fog worked out from the same <c>RenderSettings</c> the arena sets and the game drives, so the boss
+        /// dims on exactly the curve everything around it dims on. Per object is the approximation: a billboard
+        /// is one flat thing at one distance, so there is nothing across its face for a per-pixel fog to vary.
+        /// </para>
+        /// <para>Only the creature is fogged. The health bar deliberately is not — a bar you cannot read at the
+        /// far side of the room is not telling you anything.</para>
+        /// </remarks>
+        private Color Fogged(Color color)
+        {
+            if (!RenderSettings.fog)
+            {
+                return color;
+            }
+
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                return color;
+            }
+
+            var start = RenderSettings.fogStartDistance;
+            var end = RenderSettings.fogEndDistance;
+            if (end <= start)
+            {
+                return color;
+            }
+
+            var distance = Vector3.Distance(camera.transform.position, _bodyBillboard.position);
+            var clear = Mathf.Clamp01((end - distance) / (end - start));
+
+            // Alpha is the sprite's own cut-out and has nothing to do with distance; fogging it would dissolve the
+            // boss instead of dimming it.
+            var fogged = Color.Lerp(RenderSettings.fogColor, color, clear);
+            fogged.a = color.a;
+            return fogged;
+        }
+
         private void UpdateBodyColor()
         {
             Color color;
@@ -718,7 +764,7 @@ namespace FalseGods.UnityRuntime.Presentation
                     : PhaseOneColor;
             }
 
-            SetColor(_bodyMat, color);
+            SetColor(_bodyMat, Fogged(color));
         }
 
         private void UpdateWeakPoint()
@@ -733,7 +779,7 @@ namespace FalseGods.UnityRuntime.Presentation
                 color = _hasState && _state.WeakPointExposed ? WeakExposedColor : WeakHiddenColor;
             }
 
-            SetColor(_weakMat, color);
+            SetColor(_weakMat, Fogged(color));
         }
 
         private void UpdateHealthBar(float fraction)
