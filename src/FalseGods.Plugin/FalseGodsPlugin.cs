@@ -210,9 +210,11 @@ namespace FalseGods.Plugin
             _fogStartDistance = Config.Bind("Arena", "FogStartDistance", 10f,
                 "[DEV/TEMPORARY - removed before release] Distance at which the boss arena's fog begins to "
                 + "thicken. Only applies to the arena loaded as a level; the level's own fog COLOUR is kept.");
-            _fogEndDistance = Config.Bind("Arena", "FogEndDistance", 80f,
+            _fogEndDistance = Config.Bind("Arena", "FogEndDistance", 70f,
                 "[DEV/TEMPORARY - removed before release] Distance at which the boss arena's fog becomes opaque. "
-                + "The arena is 60 units across, so a far corner sits about 60 units from the player's spawn. "
+                + "The arena is about 80 units across, so this deliberately stops short of the far wall: the room "
+                + "should end in fog rather than in a visible edge. NOTE that the game's aim assist reaches no "
+                + "further than this - it clamps its own range to the fog cutoff - so this is not purely a look. "
                 + "Changeable live while standing in the arena.");
 
             // TEMPORARY bring-up affordance for the thrown-destructible mechanic: throw one crate at the player,
