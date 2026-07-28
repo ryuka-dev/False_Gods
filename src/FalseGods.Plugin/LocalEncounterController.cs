@@ -140,17 +140,14 @@ namespace FalseGods.Plugin
         private const int EmergencyBandSize = 4;
 
         /// <summary>
-        /// How many arms a starved boss puts up beside itself, and how far to either side they stand.
+        /// How many arms a starved boss puts up beside itself.
         /// </summary>
         /// <remarks>
         /// Two, flanking it, because that is what the creature reads as: a boss reaching out of the sludge with
-        /// the hands it has left now that there is nothing on its pile to throw. The distance keeps them clear of
-        /// the boss's own body without putting them somewhere the players can ignore — the arm never moves, so
-        /// where it goes up is where it fights from for the whole rage.
+        /// the hands it has left now that there is nothing on its pile to throw. Where they stand is carried by
+        /// <see cref="ArmPlacement"/> and set from outside, because it is being tuned in the room.
         /// </remarks>
         private const int RageArmCount = 2;
-
-        private const float RageArmSideDistance = 3f;
 
         /// <summary>How long a carrier spends loading and again setting down, mirroring the carrier port's own
         /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
@@ -200,6 +197,21 @@ namespace FalseGods.Plugin
         private readonly IMinionSpawnPort _minionSpawns;
         private readonly IMinionSpawnPort _emergencyMinions;
         private readonly IBossArmPort _rageArms;
+
+        /// <summary>
+        /// Where the rage's arms stand relative to the boss. Set by the Composition Root and re-read every frame,
+        /// so it can be moved while the fight is running.
+        /// </summary>
+        /// <remarks>
+        /// <b>Temporary as a setting, not as a concept.</b> The three distances are boss design and belong in
+        /// authored boss content once there is a pipeline for it; they are exposed only so the look can be found
+        /// in-engine rather than by rebuilding. See Docs/DefinitionOfDone.md §3.
+        /// </remarks>
+        public float ArmSideDistance { get; set; } = 3f;
+
+        public float ArmForwardOffset { get; set; }
+
+        public float ArmLift { get; set; }
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
@@ -508,6 +520,7 @@ namespace FalseGods.Plugin
             ReportActivityChange();
             AdvanceSupplyLine(deltaSeconds);
             AdvanceStarvation(deltaSeconds);
+            CarryTheArmsWithTheBoss();
             FireWhateverWasBrought(deltaSeconds);
             Present();
             _presentation.Render(deltaSeconds);
@@ -1005,43 +1018,43 @@ namespace FalseGods.Plugin
             _emergencyMinions.Summon(at);
         }
 
+        /// <summary>Put the starved boss's arms up at its sides.</summary>
+        private void RaiseRageArms() => _rageArms.Raise(RageArmCount, ArmsAroundTheBoss());
+
         /// <summary>
-        /// Put the starved boss's arms up beside where it is standing.
+        /// Keep the arms at the boss's sides. Cheap and unconditional while a fight is up: the port does nothing
+        /// when no arms are standing, which is every frame the boss is not enraged.
         /// </summary>
         /// <remarks>
-        /// <b>The anchor, not the boss's transform.</b> The boss teleports between the room's authored anchors, so
-        /// the anchor is where it will still be standing for the rest of this station — an arm placed against a
-        /// position read mid-relocation would be left throwing at nothing from the place it used to be. It is the
-        /// same reading the delivery pile uses, for the same reason.
+        /// <b>They are the boss's arms, so they go where it goes.</b> The creature cannot take a step, so an arm
+        /// left where it first rose would be abandoned the moment the boss moved to its next station — throwing
+        /// mud across the room at nothing, from a place with no boss in it.
         /// </remarks>
-        private void RaiseRageArms()
+        private void CarryTheArmsWithTheBoss()
         {
-            if (!TryGetBossAnchor(out var at))
+            if (_rageArms.Raised > 0)
             {
-                _logger?.LogWarning("[arm] the room authored no boss anchors, so there is nowhere beside the boss "
-                    + "to put an arm; it rages with its band only.");
-                return;
+                _rageArms.Follow(ArmsAroundTheBoss());
             }
-
-            _rageArms.Raise(at, RageArmCount, RageArmSideDistance);
         }
 
-        /// <summary>Where the boss is standing, by the room's authored anchor for its current station. False when
-        /// there is no fight or the room authored no anchors.</summary>
-        private bool TryGetBossAnchor(out ArenaWorldPoint at)
+        /// <summary>
+        /// Where the arms belong this frame: at the boss's own position and height, turned by its own facing.
+        /// </summary>
+        /// <remarks>
+        /// <b>The boss's pose, not the room's floor.</b> Deriving an arm's footing from the level was measured to
+        /// be wrong in two ways at once — the arena's scenery is deliberately off the navigation layers, so
+        /// snapping to navigable ground puts an arm underneath whatever prop stands on it, and a fixed distance
+        /// from a fixed point knows nothing about what is there. The boss already stands somewhere the room
+        /// authored, at a height the room authored, so its pose carries both answers.
+        /// </remarks>
+        private ArmPlacement ArmsAroundTheBoss()
         {
-            at = default;
-
-            var anchors = _arenaContent?.BossAnchors;
-            if (_boss is null || anchors is null || anchors.Count == 0)
-            {
-                return false;
-            }
-
-            var station = _boss.StationIndex;
-            var anchor = station >= 0 && station < Itinerary.Count ? Itinerary[station].AnchorIndex : 0;
-            at = anchors[anchor < anchors.Count ? anchor : anchors.Count - 1];
-            return true;
+            var at = _boss is null
+                ? default
+                : new ArenaWorldPoint(_boss.Position.X, _boss.PositionHeight, _boss.Position.Z);
+            var facing = _boss?.Facing ?? default;
+            return new ArmPlacement(at, facing, ArmSideDistance, ArmForwardOffset, ArmLift);
         }
 
         private void Summon(SummonRequest request)

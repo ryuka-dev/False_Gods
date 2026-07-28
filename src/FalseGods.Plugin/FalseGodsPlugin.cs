@@ -147,6 +147,10 @@ namespace FalseGods.Plugin
         private readonly List<int> _forgottenPlayers = new List<int>();
         private IPlayerMotionPort _playerMotion = null!;
 
+        private ConfigEntry<float> _armSideDistance = null!;
+        private ConfigEntry<float> _armForwardOffset = null!;
+        private ConfigEntry<float> _armLift = null!;
+
         private float _appliedFogStart;
         private float _appliedFogEnd;
 
@@ -211,6 +215,19 @@ namespace FalseGods.Plugin
                 "[DEV/TEMPORARY - removed before release] Distance at which the boss arena's fog becomes opaque. "
                 + "The arena is 60 units across, so a far corner sits about 60 units from the player's spawn. "
                 + "Changeable live while standing in the arena.");
+
+            // Where a starved boss's arms stand, relative to the boss itself. The look is being found in-engine,
+            // so these are live: a change takes effect on the next frame of a fight in progress. The values they
+            // settle on belong in authored boss content, not in a player config.
+            _armSideDistance = Config.Bind("Boss", "ArmSideDistance", 3f,
+                "[DEV/TEMPORARY - removed before release] How far to either side of the boss its rage arms stand, "
+                + "in metres. The arms follow the boss, so this is measured from wherever it currently is.");
+            _armForwardOffset = Config.Bind("Boss", "ArmForwardOffset", 0f,
+                "[DEV/TEMPORARY - removed before release] How far in front of the boss its rage arms stand, in "
+                + "metres, along the way it is facing. Negative puts them behind it.");
+            _armLift = Config.Bind("Boss", "ArmLift", 0f,
+                "[DEV/TEMPORARY - removed before release] How far above the boss's own footing the rage arms sit, "
+                + "in metres. Negative sinks them into the ground.");
 
             // TEMPORARY bring-up affordance for the thrown-destructible mechanic: throw one crate at the player,
             // with no boss involved, so the flight, the shoot-it-down, and the landing can be judged on their own.
@@ -316,6 +333,11 @@ namespace FalseGods.Plugin
         {
             // The session's agreement on which level is the boss arena has to exist before anyone asks to go
             // there, so it is maintained every frame rather than only while an encounter is up.
+            // Live while a fight runs, so the arms can be moved without a rebuild or a re-raise.
+            _boss.ArmSideDistance = _armSideDistance.Value;
+            _boss.ArmForwardOffset = _armForwardOffset.Value;
+            _boss.ArmLift = _armLift.Value;
+
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
             MaintainSpawnOwnership(FalseGodsIntegrations.Current);
             MaintainCrateFlow(FalseGodsIntegrations.Current);

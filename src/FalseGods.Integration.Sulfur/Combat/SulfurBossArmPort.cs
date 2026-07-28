@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using FalseGods.Application.Combat;
-using FalseGods.RuntimeContracts.Arena;
-using Pathfinding;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.Units;
 using UnityEngine;
@@ -12,35 +10,37 @@ namespace FalseGods.Integration.Sulfur.Combat
 {
     /// <summary>
     /// The SULFUR implementation of <see cref="IBossArmPort"/>: the arms a starved boss puts up are the cave
-    /// boss's own, raised through the game's own entry point.
+    /// boss's own, raised through the game's own entry point and then carried with it.
     /// </summary>
     /// <remarks>
-    /// <para><b>Nothing here drives the arm.</b> Measured on v0.18.5: the creature's animator starts in
-    /// <c>Submerged</c>, rises into <c>Shoot</c> the moment its behaviour tree raises <c>Attack</c>, throws on an
-    /// animation event, and sinks again when the clip ends — so appearing, throwing and sinking are the game's,
+    /// <para><b>Nothing here drives the arm's behaviour.</b> Measured on v0.18.5: the creature's animator starts
+    /// in <c>Submerged</c>, rises into <c>Shoot</c> the moment its behaviour tree raises <c>Attack</c>, throws on
+    /// an animation event, and sinks again when the clip ends — so appearing, throwing and sinking are the game's,
     /// repeating for as long as it has someone to aim at. The tree is already running when the unit is spawned
-    /// (<c>SpawnUnit</c> activates it), and its only condition is a target within the creature's own ranged
-    /// attack range. So raising an arm is a placement decision and nothing else.</para>
-    /// <para><b>Which is why placement is the whole design.</b> The arm has no navigation agent at all — it cannot
-    /// take one step — and it acquires its target through the game's ordinary line-of-sight detection. An arm put
-    /// somewhere it cannot see the fight from is an arm that never throws, and there is no behaviour to fall back
-    /// on. It is placed beside the boss, flanking the line between the boss and the fight, and brought down onto
-    /// navigable ground the way the game's own arm spawner does.</para>
-    /// <para><b>Nothing is invented about its damage or its aim.</b> The mud ball, its arc, its damage and its
-    /// sound belong to the creature. A session layer that turns that one ball into one per player is likewise the
-    /// session layer's business, and this asks for none of it.</para>
+    /// (<c>SpawnUnit</c> activates it), and its only condition is a target within the creature's own ranged attack
+    /// range (30 m, line of sight). So the whole of this class is <i>where</i>.</para>
+    /// <para><b>And where is the boss.</b> The creature has no navigation agent at all — it cannot take one step —
+    /// so its position is set here every frame from the boss's own. Reading the level instead was measured to be
+    /// wrong twice over: the arena's scenery is deliberately kept off the navigation layers, so snapping to
+    /// navigable ground puts an arm <i>under</i> whatever prop is standing on it (an arm rose in the middle of a
+    /// sludge pool, buried to the waist), and a fixed distance from a fixed point knows nothing about what is
+    /// there anyway. The boss already stands where the room authored, at the height the room authored; taking the
+    /// arms' place from the boss inherits both and measures nothing.</para>
+    /// <para><b>Moving the transform is what a client sees.</b> The arms are ordinary host-spawned units, so the
+    /// session layer mirrors them and follows their transform; they are deliberately left parented where the game
+    /// puts its own units rather than under the boss's presentation rig, which carries a display scale that would
+    /// be inherited by anything hung from it.</para>
     /// <para><b>Host only.</b> The host owns enemies; a client's arms are mirrored puppets.</para>
     /// </remarks>
     public sealed class SulfurBossArmPort : IBossArmPort
     {
-        /// <summary>How far above a candidate point to start looking for the floor, and how far down to look —
-        /// the same shape of search the game's own arm spawner falls back to when it is off the graph.</summary>
-        private const float GroundProbeRise = 2f;
-        private const float GroundProbeReach = 5f;
-
         private readonly MonoBehaviour _host;
         private readonly ILogger? _logger;
         private readonly List<Unit> _raised = new List<Unit>();
+
+        // Which side of the boss each arm belongs on, index-aligned with _raised as they arrive. An arm's side is
+        // decided when it is asked for, not when it lands, so a slow load cannot put both on the same side.
+        private readonly List<Vector3> _stations = new List<Vector3>();
 
         // Which raising the arms in flight belong to. An arm is loaded asynchronously, so a rage that ends while
         // one is still on its way would otherwise leave it standing and throwing after the boss had calmed: the
@@ -64,16 +64,11 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public void Raise(ArenaWorldPoint around, int count, float sideDistance)
+        public void Raise(int count, ArmPlacement placement)
         {
-            if (count <= 0)
+            if (count <= 0 || Raised > 0)
             {
-                return;
-            }
-
-            if (Raised > 0)
-            {
-                return; // already up; the rage raises them once and keeps them
+                return; // nothing asked for, or already up: the rage raises them once and keeps them
             }
 
             var definition = UnitIds.GoblinCousinArm.GetAsset();
@@ -84,21 +79,35 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return;
             }
 
-            var centre = new Vector3(around.X, around.Y, around.Z);
-            var sideways = SidewaysFrom(centre);
             var generation = ++_generation;
-
             for (var i = 0; i < count; i++)
             {
-                // Alternate sides and step outwards, so two arms flank the boss and four make two ranks.
-                var side = (i % 2 == 0) ? 1f : -1f;
-                var rank = (i / 2) + 1;
-                var wanted = centre + sideways * (side * sideDistance * rank);
-                RaiseOne(definition, OnGround(wanted), generation);
+                var station = StationOffset(i, placement);
+                RaiseOne(definition, PlaceOf(placement, station), station, generation);
             }
 
-            _logger?.Log($"[arm] {count} arm(s) rising beside the boss at "
-                + $"({centre.x:0.#}, {centre.y:0.#}, {centre.z:0.#}); they throw until it is supplied again.");
+            _logger?.Log($"[arm] {count} arm(s) rising at the boss's sides ({placement.SideDistance:0.#}m out, "
+                + $"{placement.ForwardOffset:0.#}m forward, {placement.Lift:0.#}m up); they follow it until it is "
+                + "supplied again.");
+        }
+
+        public void Follow(ArmPlacement placement)
+        {
+            if (_raised.Count == 0)
+            {
+                return;
+            }
+
+            for (var i = 0; i < _raised.Count; i++)
+            {
+                var arm = _raised[i];
+                if (arm == null)
+                {
+                    continue;
+                }
+
+                arm.transform.position = PlaceOf(placement, _stations[i]);
+            }
         }
 
         public void LowerAll()
@@ -129,6 +138,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             _raised.Clear();
+            _stations.Clear();
             if (lowered > 0)
             {
                 _logger?.Log($"[arm] {lowered} arm(s) sink back into the ground.");
@@ -137,7 +147,7 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         /// <summary>Fire the asynchronous spawn and keep the arm when it lands, if the rage that asked for it is
         /// still running. Deliberately not awaited: raising is a moment in the fight.</summary>
-        private async void RaiseOne(UnitSO definition, Vector3 position, int generation)
+        private async void RaiseOne(UnitSO definition, Vector3 position, Vector3 station, int generation)
         {
             Unit unit;
             try
@@ -172,72 +182,50 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             _raised.Add(unit);
+            _stations.Add(station);
         }
 
         /// <summary>
-        /// The horizontal axis to put arms along: across the line from the boss to the nearest player still in the
-        /// fight, so they flank whoever the boss is facing rather than lining up behind it.
+        /// Where the <paramref name="index"/>th arm belongs relative to the boss, in the boss's own frame: right
+        /// or left in turn, stepping outwards, so two arms flank it and four make two ranks.
+        /// </summary>
+        private static Vector3 StationOffset(int index, ArmPlacement placement)
+        {
+            var side = (index % 2 == 0) ? 1f : -1f;
+            var rank = (index / 2) + 1;
+            return new Vector3(side * placement.SideDistance * rank, placement.Lift, placement.ForwardOffset);
+        }
+
+        /// <summary>
+        /// Turn a station in the boss's frame into a world position: the offset is rotated by whichever way the
+        /// boss is facing, so the arms stay at its sides as it turns.
         /// </summary>
         /// <remarks>
-        /// Falls back to a world axis when there is nobody to face or the boss is standing on top of them — an arm
-        /// beside the boss is still an arm, and a degenerate cross product would put both in the same place.
+        /// A boss facing nowhere — which is what a dead or newly spawned one reports — leaves the offset in world
+        /// axes rather than collapsing both arms onto the boss.
         /// </remarks>
-        private static Vector3 SidewaysFrom(Vector3 centre)
+        private static Vector3 PlaceOf(ArmPlacement placement, Vector3 station)
         {
-            var player = FightingPlayers.NearestTo(centre);
-            if (player != null)
+            var forward = new Vector3(placement.BossFacing.X, 0f, placement.BossFacing.Z);
+            var right = Vector3.right;
+            if (forward.sqrMagnitude > 1e-4f)
             {
-                var toPlayer = player.transform.position - centre;
-                toPlayer.y = 0f;
-                if (toPlayer.sqrMagnitude > 0.01f)
-                {
-                    return Vector3.Cross(Vector3.up, toPlayer).normalized;
-                }
+                forward = forward.normalized;
+                right = Vector3.Cross(Vector3.up, forward);
+            }
+            else
+            {
+                forward = Vector3.forward;
             }
 
-            return Vector3.right;
+            return new Vector3(placement.BossAt.X, placement.BossAt.Y, placement.BossAt.Z)
+                + right * station.x
+                + Vector3.up * station.y
+                + forward * station.z;
         }
 
-        /// <summary>
-        /// Bring a candidate point down onto ground an arm can stand in, the way the game's own arm spawner does:
-        /// the navigation graph first, because that is the surface the fight happens on, then a drop onto the
-        /// level's geometry, and the point itself if the room answers neither.
-        /// </summary>
-        private Vector3 OnGround(Vector3 wanted)
-        {
-            try
-            {
-                var astar = AstarPath.active;
-                if (astar != null)
-                {
-                    var nearest = astar.GetNearest(wanted, NNConstraint.Walkable);
-                    if (nearest.node != null)
-                    {
-                        return nearest.node.ClosestPointOnNode(wanted);
-                    }
-                }
-
-                var gameManager = StaticInstance<GameManager>.Instance;
-                if (gameManager != null && Physics.Raycast(
-                        wanted + Vector3.up * GroundProbeRise,
-                        Vector3.down,
-                        out var hit,
-                        GroundProbeRise + GroundProbeReach,
-                        gameManager.geometryLayer))
-                {
-                    return hit.point;
-                }
-            }
-            catch (Exception exception)
-            {
-                _logger?.LogWarning($"[arm] an arm's footing could not be found ({exception.Message}); "
-                    + "it rises where it was asked to.");
-            }
-
-            return wanted;
-        }
-
-        /// <summary>Drop the arms that are gone — taken down by us, or taken with a level.</summary>
+        /// <summary>Drop the arms that are gone — taken down by us, or taken with a level — keeping the stations
+        /// index-aligned with them.</summary>
         private void Forget()
         {
             for (var i = _raised.Count - 1; i >= 0; i--)
@@ -246,6 +234,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 if (arm == null || !arm.IsAlive)
                 {
                     _raised.RemoveAt(i);
+                    _stations.RemoveAt(i);
                 }
             }
         }
