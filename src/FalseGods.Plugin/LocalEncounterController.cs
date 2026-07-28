@@ -124,14 +124,16 @@ namespace FalseGods.Plugin
         private const float CarrierReplacementRoundTrips = 1f;
 
         /// <summary>
-        /// How long the boss must have had nothing to throw before it stops waiting and comes at the players.
+        /// How long the boss will go without a delivery before it stops waiting, as a share of a round trip.
         /// </summary>
         /// <remarks>
-        /// Long enough that the ordinary gap between deliveries passes unremarked - the pile empties every volley
-        /// by design - and short enough that a party working on the village feels the room change while they are
-        /// still doing it.
+        /// Measured against the walk rather than fixed in seconds, because the walk is what a delivery costs: a
+        /// flat number would call the opening of every fight a cut route, since the first carriers have the length
+        /// of the room to cover before anything arrives at all. Above one trip, so a route that is merely working
+        /// is never mistaken for one that has been stopped; not far above, so a party that cuts it feels the room
+        /// change while they are still doing it.
         /// </remarks>
-        private const float StarvationSeconds = 6f;
+        private const float StarvationRoundTrips = 1.5f;
 
         /// <summary>How many go in the band a starved boss summons. Enough to be a job of its own, since killing
         /// them is half of what it takes to calm it.</summary>
@@ -186,7 +188,12 @@ namespace FalseGods.Plugin
         private readonly IMinionSpawnPort _emergencyMinions;
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
-        private readonly StarvationWatch _starvation = new StarvationWatch(StarvationSeconds);
+        private readonly StarvationWatch _starvation = new StarvationWatch();
+
+        /// <summary>What was on the boss's pile last frame, so a delivery can be seen arriving. The pile itself is
+        /// empty almost always — every volley clears it — so its level says nothing about whether the route is
+        /// running; its going UP is the only thing that does.</summary>
+        private int _pileLastSeen;
         private readonly IThrownCratePort _crates;
         private readonly ICarrierPort _carriers;
         private readonly Action<ArenaWorldPoint, CratePileId>? _announceProduced;
@@ -726,6 +733,7 @@ namespace FalseGods.Plugin
             // nothing rather than mid-tantrum.
             _emergencyMinions.DespawnAll();
             _starvation.Reset();
+            _pileLastSeen = 0;
             // The supply line stops with the fight. The destructibles it already produced are left where they are:
             // they are the game's own breakables standing in the level, and the crate port owns their lifetime.
             _carriers.DismissAll();
@@ -926,21 +934,26 @@ namespace FalseGods.Plugin
                 return;
             }
 
+            var onThePile = _crates.RestingOn(pile);
+            var delivered = onThePile > _pileLastSeen;
+            _pileLastSeen = onThePile;
+
             var change = _starvation.Advance(
                 deltaSeconds,
-                hasAmmunition: _crates.RestingOn(pile) > 0,
+                deliveryArrived: delivered,
+                patienceSeconds: _measuredRoundTripSeconds * StarvationRoundTrips,
                 emergencyBandAlive: _emergencyMinions.Alive);
 
             switch (change)
             {
                 case StarvationChange.Enraged:
-                    _logger?.Log($"[rage] nothing to throw for {StarvationSeconds:0.#}s: the boss comes at you. "
-                        + $"Summoning {EmergencyBandSize}; it settles when they are dead AND the pile is stocked.");
+                    _logger?.Log($"[rage] nothing delivered for {_starvation.SinceDelivery:0.#}s: the boss comes at "
+                        + $"you. Summoning {EmergencyBandSize}; it settles when they are dead AND the route runs.");
                     SummonEmergencyBand();
                     break;
 
                 case StarvationChange.Calmed:
-                    _logger?.Log("[rage] supplied again and its band is dead; the boss goes back to throwing.");
+                    _logger?.Log("[rage] delivering again and its band is dead; the boss goes back to throwing.");
                     break;
             }
         }
