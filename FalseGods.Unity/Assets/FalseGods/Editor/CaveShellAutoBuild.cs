@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -81,41 +81,13 @@ namespace FalseGods.EditorTools
                 return;
             }
 
+            // One deploy, wherever it was asked for from: a sculpt landing and somebody asking for a deploy put
+            // the same files in the same places, so they share the implementation rather than drifting apart.
             var root = Directory.GetParent(Application.dataPath).FullName;
-            var bundle = Path.Combine(root, "Build", PocBundleBuilder.BundleFileName);
-            var artifact = Path.Combine(root, "Build", PocArenaContentExporter.ArtifactFileName);
-            var targetsFile = Path.Combine(root, "LocalDeployTargets.txt");
-
-            if (!File.Exists(targetsFile))
-            {
-                Debug.Log("[FalseGods] auto-build: bundle rebuilt. No LocalDeployTargets.txt at the project root, " +
-                    "so it was not deployed. Add one absolute plugin-folder path per line to auto-deploy.");
-                return;
-            }
-
-            var deployed = 0;
-            foreach (var raw in File.ReadAllLines(targetsFile))
-            {
-                var dir = raw.Trim();
-                if (dir.Length == 0 || dir.StartsWith("#", StringComparison.Ordinal))
-                    continue;
-
-                try
-                {
-                    Directory.CreateDirectory(dir);
-                    File.Copy(bundle, Path.Combine(dir, Path.GetFileName(bundle)), overwrite: true);
-                    File.Copy(artifact, Path.Combine(dir, Path.GetFileName(artifact)), overwrite: true);
-                    deployed++;
-                }
-                catch (Exception exception)
-                {
-                    Debug.LogWarning($"[FalseGods] auto-build: deploy to '{dir}' failed ({exception.Message}). " +
-                        "If the game is running it may hold the bundle open — reload the level or close the game.");
-                }
-            }
-
-            Debug.Log($"[FalseGods] auto-build: CaveShell.fbx -> bundle rebuilt + deployed to {deployed} target(s). " +
-                "Reload the level in-game to see it.");
+            ArenaDeploy.Deploy(
+                Path.Combine(root, "Build", PocBundleBuilder.BundleFileName),
+                Path.Combine(root, "Build", PocArenaContentExporter.ArtifactFileName),
+                "auto-build (CaveShell.fbx)");
         }
 
         /// <summary>

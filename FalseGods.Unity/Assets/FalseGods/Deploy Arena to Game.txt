@@ -1,0 +1,14 @@
+Double-click this file to rebuild the arena bundle and copy it into every game profile
+listed in LocalDeployTargets.txt (at the Unity project root, one absolute plugin folder
+per line). It does not open in a text editor - opening it IS the action.
+
+Then reload the level in game (the arena key) to see the change. No restart: the bundle
+can be replaced under a running game, unlike the plugin DLLs, as long as you are not
+standing in the arena at the time - a loaded level holds its bundle open.
+
+Same thing from the menu: False Gods > Deploy Arena to Game (Ctrl+Shift+D).
+
+This is the loop for dressing the room: move a marker, deploy, reload, look. Prop markers
+live under VisualRoot/VanillaProps in the arena prefab, and jump links under
+NavigationRoot/NavLinks. Neither is in the content hash, so nothing here needs a
+re-export and the two peers stay in agreement.
