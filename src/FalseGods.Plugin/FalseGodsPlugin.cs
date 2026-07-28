@@ -63,6 +63,21 @@ namespace FalseGods.Plugin
 
         private const int TestBossDefinition = 1;
 
+        /// <summary>
+        /// How far the boss arena can be seen through.
+        /// </summary>
+        /// <remarks>
+        /// <para>The cave environment's own fog is tuned for corridor-sized rooms and leaves an eighty-metre arena
+        /// pitch black from the middle of it, so the arena sets its own. Found by eye in the room, and settled:
+        /// the far side goes before the wall does, which is what makes it read as a cave rather than as a box.
+        /// Only the distances are ours — the level's own fog colour is kept.</para>
+        /// <para><b>Not only a look.</b> The game clamps its aim assist to the fog cutoff, so pulling the fog in
+        /// pulls in how far a player's aim is helped.</para>
+        /// </remarks>
+        private const float ArenaFogStart = 10f;
+
+        private const float ArenaFogEnd = 65f;
+
         // Bring-up throw shape: far enough ahead to read as incoming, high enough and slow enough to be shot.
         private const float ThrowDistance = 14f;
         private const float ThrowHeight = 1.5f;
@@ -128,8 +143,6 @@ namespace FalseGods.Plugin
         private ConfigEntry<Key> _raiseKey = null!;
         private ConfigEntry<float> _maxClientHitDamage = null!;
         private ConfigEntry<Key> _hijackKey = null!;
-        private ConfigEntry<float> _fogStartDistance = null!;
-        private ConfigEntry<float> _fogEndDistance = null!;
         private ConfigEntry<Key> _throwCrateKey = null!;
         private ConfigEntry<Key> _dropCrateKey = null!;
         private ConfigEntry<Key> _volleyCrateKey = null!;
@@ -149,8 +162,6 @@ namespace FalseGods.Plugin
         private readonly List<int> _forgottenPlayers = new List<int>();
         private IPlayerMotionPort _playerMotion = null!;
 
-        private float _appliedFogStart;
-        private float _appliedFogEnd;
 
         private BepInExLogger _log = null!;
         private IArenaHijackPort _hijack = null!;
@@ -202,20 +213,6 @@ namespace FalseGods.Plugin
                 + "declares the level a boss arena for everyone and leads the transition, and a client's press is "
                 + "a request to the host. Without a session it just goes there. The game uses the new Input "
                 + "System.");
-
-            // TEMPORARY dev affordance: the cave environment's fog cutoff is tuned for corridor-sized rooms, which
-            // leaves a 60-unit boss arena's walls invisible from the middle of it. Tunable live so the look can be
-            // found in-engine; the value it settles on belongs in the arena's authored content, not in a player
-            // config.
-            _fogStartDistance = Config.Bind("Arena", "FogStartDistance", 10f,
-                "[DEV/TEMPORARY - removed before release] Distance at which the boss arena's fog begins to "
-                + "thicken. Only applies to the arena loaded as a level; the level's own fog COLOUR is kept.");
-            _fogEndDistance = Config.Bind("Arena", "FogEndDistance", 70f,
-                "[DEV/TEMPORARY - removed before release] Distance at which the boss arena's fog becomes opaque. "
-                + "The arena is about 80 units across, so this deliberately stops short of the far wall: the room "
-                + "should end in fog rather than in a visible edge. NOTE that the game's aim assist reaches no "
-                + "further than this - it clamps its own range to the fog cutoff - so this is not purely a look. "
-                + "Changeable live while standing in the arena.");
 
             // TEMPORARY bring-up affordance for the thrown-destructible mechanic: throw one crate at the player,
             // with no boss involved, so the flight, the shoot-it-down, and the landing can be judged on their own.
@@ -274,9 +271,7 @@ namespace FalseGods.Plugin
                 VanillaPropDecoration.MudPoolHazardInterval,
                 _log);
             LevelGenerationHijack.ArenaRooms = _levelArena.CreateRoomSource();
-            _appliedFogStart = _fogStartDistance.Value;
-            _appliedFogEnd = _fogEndDistance.Value;
-            LevelGenerationHijack.Fog = new ArenaFogRange(_appliedFogStart, _appliedFogEnd);
+            LevelGenerationHijack.Fog = new ArenaFogRange(ArenaFogStart, ArenaFogEnd);
 
             _hijack = new SulfurArenaHijackPort(_log);
 
@@ -342,7 +337,6 @@ namespace FalseGods.Plugin
                 return;
             }
 
-            ApplyFogChanges();
 
             // Track EVERY player's velocity each frame so a volley can lead all of them by the average rather than
             // the instant — and so a barrage threatens the whole room, not whoever happens to be hosting.
@@ -940,29 +934,6 @@ namespace FalseGods.Plugin
                 _lastPosition = player.Position;
                 _hasLastPosition = true;
                 _tracker.Observe(velocity, deltaSeconds);
-            }
-        }
-
-        /// <summary>
-        /// Push a live fog edit into the standing arena, so the look can be tuned without reloading the level.
-        /// Only while a hijacked arena is actually up: an ordinary level's fog is the level's business.
-        /// </summary>
-        private void ApplyFogChanges()
-        {
-            var start = _fogStartDistance.Value;
-            var end = _fogEndDistance.Value;
-            if (start == _appliedFogStart && end == _appliedFogEnd)
-            {
-                return;
-            }
-
-            _appliedFogStart = start;
-            _appliedFogEnd = end;
-            LevelGenerationHijack.Fog = new ArenaFogRange(start, end);
-
-            if (_levelArena.IsLive)
-            {
-                SulfurLevelFog.TryApply(start, end, _log);
             }
         }
 
