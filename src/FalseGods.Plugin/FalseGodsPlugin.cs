@@ -284,6 +284,9 @@ namespace FalseGods.Plugin
             _boss = new LocalEncounterController(
                 _log,
                 new SulfurMinionSpawnPort(this, _log),
+                // A second, separately tracked band: the rage ends only when the emergency band is dead, so it
+                // cannot share a roster with the ordinary waves that go on around it.
+                new SulfurMinionSpawnPort(this, _log),
                 _crates,
                 new SulfurCarrierPort(
                     this,

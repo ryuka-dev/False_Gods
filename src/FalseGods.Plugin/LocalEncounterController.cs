@@ -123,6 +123,20 @@ namespace FalseGods.Plugin
         /// </remarks>
         private const float CarrierReplacementRoundTrips = 1f;
 
+        /// <summary>
+        /// How long the boss must have had nothing to throw before it stops waiting and comes at the players.
+        /// </summary>
+        /// <remarks>
+        /// Long enough that the ordinary gap between deliveries passes unremarked - the pile empties every volley
+        /// by design - and short enough that a party working on the village feels the room change while they are
+        /// still doing it.
+        /// </remarks>
+        private const float StarvationSeconds = 6f;
+
+        /// <summary>How many go in the band a starved boss summons. Enough to be a job of its own, since killing
+        /// them is half of what it takes to calm it.</summary>
+        private const int EmergencyBandSize = 4;
+
         /// <summary>How long a carrier spends loading and again setting down, mirroring the carrier port's own
         /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
         private const float CarrierHandlingSeconds = 0.75f;
@@ -169,6 +183,10 @@ namespace FalseGods.Plugin
         private readonly string _contentDirectory;
         private readonly float _maxClientHitDamage;
         private readonly IMinionSpawnPort _minionSpawns;
+        private readonly IMinionSpawnPort _emergencyMinions;
+
+        /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
+        private readonly StarvationWatch _starvation = new StarvationWatch(StarvationSeconds);
         private readonly IThrownCratePort _crates;
         private readonly ICarrierPort _carriers;
         private readonly Action<ArenaWorldPoint, CratePileId>? _announceProduced;
@@ -222,9 +240,14 @@ namespace FalseGods.Plugin
         /// <param name="throwVolley">Asked to throw <c>count</c> crates off a pile. The aiming — where the players
         /// are, where they are going, the seed the scatter comes from — belongs to whoever owns the crate
         /// mechanic, so the encounter says only when and how many.</param>
+        /// <param name="emergencyMinions">The band a starved boss throws at the players, kept apart from the
+        /// ordinary waves because the rage ends only when <i>this</i> band is dead. Counting them together would
+        /// make an ordinary wave's stragglers hold the rage open, or an emergency band's death go unnoticed among
+        /// them; kept apart, both can be on the floor at once, which is the point.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
+            IMinionSpawnPort emergencyMinions,
             IThrownCratePort crates,
             ICarrierPort carriers,
             Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
@@ -234,6 +257,7 @@ namespace FalseGods.Plugin
             _throwVolley = throwVolley;
             _logger = logger;
             _minionSpawns = minions ?? throw new ArgumentNullException(nameof(minions));
+            _emergencyMinions = emergencyMinions ?? throw new ArgumentNullException(nameof(emergencyMinions));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
             _carriers = carriers ?? throw new ArgumentNullException(nameof(carriers));
             _announceProduced = announceProduced;
@@ -457,6 +481,7 @@ namespace FalseGods.Plugin
             _boss.Advance();
             ReportActivityChange();
             AdvanceSupplyLine(deltaSeconds);
+            AdvanceStarvation(deltaSeconds);
             FireWhateverWasBrought(deltaSeconds);
             Present();
             _presentation.Render(deltaSeconds);
@@ -697,6 +722,10 @@ namespace FalseGods.Plugin
             _hitIntake?.Dispose();
             _hitIntake = null;
             _minionSpawns.DespawnAll();
+            // Both bands leave with the fight, and the rage with them: a boss raised again starts hungry-for-
+            // nothing rather than mid-tantrum.
+            _emergencyMinions.DespawnAll();
+            _starvation.Reset();
             // The supply line stops with the fight. The destructibles it already produced are left where they are:
             // they are the game's own breakables standing in the level, and the crate port owns their lifetime.
             _carriers.DismissAll();
@@ -881,6 +910,62 @@ namespace FalseGods.Plugin
         /// around its spawn points rather than dropping the extras — a room with two places can still be asked
         /// for four minions.
         /// </summary>
+        /// <summary>
+        /// Watch the boss's pile, and answer being starved. A boss with nothing to throw summons a band and goes
+        /// at the players itself; it settles again only once that band is dead and there is ammunition on the pile
+        /// once more.
+        /// </summary>
+        /// <remarks>
+        /// The ordinary waves carry on throughout. That is deliberate and is why the band is counted on its own:
+        /// the two are meant to be on the floor together, and it is only this band's death that buys the calm.
+        /// </remarks>
+        private void AdvanceStarvation(float deltaSeconds)
+        {
+            if (_boss is null || !TryGetSupplyPile(out var pile, out _))
+            {
+                return;
+            }
+
+            var change = _starvation.Advance(
+                deltaSeconds,
+                hasAmmunition: _crates.RestingOn(pile) > 0,
+                emergencyBandAlive: _emergencyMinions.Alive);
+
+            switch (change)
+            {
+                case StarvationChange.Enraged:
+                    _logger?.Log($"[rage] nothing to throw for {StarvationSeconds:0.#}s: the boss comes at you. "
+                        + $"Summoning {EmergencyBandSize}; it settles when they are dead AND the pile is stocked.");
+                    SummonEmergencyBand();
+                    break;
+
+                case StarvationChange.Calmed:
+                    _logger?.Log("[rage] supplied again and its band is dead; the boss goes back to throwing.");
+                    break;
+            }
+        }
+
+        /// <summary>Put the starved boss's band on the floor, at the room's authored minion places.</summary>
+        private void SummonEmergencyBand()
+        {
+            var places = _arenaContent?.MinionSpawns;
+            if (places is null || places.Count == 0)
+            {
+                _logger?.LogWarning("[rage] the room authored no minion spawn points, so the boss has nobody to "
+                    + "send; it will stay enraged until it is supplied again.");
+                return;
+            }
+
+            var at = new ArenaWorldPoint[EmergencyBandSize];
+            for (var i = 0; i < at.Length; i++)
+            {
+                // Offset from the ordinary waves' first place, so a band does not arrive on top of one.
+                at[i] = places[(i + 1) % places.Count];
+            }
+
+            _emergencyMinions.Summon(at);
+        }
+
         private void Summon(SummonRequest request)
         {
             var places = _arenaContent?.MinionSpawns;
