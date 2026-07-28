@@ -335,6 +335,23 @@ failed to load". A standing arena holds its AssetBundle open, and `AssetBundle.L
 loaded returns null rather than a second handle. A peer that is already in the arena must adopt the standing one
 (§1.5), not realize its own copy of it.
 
+### 3.13 Placing a vanilla prefab by its transform
+**Symptom:** the thing is a fixed distance from where it was put, always the same distance, in a direction that
+has nothing to do with the level. Two of them placed symmetrically about a point look evenly spaced about some
+*other* point — which reads as the centre being wrong rather than as both being shifted, and sends the search to
+whatever computed the centre.
+
+**A vanilla prefab's origin is not where it is drawn**, and this has cost a round trip twice. The sludge pool's
+origin sits on its rim, so it reaches roughly four metres out along one axis; the cousin's arm hangs its whole
+rig off a child about 2.45 m along local X while the references the game itself reads for the creature's feet
+(`FeetFlat`, `FeetPitched`) sit at the origin. Neither is a mistake in the game — nothing vanilla places these by
+their transform — but anything of ours that does has to take the offset out.
+
+Measure it **off the live object** rather than writing the number down: read the art root's distance from the
+unit's transform and subtract it. That survives the prefab changing between versions and comes out already
+multiplied by whatever scale the object is wearing, which a constant does not. Correct the horizontal part only —
+how deep something sits is a look, set by eye, and folding it into a correction hides it.
+
 ---
 
 ## 4. Decisions worth not re-litigating
