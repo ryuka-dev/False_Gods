@@ -189,6 +189,7 @@ namespace FalseGods.Plugin
         private readonly IMinionSpawnPort _emergencyMinions;
         private readonly IBossArmPort _rageArms;
         private readonly IBattlefieldCleanupPort _battlefield;
+        private readonly IBossVoicePort _voice;
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
@@ -260,12 +261,14 @@ namespace FalseGods.Plugin
         /// <param name="battlefield">Clears the bodies and the gore between the boss's stations. A fight held in
         /// one room for a long time, with waves summoned into it deliberately, buries the things the players are
         /// meant to be reading under everything they have already killed.</param>
+        /// <param name="voice">What the boss is heard doing. Presentation, and made on every peer for itself.</param>
         public LocalEncounterController(
             ILogger logger,
             IMinionSpawnPort minions,
             IMinionSpawnPort emergencyMinions,
             IBossArmPort rageArms,
             IBattlefieldCleanupPort battlefield,
+            IBossVoicePort voice,
             IThrownCratePort crates,
             ICarrierPort carriers,
             Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
@@ -278,6 +281,7 @@ namespace FalseGods.Plugin
             _emergencyMinions = emergencyMinions ?? throw new ArgumentNullException(nameof(emergencyMinions));
             _rageArms = rageArms ?? throw new ArgumentNullException(nameof(rageArms));
             _battlefield = battlefield ?? throw new ArgumentNullException(nameof(battlefield));
+            _voice = voice ?? throw new ArgumentNullException(nameof(voice));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
             _carriers = carriers ?? throw new ArgumentNullException(nameof(carriers));
             _announceProduced = announceProduced;
@@ -967,6 +971,8 @@ namespace FalseGods.Plugin
                     // The boss holds the rage; the supply watch only decided it. Everything that has to show the
                     // same boss — this machine's own look, and every client's — reads it from there.
                     _boss.SetEnraged(true);
+                    // The same roar a client will make for itself off the replicated change; nothing is sent for it.
+                    _voice.Roar(BossStandsAt());
                     SummonEmergencyBand();
                     RaiseRageArms();
                     break;
@@ -1035,6 +1041,11 @@ namespace FalseGods.Plugin
             }
         }
 
+        /// <summary>Where the boss is standing this frame, in world space.</summary>
+        private ArenaWorldPoint BossStandsAt() => _boss is null
+            ? default
+            : new ArenaWorldPoint(_boss.Position.X, _boss.PositionHeight, _boss.Position.Z);
+
         /// <summary>Put the starved boss's arms up at its sides.</summary>
         private void RaiseRageArms() => _rageArms.Raise(RageArms.Count, ArmsAroundTheBoss());
 
@@ -1067,9 +1078,7 @@ namespace FalseGods.Plugin
         /// </remarks>
         private ArmPlacement ArmsAroundTheBoss()
         {
-            var at = _boss is null
-                ? default
-                : new ArenaWorldPoint(_boss.Position.X, _boss.PositionHeight, _boss.Position.Z);
+            var at = BossStandsAt();
             var facing = _boss?.Facing ?? default;
             return new ArmPlacement(
                 at, facing, RageArms.SideDistance, RageArms.ForwardOffset, RageArms.Lift, RageArms.Scale);

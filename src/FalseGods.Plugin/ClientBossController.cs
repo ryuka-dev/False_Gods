@@ -7,6 +7,7 @@ using FalseGods.Application.Replication;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Arena;
 using FalseGods.Integration.Sulfur.Combat;
+using FalseGods.Integration.Sulfur.Presentation;
 using FalseGods.Integration.Sulfur.Navigation;
 using FalseGods.Integration.Sulfur.Simulation;
 using FalseGods.Protocol.Wire;
@@ -57,6 +58,7 @@ namespace FalseGods.Plugin
         private readonly SulfurLocalPlayer _localPlayer;
         private readonly IBattlefieldCleanupPort _battlefield;
         private readonly IBossArmPort _rageArms;
+        private readonly IBossVoicePort _voice;
 
         private ReplicationReceiver _receiver;
         private IDisposable? _hitBinding;
@@ -91,6 +93,8 @@ namespace FalseGods.Plugin
             _localPlayer = new SulfurLocalPlayer();
             _battlefield = new SulfurBattlefieldCleanup(logger);
             _rageArms = new SulfurBossArmPort(host, logger);
+            _voice = new SulfurBossVoice(host.transform, logger);
+            _voice.Warm();
             _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
             {
                 OnEnterArena = HandleEnterArena,
@@ -156,6 +160,12 @@ namespace FalseGods.Plugin
                 if (bossEvent is BossRelocatedEvent)
                 {
                     ClearOurOwnFloor();
+                }
+                else if (bossEvent is BossEnragedEvent enraged && enraged.Enraged)
+                {
+                    // Made here rather than sent: a roar decides nothing, and this end knows where the boss is.
+                    _voice.Roar(new ArenaWorldPoint(
+                        snapshot.Position.X, snapshot.PositionHeight, snapshot.Position.Z));
                 }
             }
 

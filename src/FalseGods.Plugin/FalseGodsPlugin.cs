@@ -5,11 +5,13 @@ using BepInEx;
 using BepInEx.Configuration;
 using FalseGods.Application.Arena;
 using FalseGods.Application.Combat;
+using FalseGods.Application.Presentation;
 using FalseGods.Application.Replication;
 using FalseGods.Core.Bosses.Combat;
 using FalseGods.Core.Simulation;
 using FalseGods.Integration.Sulfur.Arena;
 using FalseGods.Integration.Sulfur.Combat;
+using FalseGods.Integration.Sulfur.Presentation;
 using FalseGods.Plugin.Diagnostics;
 using FalseGods.RuntimeContracts.Arena;
 using FalseGods.RuntimeContracts.Integration;
@@ -161,6 +163,7 @@ namespace FalseGods.Plugin
         private HijackedArenaContent _levelArena = null!;
         private SulfurArenaHazard _hazard = null!;
         private LocalEncounterController _boss = null!;
+        private IBossVoicePort _voice = null!;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
 
@@ -275,6 +278,11 @@ namespace FalseGods.Plugin
 
             _hijack = new SulfurArenaHijackPort(_log);
 
+            // Fetched now rather than at the first rage: taking the vanilla boss's roar means loading its prefab,
+            // and a fight is the wrong moment to wait for one.
+            _voice = new SulfurBossVoice(transform, _log);
+            _voice.Warm();
+
             // When a hijacked level left our arena standing, a raise fights in that one instead of loading a
             // second copy of the same content on top of itself.
             // Minions are the game's own units, spawned through the game's own entry point; the plugin is the
@@ -294,6 +302,7 @@ namespace FalseGods.Plugin
                 // One room, fought in for a long time, with waves summoned into it on purpose: without this the
                 // floor ends the fight buried under everything the players have killed.
                 new SulfurBattlefieldCleanup(_log),
+                _voice,
                 _crates,
                 new SulfurCarrierPort(
                     this,

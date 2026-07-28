@@ -55,6 +55,17 @@
       <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.Gameplay.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- The game's sounds are assets of its audio middleware, so playing one of them needs that middleware's
+         own assembly. Presentation only: nothing authoritative crosses this reference. -->
+    <Reference Include="Sonity.Public.Runtime">
+      <HintPath>$(SulfurManagedDir)\Sonity.Public.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- A sound asset's base type lives in the middleware's internal half, so touching one at all needs both. -->
+    <Reference Include="Sonity.Internal.Runtime">
+      <HintPath>$(SulfurManagedDir)\Sonity.Internal.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- The game's outline pass lives on a URP renderer feature, so marking a minion for it needs the
          pipeline's own assembly. Presentation only: nothing authoritative crosses this reference. -->
     <Reference Include="Unity.RenderPipelines.Universal.Runtime">
