@@ -320,9 +320,11 @@ namespace FalseGods.Core.Bosses
                     return;
 
                 case BossActivity.Idle:
-                    // Idle time only accrues while there is someone to attack; an empty arena pauses the cycle
-                    // rather than firing an attack at nothing (Docs/DependencyRules.md §3 — observe the roster).
-                    if (!hasTarget)
+                    // Idle time only accrues while there is someone to attack, and only for a boss that attacks:
+                    // an empty arena pauses the cycle rather than firing an attack at nothing
+                    // (Docs/DependencyRules.md §3 — observe the roster), and a boss whose fight is fought by the
+                    // room around it never leaves this state at all.
+                    if (!hasTarget || !_definition.AttacksOnItsOwn)
                     {
                         _activityEnteredTime = now;
                     }
@@ -383,6 +385,11 @@ namespace FalseGods.Core.Bosses
                 Activity = BossActivity.Dead;
                 CurrentAttack = null;
                 Facing = SimVector2.Zero;
+
+                // A dead boss is not angry. Cleared silently rather than announced: what reads the rage is the
+                // continuous state, and a peer that saw the death has already been told everything it needs — but
+                // left standing it would keep every peer's arms up over the corpse.
+                IsEnraged = false;
                 _events.Add(new BossDied(Id));
                 return;
             }

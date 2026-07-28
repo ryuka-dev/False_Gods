@@ -2,7 +2,9 @@ using System;
 using System.Reflection;
 using FalseGods.Application.Combat;
 using PerfectRandom.Sulfur.Core;
+using PerfectRandom.Sulfur.Core.UI;
 using PerfectRandom.Sulfur.Core.Units;
+using TMPro;
 using UnityEngine;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 
@@ -42,11 +44,28 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </summary>
         private const string ArmourFieldName = "armor";
 
+        /// <summary>The label on the game's boss bar. Private, because the game only ever fills it from the
+        /// creature it attached.</summary>
+        private const string BossBarLabelFieldName = "bossName";
+
+        /// <summary>
+        /// What the borrowed creature's name is announced as.
+        /// </summary>
+        /// <remarks>
+        /// The bar's label comes from the unit definition, and ours is borrowed from the cave boss — so left alone
+        /// it would announce the vanilla creature by its own localised name. Prefixing keeps that localisation
+        /// (which is free, and correct in every language the game ships) while saying plainly that this is not the
+        /// creature the player has met before.
+        /// </remarks>
+        private const string BossNamePrefix = "SULFUR ";
+
         private readonly Func<Collider?> _solidBody;
         private readonly ILogger? _logger;
 
         private GameObject? _listing;
         private Npc? _npc;
+        private bool _onTheBar;
+        private float _shownHealth = -1f;
 
         /// <param name="solidBody">The boss's own solid capsule — what the game is told to measure it by, and what
         /// the listing hangs from so it goes wherever the boss goes.</param>
@@ -117,8 +136,121 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        public void ShowHealthBar()
+        {
+            var npc = _npc;
+            if (npc == null || _onTheBar)
+            {
+                return;
+            }
+
+            try
+            {
+                // The game's own entry point: it null-guards the UI itself, subscribes the bar to this unit's
+                // health, plays the bar's arrival, and starts it full.
+                npc.AttachToBossUI(true);
+                _onTheBar = true;
+                _shownHealth = 1f;
+                NameTheBoss(npc);
+                _logger?.Log("[boss-bar] the boss is on the game's own boss bar.");
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[boss-bar] the boss could not be put on the game's boss bar "
+                    + $"({exception.Message}); the fight runs without it.");
+            }
+        }
+
+        public void ReportHealth(float fraction)
+        {
+            var npc = _npc;
+            if (npc == null || !_onTheBar)
+            {
+                return;
+            }
+
+            var clamped = fraction < 0f ? 0f : fraction > 1f ? 1f : fraction;
+            if (Math.Abs(clamped - _shownHealth) < 0.0001f)
+            {
+                return; // the bar lerps towards what it was last told; saying it again says nothing
+            }
+
+            _shownHealth = clamped;
+            try
+            {
+                // The bar subscribed to this, and the game raises it the same way — with a NORMALISED health, not
+                // a point count.
+                npc.onHealthChange?.Invoke(clamped);
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[boss-bar] the boss's health could not be shown ({exception.Message}).");
+            }
+        }
+
+        public void HideHealthBar()
+        {
+            var npc = _npc;
+            if (npc == null || !_onTheBar)
+            {
+                return;
+            }
+
+            _onTheBar = false;
+            _shownHealth = -1f;
+            try
+            {
+                npc.AttachToBossUI(false);
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[boss-bar] the boss could not be taken off the boss bar ({exception.Message}).");
+            }
+        }
+
+        /// <summary>
+        /// Put our own name on the bar, keeping the game's translation of the creature we borrowed.
+        /// </summary>
+        /// <remarks>
+        /// <para>The bar fills its label from the attached creature's localised name, which for a borrowed
+        /// definition is the vanilla creature's. There is no seam for supplying a different one — the label is a
+        /// private field the game writes once on attach — so it is written over afterwards. Reflection for exactly
+        /// one field, like the roar.</para>
+        /// <para>Fail-soft on purpose: a build that cannot find the label shows the vanilla name, which is wrong
+        /// but harmless, and a fight is not worth failing over a caption.</para>
+        /// </remarks>
+        private void NameTheBoss(Npc npc)
+        {
+            try
+            {
+                var ui = StaticInstance<UIManager>.Instance;
+                var bar = ui != null ? ui.bossUI : null;
+                if (bar == null)
+                {
+                    return;
+                }
+
+                var field = typeof(BossHealth).GetField(
+                    BossBarLabelFieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                var label = field?.GetValue(bar) as TMP_Text;
+                if (label == null)
+                {
+                    _logger?.LogWarning($"[boss-bar] the bar's '{BossBarLabelFieldName}' is not where it was; the "
+                        + "borrowed creature's own name will be shown.");
+                    return;
+                }
+
+                label.text = BossNamePrefix + npc.GetActorName();
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[boss-bar] the boss's name could not be set ({exception.Message}).");
+            }
+        }
+
         public void Withdraw()
         {
+            HideHealthBar();
             var npc = _npc;
             _npc = null;
             if (npc != null)

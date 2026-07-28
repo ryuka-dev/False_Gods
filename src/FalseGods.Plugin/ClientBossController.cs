@@ -204,6 +204,7 @@ namespace FalseGods.Plugin
                 else if (bossEvent is BossDefeatedEvent)
                 {
                     _atmosphere.StopBattleMusic();
+                    _presence.HideHealthBar();
                 }
             }
 
@@ -215,7 +216,9 @@ namespace FalseGods.Plugin
                 _arenaPresentation?.Handle(WirePresentationMapping.ToEvent(arenaEvents[_presentedArenaEvents]));
             }
 
-            _presentation!.Apply(WirePresentationMapping.ToState(snapshot));
+            var state = WirePresentationMapping.ToState(snapshot);
+            _presentation!.Apply(state);
+            _presence.ReportHealth(state.HealthFraction);
             CarryTheHostsArms(snapshot);
             _presentation.Render(deltaSeconds);
         }
@@ -280,6 +283,9 @@ namespace FalseGods.Plugin
             }
 
             _atmosphere.StartBattleMusic();
+
+            // The same bar the host is showing, driven by this peer's own copy of the host's health.
+            _presence.ShowHealthBar();
         }
 
         /// <summary>

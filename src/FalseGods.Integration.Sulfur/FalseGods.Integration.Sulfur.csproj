@@ -121,6 +121,18 @@
       <Private>false</Private>
     </Reference>
 
+    <!-- The game's own boss bar labels itself with a TextMeshPro text; naming that type is what lets our own
+         name be written over the borrowed creature's. TMP's text derives from uGUI's MaskableGraphic, so its
+         assembly comes along. -->
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(SulfurManagedDir)\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
     <!-- Addressables: how vanilla content is resolved from the player's own install. -->
     <Reference Include="Unity.Addressables">
       <HintPath>$(SulfurManagedDir)\Unity.Addressables.dll</HintPath>

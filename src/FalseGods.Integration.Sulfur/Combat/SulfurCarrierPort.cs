@@ -197,6 +197,76 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        public void Disband()
+        {
+            var released = 0;
+            var dropped = 0;
+            for (var i = 0; i < _carriers.Count; i++)
+            {
+                var carrier = _carriers[i];
+                dropped += DropWhatItIsHolding(carrier);
+                carrier.ClearDrawnLoad();
+                if (SendBackToItsOwnLife(carrier))
+                {
+                    released++;
+                }
+            }
+
+            _carriers.Clear();
+            _mourning.Clear();
+            if (released > 0 || dropped > 0)
+            {
+                _logger?.Log($"[carrier] the errand is over: {released} villager(s) went back to their own lives, "
+                    + $"{dropped} crate(s) put down where they stood.");
+            }
+        }
+
+        /// <summary>
+        /// Hand a carrier back its own behaviour.
+        /// </summary>
+        /// <remarks>
+        /// <b>Both steps, in this order.</b> A forced destination is what switches a creature's behaviour tree off,
+        /// and the game refuses to switch the tree back on while one is set — so clearing it is not tidying up
+        /// afterwards, it is the thing that makes the second call work at all.
+        /// </remarks>
+        private bool SendBackToItsOwnLife(Carrier carrier)
+        {
+            var npc = carrier.Npc;
+            if (npc == null || carrier.Unit == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                npc.SetForcedDestination(Vector3.zero);
+                npc.ActivateBehaviourTree();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[carrier] a villager could not be given its own behaviour back "
+                    + $"({exception.Message}); it will stand where it is.");
+                return false;
+            }
+        }
+
+        /// <summary>Put down what a carrier is holding, where it stands: real crates on nobody's pile, so what was
+        /// in transit when the fight ended is still there to be shot.</summary>
+        private int DropWhatItIsHolding(Carrier carrier)
+        {
+            if (carrier.Load <= 0 || carrier.LastPosition == Vector3.zero)
+            {
+                return 0;
+            }
+
+            var where = new ArenaWorldPoint(
+                carrier.LastPosition.x, carrier.LastPosition.y, carrier.LastPosition.z);
+            var dropped = TossLoadAround(carrier, where, CratePileId.Loose);
+            carrier.Load = 0;
+            return dropped;
+        }
+
         /// <summary>
         /// Take the crate mesh and material off the crate port once it has them, so a carried load looks like the
         /// thing it will become. Tried once: the content is prepared on the first crate and does not change, and a

@@ -541,7 +541,11 @@ namespace FalseGods.Plugin
             // boss has finished announcing it, which is why this asks the same question the boss's own attack
             // cycle does rather than merely whether it has been triggered. Measured: gated on having begun, the
             // carriers were already walking their first load while the boss was still roaring.
-            if (!_boss.IsOutsideTheFight)
+            //
+            // It stops at the other end too. A dead boss is not hungry, has nothing to throw, and has no reason to
+            // be supplied: without this the room went on producing crates, replacing villagers on the route, and
+            // could still work itself into a rage over a pile nobody was going to use.
+            if (!_boss.IsOutsideTheFight && !_boss.IsDead)
             {
                 AdvanceSupplyLine(deltaSeconds);
                 AdvanceStarvation(deltaSeconds);
@@ -549,6 +553,7 @@ namespace FalseGods.Plugin
                 FireWhateverWasBrought(deltaSeconds);
             }
 
+            _presence.ReportHealth(_boss.HealthFraction);
             Present();
             _presentation.Render(deltaSeconds);
         }
@@ -892,7 +897,13 @@ namespace FalseGods.Plugin
                 aimedHitRadius: 2.0f,
                 areaHitRadius: 5.0f,
                 stations: anchors.Count > 0 ? Itinerary : null,
-                openingSeconds: OpeningSeconds);
+                openingSeconds: OpeningSeconds,
+                // This boss does not swing at anybody. What threatens the players is the room working for it: the
+                // barrage its village carries to it, the waves it summons, and the arms it puts up when starved.
+                // The proof-of-concept telegraph-and-radius pair it used to have was never designed for this room
+                // and has no place in the fight it turned into. The weak-point window went with it — it WAS the
+                // recovery after one of those attacks — so nothing amplifies damage any more.
+                attacksOnItsOwn: false);
 
             _boss = new BossSimulation(
                 new BossInstanceId(1),
@@ -986,7 +997,7 @@ namespace FalseGods.Plugin
             _logger?.Log($"Encounter {_encounter} started: arena '{manifest.ArenaId}' at "
                 + $"({_originWire.X:0.0}, {_originWire.Y:0.0}, {_originWire.Z:0.0}), {navigation}, "
                 + $"boss at ({bossSpawn.X:0.0}, {bossSpawn.Y:0.0}, {bossSpawn.Z:0.0}) on "
-                + $"the arena floor, {waiting}. Shoot or melee it; weak-window hits are amplified.");
+                + $"the arena floor, {waiting}. Shoot or melee it; it strikes back through its room, not itself.");
 
             // The supply line runs for as long as the fight does: production is a thing the boss's room does while
             // the boss is in it, not a property of the level.
@@ -1172,22 +1183,47 @@ namespace FalseGods.Plugin
                     ArenaDepth.RevealHoldSeconds,
                     ArenaDepth.RevealSeconds);
                 _atmosphere.StartBattleMusic();
+
+                // The bar arrives with the fight, not with the boss: a creature standing in a room nobody has
+                // walked into is not a boss fight yet.
+                _presence.ShowHealthBar();
                 _logger?.Log($"[opening] the boss roars; the room opens to {ArenaDepth.FightEnd:0}m after "
                     + $"{ArenaDepth.RevealHoldSeconds:0.#}s, and the fight runs in {OpeningSeconds:0.#}s.");
                 return;
             }
         }
 
-        /// <summary>Let the music go when the boss does, the way the game ends its own boss fights.</summary>
-        private void EndTheMusicWithTheBoss(IReadOnlyList<IBossDomainEvent> bossEvents)
+        /// <summary>
+        /// Everything that was only happening because the boss was alive, ended when it is not.
+        /// </summary>
+        /// <remarks>
+        /// <para>Done on the boss's own death event rather than by noticing its health each frame, so it happens
+        /// once and at the moment the fight decided it.</para>
+        /// <para><b>The villagers are let go, not deleted.</b> They are the game's own creatures and they were only
+        /// ever on an errand; ending the errand hands them back their behaviour and drops what they were carrying
+        /// where they stand. Deleting them would be the room admitting they were the boss's machinery.</para>
+        /// <para>The rage goes with it too: a starved boss that is now a dead boss must not leave its band and its
+        /// arms standing over the corpse.</para>
+        /// </remarks>
+        private void EndTheFightWithTheBoss(IReadOnlyList<IBossDomainEvent> bossEvents)
         {
             for (var i = 0; i < bossEvents.Count; i++)
             {
-                if (bossEvents[i] is BossDied)
+                if (!(bossEvents[i] is BossDied))
                 {
-                    _atmosphere.StopBattleMusic();
-                    return;
+                    continue;
                 }
+
+                _atmosphere.StopBattleMusic();
+                _presence.HideHealthBar();
+                _carriers.Disband();
+                _rageArms.LowerAll();
+                _starvation.Reset();
+                _pileLastSeen = 0;
+                _supply = null; // nothing more is produced; what is already standing stays where it is
+                _logger?.Log("[fight] the boss is dead: the supply line has stopped and its villagers have gone "
+                    + "back to their own lives.");
+                return;
             }
         }
 
@@ -1387,7 +1423,7 @@ namespace FalseGods.Plugin
             _coordinator.Process(bossEvents);
             ClearTheFloorOnRelocation(bossEvents);
             PlayTheOpening(bossEvents);
-            EndTheMusicWithTheBoss(bossEvents);
+            EndTheFightWithTheBoss(bossEvents);
 
             var damageRequests = _boss.DrainDamageRequests();
             if (damageRequests.Count > 0)

@@ -62,5 +62,20 @@ namespace FalseGods.Application.Combat
         /// <summary>Take every carrier off the route and out of the world. The supply line belongs to the fight:
         /// one that ended must not leave goblins walking crates to a boss that is gone.</summary>
         void DismissAll();
+
+        /// <summary>
+        /// Take every carrier off the route and <b>leave them alive</b>: each drops what it was carrying where it
+        /// stands and goes back to being an ordinary villager.
+        /// </summary>
+        /// <remarks>
+        /// <para>For the boss dying. Deleting the goblins then would be the room admitting they were only ever the
+        /// boss's machinery; letting them go is the room saying the errand is over. What they do afterwards is not
+        /// ours to decide — handing them back their own behaviour is the whole point, and a civilian's own
+        /// behaviour is what the game already has for one.</para>
+        /// <para>The loads are dropped rather than kept, because a crate on a villager's back that nobody will
+        /// ever collect is a prop that reads as a bug — and dropping them leaves the players something to shoot.
+        /// </para>
+        /// </remarks>
+        void Disband();
     }
 }

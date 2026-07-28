@@ -26,7 +26,26 @@
         void Declare();
 
         /// <summary>Take the declaration back. A fight that ended must not leave the game aiming at a boss that
-        /// is no longer there.</summary>
+        /// is no longer there. Also takes the boss off the game's boss bar.</summary>
         void Withdraw();
+
+        /// <summary>
+        /// Put the boss on the game's own boss bar — the one across the top of the heads-up display. Repeating it
+        /// is free.
+        /// </summary>
+        /// <remarks>
+        /// The bar is the game's, so it looks and behaves like every other boss fight's: the same frame, the same
+        /// colour, the same animation coming in. Shown when the fight begins rather than when the boss is placed —
+        /// a creature standing in a room nobody has walked into is not a boss fight yet.
+        /// </remarks>
+        void ShowHealthBar();
+
+        /// <summary>How full the bar is, as a fraction in [0, 1]. Pushed by whoever knows the boss's health: the
+        /// host from its own simulation, a client from the host's replicated state, so both see one bar move
+        /// together.</summary>
+        void ReportHealth(float fraction);
+
+        /// <summary>Take the boss off the bar, the way the game does when one of its own bosses dies.</summary>
+        void HideHealthBar();
     }
 }

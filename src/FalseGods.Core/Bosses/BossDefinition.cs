@@ -38,7 +38,8 @@ namespace FalseGods.Core.Bosses
             float vanishSeconds = DefaultVanishSeconds,
             float hiddenSeconds = DefaultHiddenSeconds,
             float appearSeconds = DefaultAppearSeconds,
-            float openingSeconds = 0f)
+            float openingSeconds = 0f,
+            bool attacksOnItsOwn = true)
         {
             if (maxHealth <= 0)
             {
@@ -89,6 +90,7 @@ namespace FalseGods.Core.Bosses
             HiddenSeconds = hiddenSeconds;
             AppearSeconds = appearSeconds;
             OpeningSeconds = openingSeconds;
+            AttacksOnItsOwn = attacksOnItsOwn;
 
             MaxHealth = maxHealth;
             PhaseTwoHealthFraction = phaseTwoHealthFraction;
@@ -178,6 +180,22 @@ namespace FalseGods.Core.Bosses
         /// authored opening gets.</para>
         /// </remarks>
         public float OpeningSeconds { get; }
+
+        /// <summary>
+        /// Whether the boss runs an attack cycle of its own — idling, telegraphing, committing, recovering.
+        /// </summary>
+        /// <remarks>
+        /// <para>A boss that does not is not a boss that does nothing: what threatens the players may be entirely
+        /// the room's, summoned and thrown and supplied on the boss's behalf. Turning it off leaves the boss idle
+        /// between relocations, which is the honest state for a creature whose fight is fought by everything
+        /// around it.</para>
+        /// <para><b>The weak point goes with it.</b> The exposed window <i>is</i> the post-attack recovery, so a
+        /// boss with no attacks of its own has none — the damage a player deals it is never amplified, which is a
+        /// tuning consequence to remember rather than an oversight.</para>
+        /// <para>The attack timings and radii stay meaningful for a boss that does attack; they are simply never
+        /// read by one that does not.</para>
+        /// </remarks>
+        public bool AttacksOnItsOwn { get; }
 
         /// <summary>
         /// An itinerary must start at full health and descend strictly: each station is entered at a lower health

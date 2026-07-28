@@ -17,9 +17,11 @@ namespace FalseGods.UnityRuntime.Presentation
 {
     /// <summary>
     /// The production implementation of the <see cref="IEncounterPresentation"/> seam: a minimal billboard boss
-    /// (body, weak point, muzzle, health bar, ground telegraph) driven <b>only</b> by <see cref="Apply"/> (continuous
-    /// state) and <see cref="Handle"/> (discrete cues), with a per-frame <see cref="Render"/> visual step the driver
-    /// calls each frame.
+    /// (body, muzzle, ground telegraph) driven <b>only</b> by <see cref="Apply"/> (continuous state) and
+    /// <see cref="Handle"/> (discrete cues), with a per-frame <see cref="Render"/> visual step the driver calls
+    /// each frame.
+    /// <para>The boss's health is shown on the <b>game's own</b> boss bar, not here: a floating world-space bar
+    /// was a development stand-in and no added creature uses one. Nothing in this renderer draws health.</para>
     /// </summary>
     /// <remarks>
     /// This is the single presentation entry point for single-player, host, and client (Docs/Architecture.md §7): each
@@ -49,11 +51,7 @@ namespace FalseGods.UnityRuntime.Presentation
     {
         private const float BodyHeight = 2.4f;
         private const float BodyWidth = 1.6f;
-        private const float WeakPointSize = 0.55f;
         private const float MuzzleForward = 0.9f;
-        private const float HealthBarHeight = 0.18f;
-        private const float HealthBarWidth = 1.8f;
-        private const float HealthBarLift = 0.5f;   // above the body top
 
         // Uniform visual scale of the whole rig, applied to the root — mirrors SULFUR's own single-scale sprite
         // setup (the vanilla cave boss is one scaled Sprite object). At 1.0 the body is BodyHeight (2.4) tall; the
@@ -75,19 +73,11 @@ namespace FalseGods.UnityRuntime.Presentation
         // flat coloured quad, so the art is never required for correct behaviour.
         private const string BodyTextureResourceSuffix = "boss-body.png";
 
-        // Local -Z is "the sprite's visible front" (a Unity Quad shows its -Z face once the pivot turns it to the
-        // viewer), so these small negative offsets keep the weak point and health-bar fill in front, not z-fighting.
-        private const float WeakPointDepth = -0.06f;
-        private const float HealthFillDepth = -0.05f;
-
         private static readonly Color PhaseOneColor = new Color(0.20f, 0.70f, 0.65f);
         private static readonly Color PhaseTwoColor = new Color(0.85f, 0.35f, 0.18f);
-        private static readonly Color WeakExposedColor = new Color(1.00f, 0.90f, 0.20f);
-        private static readonly Color WeakHiddenColor = new Color(0.25f, 0.25f, 0.28f);
         private static readonly Color DeadColor = new Color(0.20f, 0.20f, 0.22f);
         private static readonly Color TelegraphProjectileColor = new Color(0.95f, 0.25f, 0.20f);
         private static readonly Color TelegraphAreaColor = new Color(0.95f, 0.55f, 0.10f);
-        private static readonly Color HealthFillColor = new Color(0.30f, 0.80f, 0.35f);
 
         // What an enraged boss is lit with. Multiplied over the artwork rather than replacing it (the body
         // quad's colour tints its texture), so the drawing still reads as itself - it has simply gone red.
@@ -119,16 +109,11 @@ namespace FalseGods.UnityRuntime.Presentation
         private readonly GameObject _root;
         private readonly GameObject _collisionBody;  // solid capsule on the Entities layer; physical presence
         private readonly GameObject _hitBody;        // trigger capsule on the Hitbox layer; weapon-hit target
-        private readonly Transform _bodyBillboard; // body + weak point; obeys FacingMode. Pivot at the body centre.
+        private readonly Transform _bodyBillboard; // the body; obeys FacingMode. Pivot at the body centre.
         private readonly Transform _aimPivot;      // gameplay-space yaw toward the target; holds the muzzle
         private readonly Transform _body;
         private readonly Material _bodyMat;
-        private readonly Transform _weakPoint;
-        private readonly Material _weakMat;
         private readonly Transform _muzzle;
-        private readonly Transform _healthBar;     // own camera-facing billboard, so the bar is always readable
-        private readonly Transform _healthFill;
-        private readonly Material _healthFillMat;
 
         private readonly Texture2D _bodyTexture;  // embedded boss sprite, or null → flat coloured quad
         private readonly bool _bodyTextured;
@@ -206,34 +191,10 @@ namespace FalseGods.UnityRuntime.Presentation
             _body.localScale = new Vector3(bodyWidth, BodyHeight, 1f);
             BodyCollider = AddBox(body);
 
-            // Weak point near the top, slightly toward the viewer, with its OWN collider so R15's "hitbox detached
-            // from the visible part" is directly checkable — the collider is where you see it.
-            var weak = CreateQuad("WeakPoint", _bodyBillboard, WeakHiddenColor, out _weakMat);
-            _weakPoint = weak.transform;
-            _weakPoint.localPosition = new Vector3(0f, BodyHeight * 0.28f, WeakPointDepth);
-            _weakPoint.localScale = new Vector3(WeakPointSize, WeakPointSize, 1f);
-            WeakPointCollider = AddBox(weak);
-
             // Muzzle: an invisible transform on the aim pivot (world-space toward the target); projectiles leave here.
             _muzzle = new GameObject("Muzzle").transform;
             _muzzle.SetParent(_aimPivot, worldPositionStays: false);
             _muzzle.localPosition = new Vector3(0f, BodyHeight * 0.5f, MuzzleForward);
-
-            // Health bar: its own transform under the root with its own camera-facing billboard, so it stays readable
-            // regardless of which way the body is facing.
-            // TEMPORARY / PLACEHOLDER: this floating world-space bar is a development stand-in. The shipping boss
-            // will show health on SULFUR's native boss HUD (the bar across the top of the heads-up display), and no
-            // added creature will use this floating bar. Replace it when the native boss-bar seam lands; do not build
-            // more presentation on top of it.
-            var bg = CreateQuad("HealthBarBg", _root.transform, new Color(0.05f, 0.05f, 0.06f), out _);
-            _healthBar = bg.transform;
-            _healthBar.localPosition = new Vector3(0f, BodyHeight + HealthBarLift, 0f);
-            _healthBar.localScale = new Vector3(HealthBarWidth, HealthBarHeight, 1f);
-            var fill = CreateQuad("HealthBarFill", _healthBar, HealthFillColor, out _healthFillMat);
-            _healthFill = fill.transform;
-            _healthFill.localPosition = new Vector3(0f, 0f, HealthFillDepth);
-            _healthFill.localScale = Vector3.one;
-            _healthFillMat.renderQueue = _healthFillMat.renderQueue + 1;
 
             // Physical collision body: an upright capsule on the "Entities" layer — where SULFUR's NPCs live
             // (Npc.mainCollider is a CapsuleCollider on this layer) — so the player bumps into the boss exactly as it
@@ -314,9 +275,6 @@ namespace FalseGods.UnityRuntime.Presentation
 
         /// <summary>The boss body's world collider — an aim ray tests it to place a hit where you aim.</summary>
         public Collider BodyCollider { get; }
-
-        /// <summary>The weak point's world collider, so an aimed hit can report whether it landed on the weak part.</summary>
-        public Collider WeakPointCollider { get; }
 
         /// <summary>The solid physical capsule (Entities layer) — the boss's collision presence; classifies as a body hit.</summary>
         public Collider CollisionCollider { get; }
@@ -467,17 +425,9 @@ namespace FalseGods.UnityRuntime.Presentation
                 }
 
                 UpdateBodyColor();
-                UpdateWeakPoint();
-                UpdateHealthBar(_state.HealthFraction);
             }
 
             OrientBody(camera);
-
-            // The health bar always faces the camera (yaw + pitch) so it stays readable from any angle.
-            if (camera != null)
-            {
-                _healthBar.rotation = FaceCameraRotation(_healthBar.position, camera.transform.position, lockPitch: false);
-            }
 
             AnimateTelegraph();
             AnimateTransients(deltaSeconds);
@@ -488,7 +438,6 @@ namespace FalseGods.UnityRuntime.Presentation
                 if (_flashTimer <= 0f)
                 {
                     UpdateBodyColor();
-                    UpdateWeakPoint();
                 }
             }
 
@@ -778,30 +727,6 @@ namespace FalseGods.UnityRuntime.Presentation
             }
 
             SetColor(_bodyMat, Fogged(color));
-        }
-
-        private void UpdateWeakPoint()
-        {
-            Color color;
-            if (_flashTimer > 0f && _flashWeakPoint)
-            {
-                color = Color.white;
-            }
-            else
-            {
-                color = _hasState && _state.WeakPointExposed ? WeakExposedColor : WeakHiddenColor;
-            }
-
-            SetColor(_weakMat, Fogged(color));
-        }
-
-        private void UpdateHealthBar(float fraction)
-        {
-            var f = Mathf.Clamp01(fraction);
-            // Shrink the fill from the left: scale on X, then shift so its left edge stays put.
-            _healthFill.localScale = new Vector3(f, 1f, 1f);
-            _healthFill.localPosition = new Vector3(-(1f - f) * 0.5f, 0f, HealthFillDepth);
-            SetColor(_healthFillMat, Color.Lerp(new Color(0.85f, 0.2f, 0.2f), HealthFillColor, f));
         }
 
         private void AnimateTelegraph()

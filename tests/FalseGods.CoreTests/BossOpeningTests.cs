@@ -161,6 +161,57 @@ namespace FalseGods.CoreTests
         }
 
         [Fact]
+        public void A_boss_that_does_not_attack_stays_idle_and_never_exposes_a_weak_point()
+        {
+            var h = new BossTestHarness().WithParticipantAt(1, 0f, 5f);
+            var boss = h.Build(new BossDefinition(
+                maxHealth: 100,
+                phaseTwoHealthFraction: 0.5f,
+                moveSpeed: 2f,
+                idleSeconds: 1f,
+                telegraphSeconds: 1f,
+                commitSeconds: 0.5f,
+                recoverSeconds: 1f,
+                weakPointDamageMultiplier: 3,
+                attackDamage: 10,
+                aimedHitRadius: 2f,
+                areaHitRadius: 5f,
+                attacksOnItsOwn: false));
+            boss.Spawn(SimVector2.Zero);
+            boss.DrainEvents();
+
+            for (var i = 0; i < 20; i++)
+            {
+                var events = h.Step(1f);
+                Assert.False(BossTestHarness.Has<AttackTelegraphed>(events));
+                Assert.False(BossTestHarness.Has<AttackCommitted>(events));
+                Assert.False(BossTestHarness.Has<WeakPointExposed>(events));
+                Assert.False(boss.IsWeakPointExposed);
+            }
+
+            Assert.Equal(BossActivity.Idle, boss.Activity);
+            Assert.Empty(boss.DrainDamageRequests());
+
+            // Nothing amplifies a hit any more, which is the tuning consequence worth pinning.
+            boss.ApplyDamage(10);
+            Assert.Equal(boss.MaxHealth - 10, boss.Health);
+        }
+
+        [Fact]
+        public void A_boss_that_dies_enraged_is_not_left_enraged()
+        {
+            var boss = new BossTestHarness().Build();
+            boss.Spawn(SimVector2.Zero);
+            boss.SetEnraged(true);
+            boss.DrainEvents();
+
+            boss.ApplyDamage(BossTestHarness.StandardDefinition.MaxHealth * 10);
+
+            Assert.True(boss.IsDead);
+            Assert.False(boss.IsEnraged);
+        }
+
+        [Fact]
         public void A_boss_with_no_opening_is_in_the_fight_the_moment_it_begins()
         {
             var h = new BossTestHarness().WithParticipantAt(1, 0f, 5f);
