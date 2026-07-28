@@ -60,6 +60,10 @@ namespace FalseGods.Plugin
         private readonly IBossArmPort _rageArms;
         private readonly IBossVoicePort _voice;
 
+        /// <summary>The same declaration the host makes, made here too: aim assist and homing run on the machine
+        /// doing the aiming, so each peer has to show its own game its own puppet.</summary>
+        private readonly IBossPresencePort _presence;
+
         private ReplicationReceiver _receiver;
         private IDisposable? _hitBinding;
         private BossPresentation? _presentation;
@@ -93,6 +97,7 @@ namespace FalseGods.Plugin
             _localPlayer = new SulfurLocalPlayer();
             _battlefield = new SulfurBattlefieldCleanup(logger);
             _rageArms = new SulfurBossArmPort(host, logger);
+            _presence = new SulfurBossPresence(() => _presentation?.CollisionCollider, logger);
             _voice = new SulfurBossVoice(host.transform, logger);
             _voice.Warm();
             _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
@@ -240,6 +245,7 @@ namespace FalseGods.Plugin
             _receiver.Dispose();
             _hitBinding?.Dispose();
             _hitBinding = null;
+            _presence.Withdraw();
             _presentation?.Dispose();
             _presentation = null;
             TeardownArena();
@@ -457,6 +463,9 @@ namespace FalseGods.Plugin
                 _presentation.SpriteScale = _loadedArena.BossSize;
             }
 
+            // Same as the host: this peer's own weapons have to be able to find this peer's own puppet.
+            _presence.Declare();
+
             _encounter = encounter;
             _presentedEvents = 0;
             _presentedArenaEvents = 0;
@@ -480,6 +489,7 @@ namespace FalseGods.Plugin
             _receiver = new ReplicationReceiver(_integration.Channel, _integration.Session);
             _hitBinding?.Dispose();
             _hitBinding = null;
+            _presence.Withdraw();
             _presentation?.Dispose();
             _presentation = null;
             _encounter = null;
@@ -500,6 +510,7 @@ namespace FalseGods.Plugin
             _receiver = new ReplicationReceiver(_integration.Channel, _integration.Session);
             _hitBinding?.Dispose();
             _hitBinding = null;
+            _presence.Withdraw();
             _presentation?.Dispose();
             _presentation = null;
             _encounter = null;

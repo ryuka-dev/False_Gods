@@ -191,6 +191,10 @@ namespace FalseGods.Plugin
         private readonly IBattlefieldCleanupPort _battlefield;
         private readonly IBossVoicePort _voice;
 
+        /// <summary>Puts the boss on the list the game's own weapon systems read, so homing shots follow it and
+        /// aim assist holds on it. Reads the boss's solid body at call time, since it is made per raise.</summary>
+        private readonly IBossPresencePort _presence;
+
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
 
@@ -292,6 +296,7 @@ namespace FalseGods.Plugin
             _participants = new SulfurParticipantQuery();
             _damagePort = new SulfurDamagePort(logger);
             _localPlayer = new SulfurLocalPlayer();
+            _presence = new SulfurBossPresence(() => _presentation?.CollisionCollider, logger);
             _contentDirectory = Path.GetDirectoryName(typeof(LocalEncounterController).Assembly.Location) ?? ".";
         }
 
@@ -764,6 +769,7 @@ namespace FalseGods.Plugin
             _arenaContent = null;
             _damageBinding?.Dispose();
             _damageBinding = null;
+            _presence.Withdraw();
             _presentation?.Dispose();
             _presentation = null;
             _presenter = null;
@@ -839,6 +845,10 @@ namespace FalseGods.Plugin
 
             _presenter = new BossPresenter(_presentation);
             _arenaPresentation = new ArenaPresentation(_realization!, _logger);
+
+            // The boss is ours to run, but the game has to be able to see it, or homing weapons ignore it and aim
+            // assist pulls off it.
+            _presence.Declare();
 
             if (_hostIntegration != null && _hostSender != null)
             {
