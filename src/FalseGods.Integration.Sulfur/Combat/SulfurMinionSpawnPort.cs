@@ -69,6 +69,37 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// <summary>A plain cut-out shader, the same one the boss's own art is drawn with.</summary>
         private const string HaloShader = "Sprites/Default";
 
+        // Looked up once for the whole session. Shader.Find walks every shader the build has, which is far too
+        // much to do while a creature is arriving — it was measured as a hitch on every summon.
+        private static Shader? _haloShader;
+        private static bool _haloShaderSearched;
+
+        private static Shader? HaloShaderOrNull()
+        {
+            if (!_haloShaderSearched)
+            {
+                _haloShaderSearched = true;
+                _haloShader = Shader.Find(HaloShader);
+            }
+
+            return _haloShader;
+        }
+
+        // One line per session about how the rim was built, or why it was not. Repeating it once a minion would
+        // say nothing new and drown the log.
+        private bool _reported;
+
+        private void ReportOnce(string what)
+        {
+            if (_reported)
+            {
+                return;
+            }
+
+            _reported = true;
+            _logger?.Log($"[minion] {what}.");
+        }
+
         /// <summary>Where the unit shader keeps the creature's picture, when it is not the material's main
         /// texture. Measured off the cave boss's own material.</summary>
         private static readonly string[] SpriteTextureNames = { "_FleshTexture", "_BaseMap", "_MainTex" };
@@ -264,6 +295,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var sprite = FindSpriteRenderer(unit);
                 if (sprite == null)
                 {
+                    ReportOnce("no renderer with a mesh to copy");
                     return;
                 }
 
@@ -271,6 +303,14 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var source = sprite.sharedMaterial;
                 if (mesh == null || mesh.sharedMesh == null || source == null)
                 {
+                    ReportOnce($"'{sprite.name}' has no mesh or material to copy");
+                    return;
+                }
+
+                var shader = HaloShaderOrNull();
+                if (shader == null)
+                {
+                    ReportOnce($"this build has no '{HaloShader}' shader");
                     return;
                 }
 
@@ -285,9 +325,18 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var renderer = halo.AddComponent<MeshRenderer>();
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
-                renderer.material = BuildHaloMaterial(source);
+                var material = BuildHaloMaterial(shader, source);
+                renderer.material = material;
 
                 _halos[unit] = halo;
+
+                // Said once, with everything that decides whether a rim can be seen at all: which renderer was
+                // copied, whether its picture was found, and where the copy lands in the drawing order. Guessing
+                // at any of those from outside the game is how the last two attempts were spent.
+                ReportOnce($"rim on '{sprite.name}' (mesh '{mesh.sharedMesh.name}', {mesh.sharedMesh.vertexCount} verts), "
+                    + $"picture '{(material.mainTexture == null ? "<none>" : material.mainTexture.name)}', "
+                    + $"queue {material.renderQueue} vs the creature's {source.renderQueue}, "
+                    + $"layer '{LayerMask.LayerToName(halo.layer)}', scale {HaloScale:0.##}");
             }
             catch (Exception exception)
             {
@@ -303,9 +352,9 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// The texture is taken from the creature's own material, so the rim is the shape of the art rather than
         /// of a box. Cut-out rather than blended, or the rim would be a rectangle wherever the art is transparent.
         /// </remarks>
-        private static Material BuildHaloMaterial(Material source)
+        private static Material BuildHaloMaterial(Shader shader, Material source)
         {
-            var material = new Material(Shader.Find(HaloShader));
+            var material = new Material(shader);
             var texture = source.mainTexture;
             if (texture == null)
             {
