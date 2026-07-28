@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Application.Combat;
 using FalseGods.RuntimeContracts.Arena;
@@ -27,9 +27,27 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// </remarks>
     public sealed class SulfurMinionSpawnPort : IMinionSpawnPort
     {
-        // The cave's own rank and file. A goblin spearman closes the distance, which is what makes the terraces
-        // and their jump links part of the fight. Destined for authored boss content, like the crate constants.
-        private static readonly UnitId MinionUnit = UnitIds.GoblinSpearman;
+        /// <summary>
+        /// The cave's own rank and file, and deliberately more than one kind of it.
+        /// </summary>
+        /// <remarks>
+        /// A band of identical spearmen is one problem repeated: solve the approach once and every summon after it
+        /// is the same fight. A mixed band asks two questions at once — the spearmen close, so the terraces and
+        /// their jump links matter, while the archers and casters punish standing still to deal with them. The
+        /// vanilla cousin does exactly this, picking each henchman at random from a list of its own, which is also
+        /// where the shape of this came from.
+        /// <para>Picked per minion rather than per summon, so a wave is mixed rather than uniform. The host
+        /// chooses and the session layer mirrors what it spawned, so no shared seed is needed for the peers to
+        /// agree — unlike the crates, which every peer builds for itself.</para>
+        /// <para>Destined for authored boss content, like the crate constants.</para>
+        /// </remarks>
+        private static readonly UnitId[] MinionUnits =
+        {
+            UnitIds.GoblinSpearman,
+            UnitIds.GoblinSpearman,   // twice: the melee that uses the room stays the backbone of a wave
+            UnitIds.GoblinArcher,
+            UnitIds.GoblinWizardFire,
+        };
 
         private readonly MonoBehaviour _host;
         private readonly ILogger? _logger;
@@ -60,19 +78,27 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return;
             }
 
-            var definition = MinionUnit.GetAsset();
-            if (definition == null)
-            {
-                _logger?.LogWarning($"[minion] the game has no definition for {MinionUnit.value}; nothing summoned.");
-                return;
-            }
-
+            var summoned = 0;
+            var band = new List<string>(at.Count);
             for (var i = 0; i < at.Count; i++)
             {
+                var kind = MinionUnits[UnityEngine.Random.Range(0, MinionUnits.Length)];
+                var definition = kind.GetAsset();
+                if (definition == null)
+                {
+                    // One kind the build does not have is one minion missing, not a summon that fails: the rest of
+                    // the band still arrives.
+                    _logger?.LogWarning($"[minion] the game has no definition for {kind.value}; that one is skipped.");
+                    continue;
+                }
+
                 SpawnOne(definition, new Vector3(at[i].X, at[i].Y, at[i].Z));
+                band.Add(definition.displayName ?? kind.value.ToString());
+                summoned++;
             }
 
-            _logger?.Log($"[minion] {at.Count} minion(s) requested; {_spawned.Count} already alive.");
+            _logger?.Log($"[minion] {summoned} of {at.Count} minion(s) requested ({string.Join(", ", band)}); "
+                + $"{_spawned.Count} already alive.");
         }
 
         public void DespawnAll()
