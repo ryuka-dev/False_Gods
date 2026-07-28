@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using BepInEx;
@@ -159,6 +159,7 @@ namespace FalseGods.Plugin
         private CrateCommandFlow? _crateFlow;
         private IFalseGodsIntegration? _crateFlowIntegration;  // the integration _crateFlow was composed on
         private HijackedArenaContent _levelArena = null!;
+        private SulfurArenaHazard _hazard = null!;
         private LocalEncounterController _boss = null!;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
@@ -251,13 +252,17 @@ namespace FalseGods.Plugin
             // the arena from content this root owns — the adapter cannot reach the bundle pipeline itself.
             LevelGenerationHijackPatches.Install(_log);
             _levelArena = new HijackedArenaContent(
-                Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".",
-                _log,
-                // Asked at load time, not now: the arena is built during level generation, by which point the peer
-                // is in whatever session it is in. No session at all is single player, and single player decides
-                // its own world.
-                worldIsOurs: () => FalseGodsIntegrations.Current?.Session.Role
-                    != RuntimeContracts.Multiplayer.SessionRole.Client);
+                Path.GetDirectoryName(typeof(FalseGodsPlugin).Assembly.Location) ?? ".", _log);
+
+            // The arena's standing hazards read the volumes the cloned scenery brought with it, so they follow
+            // whichever arena is up and go quiet with it.
+            _hazard = new SulfurArenaHazard(
+                () => _levelArena.Realization?.CurrentRoot!,
+                VanillaPropDecoration.ParentPath,
+                VanillaPropDecoration.MudPoolHazardVolumeName,
+                VanillaPropDecoration.MudPoolHazardDamage,
+                VanillaPropDecoration.MudPoolHazardInterval,
+                _log);
             LevelGenerationHijack.ArenaRooms = _levelArena.CreateRoomSource();
             _appliedFogStart = _fogStartDistance.Value;
             _appliedFogEnd = _fogEndDistance.Value;
@@ -341,6 +346,13 @@ namespace FalseGods.Plugin
 
             var integration = FalseGodsIntegrations.Current;
             var role = EvaluateRole(integration);
+
+            // The sludge burns only where the world is ours. A client's pool is scenery: what standing in it costs
+            // is settled on the host, exactly as the boss's own hits are, so nobody is burned twice.
+            if (role != CompositionRole.Client)
+            {
+                _hazard.Advance(Time.deltaTime);
+            }
 
             if (role == CompositionRole.Client)
             {
