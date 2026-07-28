@@ -165,8 +165,12 @@ namespace FalseGods.Integration.Sulfur.Arena
                     if (_burning.TryGetValue(id, out var finished))
                     {
                         _burning.Remove(id);
+                        // Health as this machine sees it, which for a player another peer owns does not move
+                        // here even though they really are being burned — their own machine applies it.
+                        var now = Health(player);
                         _logger?.Log($"[hazard] a player left the sludge after {finished.Ticks} tick(s): "
-                            + $"health {finished.HealthOnEntry:0.##} -> {Health(player):0.##}");
+                            + $"health here {finished.HealthOnEntry:0.##} -> {now:0.##}"
+                            + (now < finished.HealthOnEntry ? string.Empty : " (owned by another peer)"));
                     }
 
                     continue;
@@ -212,20 +216,14 @@ namespace FalseGods.Integration.Sulfur.Arena
             {
                 // Normal damage from a non-player source, as the donor's own volume dealt it: the game then
                 // applies its own armour and resistance rules on top.
-                var before = Health(player);
-                var accepted = player.playerUnit.ReceiveDamage(
+                //
+                // The return value is deliberately ignored, and so is any lack of movement in the health read
+                // below. For a player whose health another peer owns, the session layer answers false here and
+                // leaves this machine's copy untouched while forwarding the real hit to the machine that owns
+                // them — measured, with that peer reporting back the exact halved amount. Reading either as
+                // failure was wrong once already.
+                player.playerUnit.ReceiveDamage(
                     _damage, DamageTypes.Normal, new SludgeDamager(player.transform), Hitmesh.Data.Default);
-                var after = Health(player);
-
-                // Reported rather than assumed. Asking the game to damage somebody and watching it happen are two
-                // different things: the hit can be refused outright, or accepted and then reduced to nothing by
-                // the player's own resistances — and from the outside both look identical to a player who says
-                // the mud does not hurt.
-                if (!accepted || after >= before)
-                {
-                    _logger?.Log($"[hazard] the game did not take {_damage} off a player: accepted={accepted}, "
-                        + $"health {before:0.##} -> {after:0.##}");
-                }
             }
             catch (Exception exception)
             {
