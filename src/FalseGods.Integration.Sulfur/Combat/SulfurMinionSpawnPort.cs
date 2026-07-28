@@ -66,8 +66,18 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// little enough that it stays a rim rather than a shadow.</summary>
         private const float HaloScale = 1.12f;
 
-        /// <summary>A plain cut-out shader, the same one the boss's own art is drawn with.</summary>
-        private const string HaloShader = "Sprites/Default";
+        /// <summary>Flat-colour shaders the build is likely to keep, best first — the same chain the boss's own
+        /// art resolves through, because that one was measured against this game rather than assumed.</summary>
+        private static readonly string[] HaloShaders =
+        {
+            "Universal Render Pipeline/Unlit",
+            "Sprites/Default",
+            "Unlit/Color",
+            "Hidden/Internal-Colored",
+        };
+
+        private const string BaseColourProperty = "_BaseColor";
+        private const string ColourProperty = "_Color";
 
         // Looked up once for the whole session. Shader.Find walks every shader the build has, which is far too
         // much to do while a creature is arriving — it was measured as a hitch on every summon.
@@ -76,10 +86,20 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         private static Shader? HaloShaderOrNull()
         {
-            if (!_haloShaderSearched)
+            if (_haloShaderSearched)
             {
-                _haloShaderSearched = true;
-                _haloShader = Shader.Find(HaloShader);
+                return _haloShader;
+            }
+
+            _haloShaderSearched = true;
+            foreach (var name in HaloShaders)
+            {
+                var shader = Shader.Find(name);
+                if (shader != null && shader.isSupported)
+                {
+                    _haloShader = shader;
+                    break;
+                }
             }
 
             return _haloShader;
@@ -99,10 +119,6 @@ namespace FalseGods.Integration.Sulfur.Combat
             _reported = true;
             _logger?.Log($"[minion] {what}.");
         }
-
-        /// <summary>Where the unit shader keeps the creature's picture, when it is not the material's main
-        /// texture. Measured off the cave boss's own material.</summary>
-        private static readonly string[] SpriteTextureNames = { "_FleshTexture", "_BaseMap", "_MainTex" };
 
         /// <summary>What "kill this one first" looks like. Warm and bright against a cave.</summary>
         private static readonly Color PriorityColour = new Color(1f, 0.45f, 0.15f, 1f);
@@ -310,7 +326,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var shader = HaloShaderOrNull();
                 if (shader == null)
                 {
-                    ReportOnce($"this build has no '{HaloShader}' shader");
+                    ReportOnce("this build has none of the flat-colour shaders the rim needs");
                     return;
                 }
 
@@ -325,7 +341,9 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var renderer = halo.AddComponent<MeshRenderer>();
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
-                var material = BuildHaloMaterial(shader, source);
+                var material = BuildHaloMaterial(shader);
+                // Drawn just before the creature, so the creature paints over its middle and leaves the edge.
+                material.renderQueue = source.renderQueue - 1;
                 renderer.material = material;
 
                 _halos[unit] = halo;
@@ -333,8 +351,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // Said once, with everything that decides whether a rim can be seen at all: which renderer was
                 // copied, whether its picture was found, and where the copy lands in the drawing order. Guessing
                 // at any of those from outside the game is how the last two attempts were spent.
-                ReportOnce($"rim on '{sprite.name}' (mesh '{mesh.sharedMesh.name}', {mesh.sharedMesh.vertexCount} verts), "
-                    + $"picture '{(material.mainTexture == null ? "<none>" : material.mainTexture.name)}', "
+                ReportOnce($"rim on '{sprite.name}' (mesh '{mesh.sharedMesh.name}', {mesh.sharedMesh.vertexCount} verts) "
+                    + $"in flat colour via '{shader.name}' (supported={shader.isSupported}), "
                     + $"queue {material.renderQueue} vs the creature's {source.renderQueue}, "
                     + $"layer '{LayerMask.LayerToName(halo.layer)}', scale {HaloScale:0.##}");
             }
@@ -345,40 +363,33 @@ namespace FalseGods.Integration.Sulfur.Combat
         }
 
         /// <summary>
-        /// A flat-colour stand-in for the creature's picture: the same cut-out, in one colour, drawn immediately
-        /// before the real thing so the real thing covers all of it but the edge.
+        /// A flat-colour copy of the creature's own shape.
         /// </summary>
         /// <remarks>
-        /// The texture is taken from the creature's own material, so the rim is the shape of the art rather than
-        /// of a box. Cut-out rather than blended, or the rim would be a rectangle wherever the art is transparent.
+        /// <b>No texture, deliberately.</b> These sprites are drawn on a mesh cut to the outline of the art -
+        /// sixteen hundred vertices for one goblin - so the shape is already in the geometry and painting it one
+        /// colour gives the silhouette directly. Sampling the creature's own picture instead would mean matching
+        /// how its shader picks a region out of a sheet, which is a guess we do not need to make.
         /// </remarks>
-        private static Material BuildHaloMaterial(Shader shader, Material source)
+        private static Material BuildHaloMaterial(Shader shader)
         {
             var material = new Material(shader);
-            var texture = source.mainTexture;
-            if (texture == null)
+            SetColour(material, PriorityColour);
+            return material;
+        }
+
+        /// <summary>Colour a material whichever way its shader takes one.</summary>
+        private static void SetColour(Material material, Color colour)
+        {
+            if (material.HasProperty(BaseColourProperty))
             {
-                foreach (var name in SpriteTextureNames)
-                {
-                    if (source.HasProperty(name))
-                    {
-                        texture = source.GetTexture(name);
-                        if (texture != null)
-                        {
-                            break;
-                        }
-                    }
-                }
+                material.SetColor(BaseColourProperty, colour);
             }
 
-            material.mainTexture = texture;
-            material.color = PriorityColour;
-
-            // Just in front of the creature in the queue means drawn just before it, so the creature paints over
-            // its middle and leaves the edge. One less, not several: anything else transparent in the scene should
-            // still sort normally around both.
-            material.renderQueue = source.renderQueue - 1;
-            return material;
+            if (material.HasProperty(ColourProperty))
+            {
+                material.SetColor(ColourProperty, colour);
+            }
         }
 
         /// <summary>The renderer carrying the creature's picture — the one with a mesh to copy.</summary>
