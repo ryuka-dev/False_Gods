@@ -284,25 +284,50 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// measured from what the prop actually renders, not from its transform, because a prop's origin is not
         /// its middle. Height is left alone: that is the prop's own surface, which the donor did get right.
         /// </summary>
+        /// <remarks>
+        /// <b>Measured from transforms, never from bounds.</b> A collider's bounds are maintained by the physics
+        /// scene, which has not caught up with an object created and re-parented in this same frame — reading them
+        /// here gives a stale answer and "correcting" against it throws the volume somewhere worse than where it
+        /// started. Mapping a shape's own centre through its transform is arithmetic on values we just set, so it
+        /// is right immediately.
+        /// </remarks>
         private static void CenterVolumes(GameObject clone, IReadOnlyList<string> names)
         {
             if (names == null || names.Count == 0)
                 return;
 
-            var body = clone.GetComponent<Renderer>();
-            if (body == null)
+            if (!TryFindBodyCenter(clone, out var middle))
                 return;
 
-            var middle = body.bounds.center;
             foreach (var child in clone.GetComponentsInChildren<Transform>(includeInactive: true))
             {
                 if (child == clone.transform || !Contains(names, child.name))
                     continue;
 
-                var collider = child.GetComponent<Collider>();
-                var current = collider != null ? collider.bounds.center : child.position;
+                var current = VolumeCenter(child);
                 child.position += new Vector3(middle.x - current.x, 0f, middle.z - current.z);
             }
+        }
+
+        /// <summary>Where a prop's body actually is, from its own mesh through its own transform. A prop's origin
+        /// is not its middle — the sludge pool's sits on its rim.</summary>
+        private static bool TryFindBodyCenter(GameObject clone, out Vector3 center)
+        {
+            center = clone.transform.position;
+            var filter = clone.GetComponent<MeshFilter>();
+            if (filter == null || filter.sharedMesh == null)
+                return clone.GetComponent<Renderer>() != null; // no mesh to measure: the origin is the best we have
+
+            center = clone.transform.TransformPoint(filter.sharedMesh.bounds.center);
+            return true;
+        }
+
+        /// <summary>Where a volume actually reaches from, mapped through its own transform rather than read off
+        /// the physics scene.</summary>
+        private static Vector3 VolumeCenter(Transform volume)
+        {
+            var sphere = volume.GetComponent<SphereCollider>();
+            return sphere == null ? volume.position : volume.TransformPoint(sphere.center);
         }
 
         /// <summary>
@@ -324,7 +349,7 @@ namespace FalseGods.Integration.Sulfur.Arena
                 var sphere = child.GetComponent<SphereCollider>();
                 var reach = sphere == null
                     ? string.Empty
-                    : $", reach {WorldRadius(sphere):0.#} around {child.TransformPoint(sphere.center).ToString("0.#")}";
+                    : $", reach {WorldRadius(sphere):0.#} around {VolumeCenter(child).ToString("0.#")}";
                 _logger.Log($"[vanilla-prop] kept '{child.name}' at {child.position.ToString("0.#")}"
                     + $", layer '{LayerMask.LayerToName(child.gameObject.layer)}'{reach}");
             }

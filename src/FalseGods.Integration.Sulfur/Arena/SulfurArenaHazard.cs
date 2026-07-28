@@ -136,7 +136,7 @@ namespace FalseGods.Integration.Sulfur.Arena
 
                 _volumes.Add(sphere);
                 _logger?.Log($"[hazard] '{_volumeName}' reaches {WorldRadius(sphere):0.#} around "
-                    + $"{sphere.bounds.center.ToString("0.#")}");
+                    + $"{Center(sphere).ToString("0.#")}");
             }
 
             _logger?.Log($"[hazard] {_volumes.Count} volume(s) burning for {_damage} every {_interval:0.##}s");
@@ -197,7 +197,7 @@ namespace FalseGods.Integration.Sulfur.Arena
                 }
 
                 var radius = WorldRadius(sphere);
-                if ((sphere.bounds.center - point).sqrMagnitude <= radius * radius)
+                if ((Center(sphere) - point).sqrMagnitude <= radius * radius)
                 {
                     return true;
                 }
@@ -268,6 +268,11 @@ namespace FalseGods.Integration.Sulfur.Arena
                 return -1f;
             }
         }
+
+        /// <summary>Where a sphere reaches from, mapped through its own transform. Deliberately not the
+        /// collider's bounds: those belong to the physics scene, which lags an object placed this frame, and a
+        /// volume read from them can be measured somewhere it is not.</summary>
+        private static Vector3 Center(SphereCollider sphere) => sphere.transform.TransformPoint(sphere.center);
 
         /// <summary>A sphere collider's radius in world units — Unity scales it by the largest of the three
         /// lossy-scale axes, so a prop placed larger reaches proportionally further.</summary>
