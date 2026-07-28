@@ -59,12 +59,19 @@ namespace FalseGods.Integration.Sulfur.Combat
         // renderers may already be gone, and an entry left in that list outlives the fight.
         private readonly Dictionary<Unit, Renderer[]> _outlines = new Dictionary<Unit, Renderer[]>();
 
-        /// <summary>The unit shader's own highlight overlay. Named here rather than inline so the one place to
-        /// change is obvious if it reads badly in game — it is a shader-graph property, so what it looks like can
-        /// only be judged by looking.</summary>
-        private const string HighlightEnabled = "_Holo_Enabled";
-        private const string HighlightColour = "_Holo_Color";
-        private const string HighlightTime = "_Holo_Unscaled_Time";
+        // The rim built around each marked creature, one object per minion, destroyed with it.
+        private readonly Dictionary<Unit, GameObject> _halos = new Dictionary<Unit, GameObject>();
+
+        /// <summary>How much larger the rim copy is than the picture it rings. Enough to read across a room,
+        /// little enough that it stays a rim rather than a shadow.</summary>
+        private const float HaloScale = 1.12f;
+
+        /// <summary>A plain cut-out shader, the same one the boss's own art is drawn with.</summary>
+        private const string HaloShader = "Sprites/Default";
+
+        /// <summary>Where the unit shader keeps the creature's picture, when it is not the material's main
+        /// texture. Measured off the cave boss's own material.</summary>
+        private static readonly string[] SpriteTextureNames = { "_FleshTexture", "_BaseMap", "_MainTex" };
 
         /// <summary>What "kill this one first" looks like. Warm and bright against a cave.</summary>
         private static readonly Color PriorityColour = new Color(1f, 0.45f, 0.15f, 1f);
@@ -149,6 +156,15 @@ namespace FalseGods.Integration.Sulfur.Combat
                 Unoutline(outlined, keepEntry: true);
             }
 
+            foreach (var halo in _halos.Values)
+            {
+                if (halo != null)
+                {
+                    try { UnityEngine.Object.Destroy(halo); } catch (Exception) { /* going away anyway */ }
+                }
+            }
+
+            _halos.Clear();
             _outlines.Clear();
             _spawned.Clear();
             if (removed > 0)
@@ -226,45 +242,128 @@ namespace FalseGods.Integration.Sulfur.Combat
         }
 
         /// <summary>
-        /// Light the creature itself up, so it is marked when looked at and not only when something is in the way.
+        /// Give the creature a rim, so it is marked when looked at and not only when something is in the way.
         /// </summary>
         /// <remarks>
-        /// <para>The game's outline is an <i>occlusion</i> cue — it draws the silhouette that a wall is hiding.
-        /// That is exactly right for finding furniture through a building and exactly wrong on its own here: these
-        /// enemies are usually in plain sight, and in plain sight the outline has nothing to draw. Worse, they are
-        /// camera-facing cutouts rather than solid meshes, so an outline grown along the surface's normals comes
-        /// out behind the picture it was meant to ring.</para>
-        /// <para>So the marking is on the creature: the shader the game gives its units carries a highlight overlay
-        /// of its own, and it is turned on here with a colour. The material is instanced first — writing the shared
-        /// one would light up every goblin of that kind in the level, including the ones nobody has to kill.</para>
+        /// <para><b>Why not the game's outline on its own.</b> That one is an <i>occlusion</i> cue: it draws the
+        /// silhouette a wall is hiding, which is what finding furniture through a building needs. In plain sight
+        /// it has nothing to draw, and in plain sight is where these enemies usually are.</para>
+        /// <para><b>Why not the unit shader's own highlight either.</b> It exists, and it works — but it is a wash
+        /// of colour over the whole picture rather than a rim, and it is gated behind the same switch that turns on
+        /// the hit flash and the burning and frozen looks, so a creature shows nothing until something hits it.
+        /// Measured, after trying it.</para>
+        /// <para><b>So the rim is built.</b> A copy of the creature's own sprite, a little larger, in flat colour,
+        /// drawn just before the creature itself: the middle is covered by the real picture and what is left
+        /// showing is an edge. It rides the sprite's own transform, so it turns and leans with it for free, and it
+        /// costs one object and one material per marked creature — which die with it.</para>
         /// </remarks>
         private void Highlight(Unit unit)
         {
             try
             {
-                if (!_outlines.TryGetValue(unit, out var renderers))
+                var sprite = FindSpriteRenderer(unit);
+                if (sprite == null)
                 {
                     return;
                 }
 
-                foreach (var renderer in renderers)
+                var mesh = sprite.GetComponent<MeshFilter>();
+                var source = sprite.sharedMaterial;
+                if (mesh == null || mesh.sharedMesh == null || source == null)
                 {
-                    if (renderer == null)
-                    {
-                        continue;
-                    }
-
-                    // .material, not .sharedMaterial: this creature's own copy, which dies with it. Writing the
-                    // shared one would light up every goblin of that kind in the level.
-                    var material = renderer.material;
-                    material.SetFloat(HighlightEnabled, 1f);
-                    material.SetColor(HighlightColour, PriorityColour);
-                    material.SetFloat(HighlightTime, Time.unscaledTime);
+                    return;
                 }
+
+                var halo = new GameObject("FalseGodsPriorityHalo");
+                halo.layer = sprite.gameObject.layer;
+                halo.transform.SetParent(sprite.transform, worldPositionStays: false);
+                halo.transform.localPosition = Vector3.zero;
+                halo.transform.localRotation = Quaternion.identity;
+                halo.transform.localScale = Vector3.one * HaloScale;
+
+                halo.AddComponent<MeshFilter>().sharedMesh = mesh.sharedMesh;
+                var renderer = halo.AddComponent<MeshRenderer>();
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                renderer.material = BuildHaloMaterial(source);
+
+                _halos[unit] = halo;
             }
             catch (Exception exception)
             {
-                _logger?.LogWarning($"[minion] one could not be lit up ({exception.Message}); it fights unmarked.");
+                _logger?.LogWarning($"[minion] one could not be given a rim ({exception.Message}); it fights unmarked.");
+            }
+        }
+
+        /// <summary>
+        /// A flat-colour stand-in for the creature's picture: the same cut-out, in one colour, drawn immediately
+        /// before the real thing so the real thing covers all of it but the edge.
+        /// </summary>
+        /// <remarks>
+        /// The texture is taken from the creature's own material, so the rim is the shape of the art rather than
+        /// of a box. Cut-out rather than blended, or the rim would be a rectangle wherever the art is transparent.
+        /// </remarks>
+        private static Material BuildHaloMaterial(Material source)
+        {
+            var material = new Material(Shader.Find(HaloShader));
+            var texture = source.mainTexture;
+            if (texture == null)
+            {
+                foreach (var name in SpriteTextureNames)
+                {
+                    if (source.HasProperty(name))
+                    {
+                        texture = source.GetTexture(name);
+                        if (texture != null)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            material.mainTexture = texture;
+            material.color = PriorityColour;
+
+            // Just in front of the creature in the queue means drawn just before it, so the creature paints over
+            // its middle and leaves the edge. One less, not several: anything else transparent in the scene should
+            // still sort normally around both.
+            material.renderQueue = source.renderQueue - 1;
+            return material;
+        }
+
+        /// <summary>The renderer carrying the creature's picture — the one with a mesh to copy.</summary>
+        private static Renderer? FindSpriteRenderer(Unit unit)
+        {
+            foreach (var renderer in unit.GetComponentsInChildren<Renderer>(includeInactive: true))
+            {
+                if (renderer != null && renderer.GetComponent<MeshFilter>() != null)
+                {
+                    return renderer;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>Take a creature's rim away. Idempotent, and safe on one that never had it.</summary>
+        private void Unhighlight(Unit? unit)
+        {
+            if (unit == null || _halos.Count == 0 || !_halos.TryGetValue(unit, out var halo))
+            {
+                return;
+            }
+
+            _halos.Remove(unit);
+            if (halo == null)
+            {
+                return;
+            }
+
+            try { UnityEngine.Object.Destroy(halo); }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[minion] a rim could not be cleared ({exception.Message}).");
             }
         }
 
@@ -400,6 +499,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 if (unit == null || !unit.IsAlive)
                 {
                     Unoutline(unit);
+                    Unhighlight(unit);
                     _spawned.RemoveAt(i);
                 }
             }
