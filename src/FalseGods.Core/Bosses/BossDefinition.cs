@@ -37,7 +37,8 @@ namespace FalseGods.Core.Bosses
             IReadOnlyList<BossStation>? stations = null,
             float vanishSeconds = DefaultVanishSeconds,
             float hiddenSeconds = DefaultHiddenSeconds,
-            float appearSeconds = DefaultAppearSeconds)
+            float appearSeconds = DefaultAppearSeconds,
+            float openingSeconds = 0f)
         {
             if (maxHealth <= 0)
             {
@@ -81,11 +82,13 @@ namespace FalseGods.Core.Bosses
             RequirePositive(vanishSeconds, nameof(vanishSeconds));
             RequirePositive(hiddenSeconds, nameof(hiddenSeconds));
             RequirePositive(appearSeconds, nameof(appearSeconds));
+            RequireNonNegative(openingSeconds, nameof(openingSeconds));
 
             Stations = ValidateItinerary(stations, moveSpeed);
             VanishSeconds = vanishSeconds;
             HiddenSeconds = hiddenSeconds;
             AppearSeconds = appearSeconds;
+            OpeningSeconds = openingSeconds;
 
             MaxHealth = maxHealth;
             PhaseTwoHealthFraction = phaseTwoHealthFraction;
@@ -162,6 +165,19 @@ namespace FalseGods.Core.Bosses
 
         /// <summary>The whole relocation, end to end.</summary>
         public float RelocationSeconds => VanishSeconds + HiddenSeconds + AppearSeconds;
+
+        /// <summary>
+        /// How long the boss spends announcing itself once the fight is triggered, before any of it starts running.
+        /// </summary>
+        /// <remarks>
+        /// The length of the roar. A boss that is triggered does not begin fighting in the same instant: it makes a
+        /// noise, and the room is given that long to notice. Boss tuning rather than encounter tuning, because it is
+        /// the boss's own gesture that is being waited on — everything a peer plays over that window (the roar, the
+        /// room opening around the players, the music) is timed to it.
+        /// <para>Zero means a boss that starts fighting the moment it is told to, which is what a boss with no
+        /// authored opening gets.</para>
+        /// </remarks>
+        public float OpeningSeconds { get; }
 
         /// <summary>
         /// An itinerary must start at full health and descend strictly: each station is entered at a lower health

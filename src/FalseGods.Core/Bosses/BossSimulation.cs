@@ -42,6 +42,7 @@ namespace FalseGods.Core.Bosses
         private readonly IReadOnlyList<BossAnchor> _anchors;
 
         private bool _spawned;
+        private float _beganTime;
         private int _pendingStation = -1; // a station reached but not yet moved to; see AdvanceStations
         private float _activityEnteredTime;
         private float _lastAdvanceTime;
@@ -72,6 +73,25 @@ namespace FalseGods.Core.Bosses
 
         /// <summary>Whether <see cref="Spawn"/> has been called and the boss is live in the encounter.</summary>
         public bool IsSpawned => _spawned;
+
+        /// <summary>
+        /// Whether the fight has been started (see <see cref="Begin"/>). A spawned boss that has not begun stands
+        /// exactly where the room put it and does nothing at all.
+        /// </summary>
+        public bool HasBegun { get; private set; }
+
+        /// <summary>When the opening is over and the fight is really on, in host simulation time.</summary>
+        private float OpeningEndsAt => _beganTime + _definition.OpeningSeconds;
+
+        /// <summary>Whether the boss is in its opening — begun, still announcing itself, not yet fighting.</summary>
+        public bool IsOpening => HasBegun && _clock.Time < OpeningEndsAt;
+
+        /// <summary>
+        /// Whether the boss cannot be hurt because the fight is not under way: it is either waiting to be started or
+        /// still in its opening. The same refusal <see cref="IsRelocating"/> makes, for the same reason — a boss
+        /// that is not in the fight does not take part in it.
+        /// </summary>
+        public bool IsOutsideTheFight => !HasBegun || IsOpening;
 
         /// <summary>Current health. Zero once dead; never negative.</summary>
         public int Health { get; private set; }
@@ -152,7 +172,12 @@ namespace FalseGods.Core.Bosses
         /// </summary>
         /// <param name="startPosition">Where a boss with no itinerary stands.</param>
         /// <param name="startHeight">The height a boss with no itinerary stands at.</param>
-        public void Spawn(SimVector2 startPosition, float startHeight = 0f)
+        /// <param name="waitToBegin">
+        /// Leave the boss standing there without starting the fight — it does nothing and takes no damage until
+        /// <see cref="Begin"/>. For a room that decides for itself when the fight starts (a trigger at its mouth);
+        /// otherwise being put in the room is being put in the fight, and <see cref="Begin"/> happens here.
+        /// </param>
+        public void Spawn(SimVector2 startPosition, float startHeight = 0f, bool waitToBegin = false)
         {
             if (_spawned)
             {
@@ -178,18 +203,76 @@ namespace FalseGods.Core.Bosses
             _activityEnteredTime = _clock.Time;
             _lastAdvanceTime = _clock.Time;
             _events.Add(new BossSpawned(Id, Phase, Health));
+
+            if (!waitToBegin)
+            {
+                Begin();
+            }
+        }
+
+        /// <summary>
+        /// Start the fight. The boss announces itself for <see cref="BossDefinition.OpeningSeconds"/> and only then
+        /// begins to act; until this is called it stands where it spawned and nothing about it runs. Reports true
+        /// when this changed anything.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Decided outside, held here</b> — the same division as <see cref="SetEnraged"/>. What starts the
+        /// fight is a fact about the room (somebody crossed the line at its mouth), which the simulation has no
+        /// business knowing; but <i>having</i> begun is boss state, because it is what every peer has to agree
+        /// about and what the opening is played from.</para>
+        /// <para>Idempotent: a caller may say it every frame. A dead boss cannot be started, and an unspawned one
+        /// is not in the room to start.</para>
+        /// </remarks>
+        public bool Begin()
+        {
+            if (!_spawned || IsDead || HasBegun)
+            {
+                return false;
+            }
+
+            HasBegun = true;
+            _beganTime = _clock.Time;
+
+            // The boss has been standing here since the room loaded, so the clocks the attack cycle reads are as
+            // stale as the wait was; the fight starts now, not however long ago the room was built.
+            _activityEnteredTime = _beganTime;
+            _lastAdvanceTime = _beganTime;
+            _events.Add(new BossBegan(Id));
+            return true;
         }
 
         /// <summary>
         /// Advance the boss one host tick: move toward the target while idle, and run the attack cycle
         /// (idle → telegraph → commit → recover → idle) off <see cref="ISimulationClock.Time"/>. A no-op before
-        /// <see cref="Spawn"/> and after death.
+        /// <see cref="Spawn"/>, before <see cref="Begin"/>, during the opening, and after death.
         /// </summary>
         public void Advance()
         {
             if (!_spawned || IsDead)
             {
                 return;
+            }
+
+            if (!HasBegun || _clock.Time < OpeningEndsAt)
+            {
+                // Waiting to be started, or still announcing itself. Nothing of the fight runs, and the clocks are
+                // kept level with the wait so that standing in the room for a minute is not later charged to the
+                // attack cycle as a minute of idling.
+                _lastAdvanceTime = _clock.Time;
+                _activityEnteredTime = _clock.Time;
+                return;
+            }
+
+            // The first frame after the opening. Time is measured from when the opening actually ended rather than
+            // from this frame, so a long frame that overshoots the end is charged honestly — and a short one does
+            // not let the boss attack in the same instant it stops roaring.
+            if (_activityEnteredTime < OpeningEndsAt)
+            {
+                _activityEnteredTime = OpeningEndsAt;
+                if (_lastAdvanceTime < OpeningEndsAt)
+                {
+                    _lastAdvanceTime = OpeningEndsAt;
+                }
             }
 
             var now = _clock.Time;
@@ -280,11 +363,12 @@ namespace FalseGods.Core.Bosses
         /// Apply <paramref name="rawAmount"/> points of incoming damage — the one authoritative combat decision the
         /// host makes. The boss amplifies a hit that lands on the exposed weak point, reduces health, and may cross
         /// into phase two or die as a result. A non-positive amount, or a hit on an unspawned or dead boss, is
-        /// ignored. Clients never call this; they receive its <see cref="BossDamaged"/> result.
+        /// ignored, as is one on a boss that is not in the fight — mid-relocation, or waiting for (or still in) its
+        /// opening. Clients never call this; they receive its <see cref="BossDamaged"/> result.
         /// </summary>
         public void ApplyDamage(int rawAmount)
         {
-            if (!_spawned || IsDead || rawAmount <= 0 || IsRelocating)
+            if (!_spawned || IsDead || rawAmount <= 0 || IsRelocating || IsOutsideTheFight)
             {
                 return;
             }

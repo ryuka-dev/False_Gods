@@ -6,6 +6,18 @@ namespace FalseGods.Core.Bosses.Events
     public sealed record BossSpawned(BossInstanceId Boss, BossPhase Phase, int Health) : IBossDomainEvent;
 
     /// <summary>
+    /// The fight began: the boss has been told to start, and is announcing itself for
+    /// <see cref="BossDefinition.OpeningSeconds"/> before anything of it runs.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="BossSpawned"/> on purpose. Spawning is the boss <i>being there</i> — it stands at
+    /// its first station from the moment the room is loaded, silent and untouchable. This is the moment somebody
+    /// walked in. Everything a peer plays for the opening hangs off this one event, so that each peer plays it for
+    /// itself at the moment the host's boss began rather than whenever a snapshot happened to arrive.
+    /// </remarks>
+    public sealed record BossBegan(BossInstanceId Boss) : IBossDomainEvent;
+
+    /// <summary>
     /// The host selected an attack and began telegraphing it. Carries the <see cref="AttackInstanceId"/> that every
     /// later event for this attack repeats, so the effect applies exactly once (Docs/MinimalProofOfConceptPlan.md
     /// B2/B6). <see cref="AimPoint"/> is fixed at selection time — an aimed projectile is committed to where the
