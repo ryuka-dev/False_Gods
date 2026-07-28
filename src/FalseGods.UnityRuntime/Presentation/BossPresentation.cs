@@ -99,11 +99,16 @@ namespace FalseGods.UnityRuntime.Presentation
         // frames (measured on the cave boss: every curve in its clips is a transform curve), so a roar needs no
         // art - it is the same picture reared up, stretched and shaken. The rear-up is what reads at a distance
         // and the shake is what makes it feel loud.
-        private const float RoarSeconds = 0.9f;
+        // A roar is a gesture, not a flinch: it has to rear up where the eye can follow it, stay up long enough to
+        // be a held note, and come down. A curve that starts at its peak and decays reads as a pop rather than a
+        // roar, which is what a first pass at these numbers looked like in game.
+        private const float RoarSeconds = 1.9f;
+        private const float RoarRiseFraction = 0.18f;  // of the whole, spent going up
+        private const float RoarHoldFraction = 0.34f;  // of the whole, spent held at the top
         private const float RoarRearUp = 0.45f;        // peak vertical stretch, as a fraction of body height
         private const float RoarSquashRatio = 0.55f;   // how much of it the width gives back, so volume reads kept
         private const float RoarShakeDegrees = 7f;     // peak Z shake
-        private const float RoarShakeFrequency = 14f;  // shakes per second
+        private const float RoarShakeFrequency = 9f;   // shakes per second
 
         private readonly ILogger _logger;
         private readonly float _floorY;
@@ -652,10 +657,14 @@ namespace FalseGods.UnityRuntime.Presentation
         }
 
         /// <summary>
-        /// How far into the roar the body is, from 1 at the moment it starts to 0 when it is over, eased so the
-        /// rear-up snaps and the settle is gradual. Zero whenever nothing is roaring, so every caller can simply
-        /// multiply by it.
+        /// How far into the roar the body is, on a rise-hold-settle envelope: up over the first stretch, held at
+        /// the top through the middle, then down over the rest. Zero whenever nothing is roaring, so every caller
+        /// can simply multiply by it.
         /// </summary>
+        /// <remarks>
+        /// Smoothstepped at both ends so neither the rear-up nor the settle starts or stops abruptly — an
+        /// instantaneous edge is what makes a big slow motion read as a small fast one.
+        /// </remarks>
         private float RoarRise()
         {
             if (_roarTimer <= 0f)
@@ -663,8 +672,19 @@ namespace FalseGods.UnityRuntime.Presentation
                 return 0f;
             }
 
-            var remaining = Mathf.Clamp01(_roarTimer / RoarSeconds);
-            return remaining * remaining;
+            var elapsed = Mathf.Clamp01(1f - (_roarTimer / RoarSeconds));
+            if (elapsed < RoarRiseFraction)
+            {
+                return Mathf.SmoothStep(0f, 1f, elapsed / RoarRiseFraction);
+            }
+
+            var held = RoarRiseFraction + RoarHoldFraction;
+            if (elapsed < held)
+            {
+                return 1f;
+            }
+
+            return Mathf.SmoothStep(1f, 0f, (elapsed - held) / Mathf.Max(1e-4f, 1f - held));
         }
 
         private void UpdateBodyColor()

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Application.Combat;
 using PerfectRandom.Sulfur.Core;
@@ -38,9 +38,12 @@ namespace FalseGods.Integration.Sulfur.Combat
         private readonly ILogger? _logger;
         private readonly List<Unit> _raised = new List<Unit>();
 
-        // Which side of the boss each arm belongs on, index-aligned with _raised as they arrive. An arm's side is
-        // decided when it is asked for, not when it lands, so a slow load cannot put both on the same side.
-        private readonly List<Vector3> _stations = new List<Vector3>();
+        // Which of the boss's stations each arm holds - right, left, second rank out, and so on - index-aligned
+        // with _raised as they arrive. Deliberately the station's NUMBER and not the offset it works out to: the
+        // distances are being tuned while a fight runs, so baking them in here would freeze an arm at whatever
+        // they were when it rose. An arm's station is decided when it is asked for, not when it lands, so a slow
+        // load cannot put two on the same side.
+        private readonly List<int> _stations = new List<int>();
 
         // Which raising the arms in flight belong to. An arm is loaded asynchronously, so a rage that ends while
         // one is still on its way would otherwise leave it standing and throwing after the boss had calmed: the
@@ -82,8 +85,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             var generation = ++_generation;
             for (var i = 0; i < count; i++)
             {
-                var station = StationOffset(i, placement);
-                RaiseOne(definition, PlaceOf(placement, station), station, generation);
+                RaiseOne(definition, PlaceOf(placement, i), i, generation);
             }
 
             _logger?.Log($"[arm] {count} arm(s) rising at the boss's sides ({placement.SideDistance:0.#}m out, "
@@ -147,7 +149,7 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         /// <summary>Fire the asynchronous spawn and keep the arm when it lands, if the rage that asked for it is
         /// still running. Deliberately not awaited: raising is a moment in the fight.</summary>
-        private async void RaiseOne(UnitSO definition, Vector3 position, Vector3 station, int generation)
+        private async void RaiseOne(UnitSO definition, Vector3 position, int station, int generation)
         {
             Unit unit;
             try
@@ -186,26 +188,31 @@ namespace FalseGods.Integration.Sulfur.Combat
         }
 
         /// <summary>
-        /// Where the <paramref name="index"/>th arm belongs relative to the boss, in the boss's own frame: right
-        /// or left in turn, stepping outwards, so two arms flank it and four make two ranks.
+        /// Where the arm holding station <paramref name="station"/> belongs, in the boss's own frame: right or
+        /// left in turn, stepping outwards, so two arms flank it and four make two ranks.
         /// </summary>
-        private static Vector3 StationOffset(int index, ArmPlacement placement)
+        /// <remarks>
+        /// Worked out from the placement every time it is asked for rather than once when the arm rose, which is
+        /// what lets the distances be moved while the arms are standing.
+        /// </remarks>
+        private static Vector3 StationOffset(int station, ArmPlacement placement)
         {
-            var side = (index % 2 == 0) ? 1f : -1f;
-            var rank = (index / 2) + 1;
+            var side = (station % 2 == 0) ? 1f : -1f;
+            var rank = (station / 2) + 1;
             return new Vector3(side * placement.SideDistance * rank, placement.Lift, placement.ForwardOffset);
         }
 
         /// <summary>
-        /// Turn a station in the boss's frame into a world position: the offset is rotated by whichever way the
-        /// boss is facing, so the arms stay at its sides as it turns.
+        /// Turn a station into a world position: its offset in the boss's frame, rotated by whichever way the boss
+        /// is facing, so the arms stay at its sides as it turns.
         /// </summary>
         /// <remarks>
         /// A boss facing nowhere — which is what a dead or newly spawned one reports — leaves the offset in world
         /// axes rather than collapsing both arms onto the boss.
         /// </remarks>
-        private static Vector3 PlaceOf(ArmPlacement placement, Vector3 station)
+        private static Vector3 PlaceOf(ArmPlacement placement, int station)
         {
+            var offset = StationOffset(station, placement);
             var forward = new Vector3(placement.BossFacing.X, 0f, placement.BossFacing.Z);
             var right = Vector3.right;
             if (forward.sqrMagnitude > 1e-4f)
@@ -219,9 +226,9 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             return new Vector3(placement.BossAt.X, placement.BossAt.Y, placement.BossAt.Z)
-                + right * station.x
-                + Vector3.up * station.y
-                + forward * station.z;
+                + right * offset.x
+                + Vector3.up * offset.y
+                + forward * offset.z;
         }
 
         /// <summary>Drop the arms that are gone — taken down by us, or taken with a level — keeping the stations
