@@ -37,5 +37,6 @@ namespace FalseGods.Protocol.Wire
         int Health,
         int MaxHealth,
         bool WeakPointExposed,
+        bool Enraged,
         Sequence LastProcessedBossEventSequence);
 }

@@ -86,13 +86,14 @@ Two carriers (mirrors ST's channel semantics in `NetworkingArchitecture.md`), an
 arena state on both**:
 
 - **Unreliable snapshots** — continuous correction:
-  - `BossSnapshot` (position/rotation/health/phase/state/attack/weak-points + `LastProcessedBossEventSequence`);
+  - `BossSnapshot` (position/rotation/health/phase/state/attack/weak-points/enraged +
+    `LastProcessedBossEventSequence`);
   - `ArenaSnapshot` (mechanism/hazard/gate states + `LastProcessedArenaEventSequence`).
 
   Loss is tolerated; snapshots never *drive* discrete transitions.
 - **Reliable, sequenced discrete events** — two independent streams, each with its own sequence space:
   - `BossEvent` (`AttackSelected`, `TelegraphStarted`, `AttackCommitted`, `ProjectileSpawned`, `PhaseChanged`,
-    `WeakPointChanged`, `AddSpawned`, `BossStaggered`, `BossDefeated`);
+    `WeakPointChanged`, `Enraged`, `AddSpawned`, `BossStaggered`, `BossDefeated`);
   - `ArenaEvent` (`MechanismGroupActivated`, `MechanismStateChanged`, `HazardTriggered`, `GateStateChanged`,
     `ArenaExitUnlocked`).
 - **`EncounterBaseline`** — the reliable, once-per-join composition of `BossSnapshot` + `ArenaSnapshot` +

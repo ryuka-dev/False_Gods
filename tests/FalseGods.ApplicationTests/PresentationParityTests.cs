@@ -1,4 +1,4 @@
-using FalseGods.Application.Presentation;
+﻿using FalseGods.Application.Presentation;
 using FalseGods.Application.Wire;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Events;
@@ -29,6 +29,8 @@ namespace FalseGods.ApplicationTests
             new object[] { new WeakPointExposed(Boss, true) },
             new object[] { new WeakPointExposed(Boss, false) },
             new object[] { new BossDamaged(Boss, 30, 70, true) },
+            new object[] { new BossEnraged(Boss, true) },
+            new object[] { new BossEnraged(Boss, false) },
             new object[] { new BossDied(Boss) },
         };
 
@@ -48,6 +50,7 @@ namespace FalseGods.ApplicationTests
         [InlineData(0)] // fresh spawn: idle, phase one, full health
         [InlineData(1)] // recovering: weak point exposed
         [InlineData(2)] // dead
+        [InlineData(3)] // enraged: the look a starved boss has, which both peers must agree on
         public void State_maps_the_same_through_the_domain_and_the_wire_paths(int scenario)
         {
             var f = new BossFixture();
@@ -61,6 +64,9 @@ namespace FalseGods.ApplicationTests
                     break;
                 case 2:
                     f.Boss.ApplyDamage(1000);
+                    break;
+                case 3:
+                    f.Boss.SetEnraged(true);
                     break;
             }
 

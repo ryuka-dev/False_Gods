@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using FalseGods.Application.Presentation;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Events;
@@ -55,6 +55,7 @@ namespace FalseGods.ApplicationTests
             Health: 1,
             MaxHealth: 1,
             WeakPointExposed: false,
+            Enraged: false,
             LastProcessedBossEventSequence: new Sequence(0));
     }
 
@@ -122,6 +123,17 @@ namespace FalseGods.ApplicationTests
                 BossPresentationMapping.ToEvent(new BossDamaged(Boss, 30, 70, WeakPointHit: true)));
             Assert.Equal(30, mapped.Amount);
             Assert.True(mapped.WeakPointHit);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void BossEnraged_maps_to_RageChanged(bool enraged)
+        {
+            var mapped = Assert.IsType<RageChanged>(
+                BossPresentationMapping.ToEvent(new BossEnraged(Boss, enraged)));
+            Assert.Equal(Boss, mapped.Boss);
+            Assert.Equal(enraged, mapped.Enraged);
         }
 
         [Fact]

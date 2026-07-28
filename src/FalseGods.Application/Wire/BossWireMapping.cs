@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Events;
 using FalseGods.Core.Simulation;
@@ -64,6 +64,7 @@ namespace FalseGods.Application.Wire
                 boss.Health,
                 boss.MaxHealth,
                 boss.IsWeakPointExposed,
+                boss.IsEnraged,
                 lastProcessedBossEventSequence);
         }
 
@@ -87,6 +88,8 @@ namespace FalseGods.Application.Wire
                 case BossRelocated e:
                     return new BossRelocatedEvent(
                         sequence, tick, e.StationIndex, e.AnchorIndex, e.Position, e.Height);
+                case BossEnraged e:
+                    return new BossEnragedEvent(sequence, tick, e.Enraged);
                 case BossDied _:
                     return new BossDefeatedEvent(sequence, tick);
                 case null:

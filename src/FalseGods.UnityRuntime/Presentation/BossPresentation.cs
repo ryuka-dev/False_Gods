@@ -1,4 +1,4 @@
-// This renderer is heavily Unity-interop and UnityEngine's API carries no nullable annotations, so the
+﻿// This renderer is heavily Unity-interop and UnityEngine's API carries no nullable annotations, so the
 // nullable-reference context adds noise without safety here (lazily-created objects like the telegraph, and the
 // optional logger, are guarded by explicit null checks / _hasState). Disable it for this file only, the same
 // rationale the throwaway probe renderer used; the rest of FalseGods.UnityRuntime keeps the repo default.
@@ -89,6 +89,22 @@ namespace FalseGods.UnityRuntime.Presentation
         private static readonly Color TelegraphAreaColor = new Color(0.95f, 0.55f, 0.10f);
         private static readonly Color HealthFillColor = new Color(0.30f, 0.80f, 0.35f);
 
+        // What an enraged boss is lit with. Multiplied over the artwork rather than replacing it (the body
+        // quad's colour tints its texture), so the drawing still reads as itself - it has simply gone red.
+        // Green and blue are pulled down instead of red being pushed past white, because the sprite is already
+        // near full brightness and pushing up would only flatten it.
+        private static readonly Color RageTint = new Color(1.00f, 0.28f, 0.22f);
+
+        // The roar. Vanilla animates these creatures by deforming the one drawing it has rather than swapping
+        // frames (measured on the cave boss: every curve in its clips is a transform curve), so a roar needs no
+        // art - it is the same picture reared up, stretched and shaken. The rear-up is what reads at a distance
+        // and the shake is what makes it feel loud.
+        private const float RoarSeconds = 0.9f;
+        private const float RoarRearUp = 0.45f;        // peak vertical stretch, as a fraction of body height
+        private const float RoarSquashRatio = 0.55f;   // how much of it the width gives back, so volume reads kept
+        private const float RoarShakeDegrees = 7f;     // peak Z shake
+        private const float RoarShakeFrequency = 14f;  // shakes per second
+
         private readonly ILogger _logger;
         private readonly float _floorY;
         private readonly Shader _shader;
@@ -124,6 +140,7 @@ namespace FalseGods.UnityRuntime.Presentation
         private bool _flashWeakPoint;
         private float _phasePulseTimer;
         private float _appearPulseTimer;
+        private float _roarTimer;
         private bool _dead;
 
         private bool _telegraphActive;
@@ -351,6 +368,16 @@ namespace FalseGods.UnityRuntime.Presentation
                 case BossMoved e:
                     _logger?.Log($"[cue] BossMoved to ({e.Position.X:0.0}, {e.PositionHeight:0.0}, {e.Position.Z:0.0})");
                     break;
+                case RageChanged e:
+                    // The look itself is continuous and comes from state; this is the moment it changes, which
+                    // is where the roar goes. Calming down is not roared - that is a boss going quiet.
+                    if (e.Enraged)
+                    {
+                        _roarTimer = RoarSeconds;
+                    }
+
+                    _logger?.Log("[cue] RageChanged enraged=" + e.Enraged);
+                    break;
                 case BossDefeated _:
                     _dead = true;
                     // Death can arrive mid-telegraph (the sim just stops; it emits no attack-cancel event), so clear
@@ -463,6 +490,11 @@ namespace FalseGods.UnityRuntime.Presentation
                 _appearPulseTimer -= deltaSeconds;
             }
 
+            if (_roarTimer > 0f)
+            {
+                _roarTimer -= deltaSeconds;
+            }
+
             if (_dead)
             {
                 _bodyBillboard.localScale = Vector3.Lerp(_bodyBillboard.localScale, new Vector3(1f, 0.15f, 1f), deltaSeconds * 2f);
@@ -471,7 +503,14 @@ namespace FalseGods.UnityRuntime.Presentation
             {
                 var pulse = 1f + (_phasePulseTimer > 0f ? _phasePulseTimer * 0.5f : 0f)
                               + (_appearPulseTimer > 0f ? _appearPulseTimer * 0.4f : 0f);
-                _bodyBillboard.localScale = new Vector3(pulse, pulse, pulse);
+
+                // The roar rides on top of whatever the pulses are doing: it rears the body up and pulls it in
+                // at the waist, easing out so the loudest part is the start.
+                var rear = RoarRise() * RoarRearUp;
+                _bodyBillboard.localScale = new Vector3(
+                    pulse * (1f - rear * RoarSquashRatio),
+                    pulse * (1f + rear),
+                    pulse);
             }
         }
 
@@ -484,6 +523,15 @@ namespace FalseGods.UnityRuntime.Presentation
             if (Math.Abs(_relocationTilt) > 0.01f)
             {
                 _bodyBillboard.rotation *= Quaternion.Euler(0f, 0f, _relocationTilt);
+            }
+
+            // The roar's shake goes on the same axis, for the same reason: applied after facing, so it survives
+            // whichever facing mode chose the orientation.
+            var roar = RoarRise();
+            if (roar > 0.001f)
+            {
+                var shake = Mathf.Sin(_time * RoarShakeFrequency * Mathf.PI * 2f) * RoarShakeDegrees * roar;
+                _bodyBillboard.rotation *= Quaternion.Euler(0f, 0f, shake);
             }
         }
 
@@ -603,6 +651,22 @@ namespace FalseGods.UnityRuntime.Presentation
             return Quaternion.LookRotation(-n, up);
         }
 
+        /// <summary>
+        /// How far into the roar the body is, from 1 at the moment it starts to 0 when it is over, eased so the
+        /// rear-up snaps and the settle is gradual. Zero whenever nothing is roaring, so every caller can simply
+        /// multiply by it.
+        /// </summary>
+        private float RoarRise()
+        {
+            if (_roarTimer <= 0f)
+            {
+                return 0f;
+            }
+
+            var remaining = Mathf.Clamp01(_roarTimer / RoarSeconds);
+            return remaining * remaining;
+        }
+
         private void UpdateBodyColor()
         {
             Color color;
@@ -613,6 +677,13 @@ namespace FalseGods.UnityRuntime.Presentation
             else if (_flashTimer > 0f && !_flashWeakPoint)
             {
                 color = Color.white;
+            }
+            else if (_hasState && _state.Enraged)
+            {
+                // The one thing that does tint the artwork. Phase is deliberately left to the pulse and the
+                // health bar, but rage is a state players have to read at a glance from across the room and act
+                // on, and it is the only state the boss can be talked back out of.
+                color = RageTint;
             }
             else if (_bodyTextured)
             {

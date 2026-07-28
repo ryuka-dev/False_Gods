@@ -407,6 +407,7 @@ BossSnapshot {
   Health
   MaxHealth
   WeakPointStates[]
+  Enraged
   LastProcessedBossEventSequence
 }
 
@@ -454,7 +455,7 @@ ArenaEvent {
 ```
 
 `BossEvent` types (at least): `AttackSelected`, `TelegraphStarted`, `AttackCommitted`, `ProjectileSpawned`,
-`PhaseChanged`, `WeakPointChanged`, `AddSpawned`, `BossStaggered`, `BossDefeated`.
+`PhaseChanged`, `WeakPointChanged`, `Enraged`, `AddSpawned`, `BossStaggered`, `BossDefeated`.
 
 `ArenaEvent` types (at least): `MechanismGroupActivated`, `MechanismStateChanged`, `HazardTriggered`,
 `GateStateChanged`, `ArenaExitUnlocked`.

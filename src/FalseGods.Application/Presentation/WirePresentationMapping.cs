@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Core.Bosses;
 using FalseGods.Protocol.Wire;
@@ -44,6 +44,7 @@ namespace FalseGods.Application.Presentation
                 snapshot.PhaseId,
                 ToVisualActivity(snapshot.StateId),
                 snapshot.WeakPointExposed,
+                snapshot.Enraged,
                 healthFraction);
         }
 
@@ -65,6 +66,8 @@ namespace FalseGods.Application.Presentation
                     return new BossHit(boss, e.Amount, e.WeakPointHit);
                 case BossRelocatedEvent e:
                     return new BossMoved(boss, e.Position, e.Height);
+                case BossEnragedEvent e:
+                    return new RageChanged(boss, e.Enraged);
                 case BossDefeatedEvent _:
                     return new BossDefeated(boss);
                 case null:

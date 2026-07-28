@@ -969,12 +969,16 @@ namespace FalseGods.Plugin
                 case StarvationChange.Enraged:
                     _logger?.Log($"[rage] nothing delivered for {_starvation.SinceDelivery:0.#}s: the boss comes at "
                         + $"you. Summoning {EmergencyBandSize}; it settles when they are dead AND the route runs.");
+                    // The boss holds the rage; the supply watch only decided it. Everything that has to show the
+                    // same boss — this machine's own look, and every client's — reads it from there.
+                    _boss.SetEnraged(true);
                     SummonEmergencyBand();
                     RaiseRageArms();
                     break;
 
                 case StarvationChange.Calmed:
                     _logger?.Log("[rage] delivering again and its band is dead; the boss goes back to throwing.");
+                    _boss.SetEnraged(false);
                     _rageArms.LowerAll();
                     break;
             }

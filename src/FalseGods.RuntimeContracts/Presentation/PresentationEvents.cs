@@ -39,6 +39,16 @@ namespace FalseGods.RuntimeContracts.Presentation
     /// </summary>
     public sealed record BossHit(BossInstanceId Boss, int Amount, bool WeakPointHit) : IPresentationEvent;
 
+    /// <summary>
+    /// The boss started, or stopped, being enraged — roar, and switch the look.
+    /// </summary>
+    /// <remarks>
+    /// The same division as <see cref="WeakPointVisibilityChanged"/>: how an enraged boss <i>looks</i> is
+    /// continuous and carried by <see cref="PresentationState.Enraged"/>, so a renderer that missed this cue still
+    /// shows the right boss; this is the one-shot the change is <i>played</i> with, which is where the roar goes.
+    /// </remarks>
+    public sealed record RageChanged(BossInstanceId Boss, bool Enraged) : IPresentationEvent;
+
     /// <summary>The boss was defeated — play the death. Terminal, like its domain counterpart.</summary>
     public sealed record BossDefeated(BossInstanceId Boss) : IPresentationEvent;
 

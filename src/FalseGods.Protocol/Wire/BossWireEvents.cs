@@ -57,5 +57,13 @@ namespace FalseGods.Protocol.Wire
         float Height) : IBossWireEvent;
 
     /// <summary>The boss died. Terminal on the boss stream.</summary>
+    /// <summary>
+    /// The boss started, or stopped, being enraged — the reliable transition behind the continuous
+    /// <c>BossSnapshot.Enraged</c>. The snapshot is what a peer that missed this corrects itself from; the event is
+    /// what a peer plays the change with, so a client roars at the moment the host's boss did rather than the
+    /// first frame a snapshot happened to arrive.
+    /// </summary>
+    public sealed record BossEnragedEvent(Sequence Sequence, SimulationTick Tick, bool Enraged) : IBossWireEvent;
+
     public sealed record BossDefeatedEvent(Sequence Sequence, SimulationTick Tick) : IBossWireEvent;
 }

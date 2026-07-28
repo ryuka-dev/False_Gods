@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Events;
 using FalseGods.RuntimeContracts.Presentation;
@@ -44,6 +44,7 @@ namespace FalseGods.Application.Presentation
                 ToPhaseVisualId(boss.Phase),
                 ToVisualActivity(boss.Activity),
                 boss.IsWeakPointExposed,
+                boss.IsEnraged,
                 healthFraction);
         }
 
@@ -70,6 +71,8 @@ namespace FalseGods.Application.Presentation
                     return new BossHit(e.Boss, e.Amount, e.WeakPointHit);
                 case BossRelocated e:
                     return new BossMoved(e.Boss, e.Position, e.Height);
+                case BossEnraged e:
+                    return new RageChanged(e.Boss, e.Enraged);
                 case BossDied e:
                     return new BossDefeated(e.Boss);
                 case null:

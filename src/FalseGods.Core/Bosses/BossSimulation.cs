@@ -100,6 +100,10 @@ namespace FalseGods.Core.Bosses
         /// </summary>
         public bool IsWeakPointExposed => Activity == BossActivity.Recovering;
 
+        /// <summary>Whether the boss is currently enraged — set by whoever watches what provokes it (see
+        /// <see cref="SetEnraged"/>), and read by everything that has to show the same boss.</summary>
+        public bool IsEnraged { get; private set; }
+
         /// <summary>The boss's current position on the arena's ground plane.</summary>
         public SimVector2 Position { get; private set; }
 
@@ -306,6 +310,30 @@ namespace FalseGods.Core.Bosses
                 Phase = BossPhase.Two;
                 _events.Add(new BossPhaseChanged(Id, Phase));
             }
+        }
+
+        /// <summary>
+        /// Say whether the boss is enraged. Reports true when this changed anything.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Decided outside, held here.</b> What provokes the boss is a fact about the room — its supply
+        /// line running dry — and the simulation has no business knowing about carriers or piles. But the rage
+        /// itself is boss state: it is what everything downstream reads, from the look on the host to the same
+        /// look on a client, so it belongs with the health and the phase rather than in whoever noticed. The same
+        /// division as <see cref="ApplyDamage"/>, where the weapon decides and the boss owns the result.</para>
+        /// <para>Idempotent, so a caller may say it every frame; only a change is announced. A dead boss is past
+        /// raging, and an unspawned one has nothing to rage about.</para>
+        /// </remarks>
+        public bool SetEnraged(bool enraged)
+        {
+            if (!_spawned || IsDead || enraged == IsEnraged)
+            {
+                return false;
+            }
+
+            IsEnraged = enraged;
+            _events.Add(new BossEnraged(Id, enraged));
+            return true;
         }
 
         /// <summary>

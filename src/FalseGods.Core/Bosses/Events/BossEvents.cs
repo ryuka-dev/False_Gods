@@ -67,5 +67,16 @@ namespace FalseGods.Core.Bosses.Events
         float Height) : IBossDomainEvent;
 
     /// <summary>The boss's health reached zero. Terminal — no further events follow for this instance.</summary>
+    /// <summary>
+    /// The boss started, or stopped, being enraged. <see cref="Enraged"/> says which.
+    /// </summary>
+    /// <remarks>
+    /// The condition that provokes it is not the boss's to know — being starved of ammunition is a fact about the
+    /// room's supply line — but <i>being</i> enraged is boss state, and everything that has to agree about it (the
+    /// look, the peers) reads the boss. So the encounter decides and the boss holds it, the same way it holds the
+    /// health that damage arriving from outside decides.
+    /// </remarks>
+    public sealed record BossEnraged(BossInstanceId Boss, bool Enraged) : IBossDomainEvent;
+
     public sealed record BossDied(BossInstanceId Boss) : IBossDomainEvent;
 }

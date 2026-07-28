@@ -29,5 +29,6 @@ namespace FalseGods.RuntimeContracts.Presentation
         int PhaseVisualId,
         BossVisualActivity Activity,
         bool WeakPointExposed,
+        bool Enraged,
         float HealthFraction);
 }

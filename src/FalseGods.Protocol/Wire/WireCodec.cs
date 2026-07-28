@@ -35,6 +35,7 @@ namespace FalseGods.Protocol.Wire
         private const byte BossDamagedTag = 6;
         private const byte BossDefeatedTag = 7;
         private const byte BossRelocatedTag = 8;
+        private const byte BossEnragedTag = 9;
 
         // Arena event stream tags, an independent tag space.
         private const byte ArenaMechanismActivatedTag = 1;
@@ -506,6 +507,7 @@ namespace FalseGods.Protocol.Wire
             WriteInt(w, s.Health);
             WriteInt(w, s.MaxHealth);
             w.WriteBool(s.WeakPointExposed);
+            w.WriteBool(s.Enraged);
             w.WriteInt64(s.LastProcessedBossEventSequence.Value);
         }
 
@@ -526,6 +528,7 @@ namespace FalseGods.Protocol.Wire
             ReadVector(r),
             r.ReadInt32(),
             r.ReadInt32(),
+            r.ReadBool(),
             r.ReadBool(),
             new Sequence(r.ReadInt64()));
 
@@ -614,6 +617,10 @@ namespace FalseGods.Protocol.Wire
                     WriteVector(w, x.Position);
                     w.WriteSingle(x.Height);
                     break;
+                case BossEnragedEvent x:
+                    WriteBossHeader(w, BossEnragedTag, x.Sequence, x.Tick);
+                    w.WriteBool(x.Enraged);
+                    break;
                 case BossDefeatedEvent x:
                     WriteBossHeader(w, BossDefeatedTag, x.Sequence, x.Tick);
                     break;
@@ -648,6 +655,8 @@ namespace FalseGods.Protocol.Wire
                 case BossRelocatedTag:
                     return new BossRelocatedEvent(
                         sequence, tick, r.ReadInt32(), r.ReadInt32(), ReadVector(r), r.ReadSingle());
+                case BossEnragedTag:
+                    return new BossEnragedEvent(sequence, tick, r.ReadBool());
                 case BossDefeatedTag:
                     return new BossDefeatedEvent(sequence, tick);
                 default:
