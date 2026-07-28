@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using FalseGods.Application.Combat;
 using FalseGods.Core.Bosses.Combat;
@@ -92,6 +92,12 @@ namespace FalseGods.Integration.Sulfur.Combat
         private Mesh _look;
         private Material _lookMaterial;
         private bool _lookResolved;
+
+        // The route's own clock and the gaps it owes: one entry per carrier killed, holding its place empty until
+        // that time. Wound by the caller's frame, so it measures the fight's time rather than the wall's.
+        private float _routeClock;
+        private float _replaceAfterSeconds;
+        private readonly List<float> _mourning = new List<float>();
         private int _nextSetDownSeed = 1;
         private float _observedWalkSpeed;
 
@@ -144,10 +150,16 @@ namespace FalseGods.Integration.Sulfur.Combat
             float deltaSeconds,
             int wanted,
             int loadPerCarrier,
+            float replaceAfterSeconds,
             IReadOnlyList<ArenaWorldPoint> sources,
             ArenaWorldPoint deliverTo,
             CratePileId deliverPile)
         {
+            // The route's own clock, wound by the caller's frame rather than read off the world, so a paused or
+            // slowed game holds the gap open for as long as it would have taken.
+            _routeClock += deltaSeconds;
+            _replaceAfterSeconds = replaceAfterSeconds;
+
             Forget();
 
             if (sources == null || sources.Count == 0)
@@ -178,6 +190,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             _carriers.Clear();
+            _mourning.Clear();
             if (dismissed > 0)
             {
                 _logger?.Log($"[carrier] {dismissed} carrier(s) taken off the route with the encounter.");
@@ -427,7 +440,19 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         private void PutOnTheRoute(int wanted, IReadOnlyList<ArenaWorldPoint> sources)
         {
-            if (_carriers.Count >= wanted || _pending)
+            // A carrier killed leaves its place empty for a while. Without that the headcount is restored the same
+            // frame it drops and the whole route is decoration: the player can stand in it, but standing in it
+            // costs the boss nothing.
+            for (var i = _mourning.Count - 1; i >= 0; i--)
+            {
+                if (_mourning[i] <= _routeClock)
+                {
+                    _mourning.RemoveAt(i);
+                }
+            }
+
+            var allowed = wanted - _mourning.Count;
+            if (_carriers.Count >= allowed || _pending)
             {
                 return;
             }
@@ -499,6 +524,14 @@ namespace FalseGods.Integration.Sulfur.Combat
                 Spill(carrier);
                 carrier.ClearDrawnLoad();
                 _carriers.RemoveAt(i);
+
+                // Died on the route rather than being taken off it, so the gap is owed time before it is filled.
+                if (_replaceAfterSeconds > 0f)
+                {
+                    _mourning.Add(_routeClock + _replaceAfterSeconds);
+                    _logger?.Log($"[carrier] one is down; the route stays {_replaceAfterSeconds:0.#}s short "
+                        + $"({_carriers.Count} still working).");
+                }
             }
         }
 

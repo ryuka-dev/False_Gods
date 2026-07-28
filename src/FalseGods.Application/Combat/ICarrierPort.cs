@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using FalseGods.Core.Bosses.Combat;
 using FalseGods.RuntimeContracts.Arena;
 
@@ -45,10 +45,16 @@ namespace FalseGods.Application.Combat
         /// <paramref name="deliverPile"/> are where the pile beside the boss is and what it is called — both of
         /// which move when the boss does.
         /// </summary>
+        /// <param name="replaceAfterSeconds">How long the route stays a carrier short after one is killed. This is
+        /// what makes killing them worth doing: the headcount is otherwise restored the same frame it drops, and a
+        /// player who fights their way to the route has bought the boss nothing. It applies only to a carrier that
+        /// <i>died</i> — filling the route at the start of a fight, and reinforcing it when the village steps up,
+        /// are not punishments and are not delayed.</param>
         void Advance(
             float deltaSeconds,
             int wanted,
             int loadPerCarrier,
+            float replaceAfterSeconds,
             IReadOnlyList<ArenaWorldPoint> sources,
             ArenaWorldPoint deliverTo,
             CratePileId deliverPile);

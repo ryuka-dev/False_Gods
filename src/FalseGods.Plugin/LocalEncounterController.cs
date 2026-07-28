@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using FalseGods.Application.Arena;
@@ -108,6 +108,20 @@ namespace FalseGods.Plugin
         /// <summary>How high above a production point a destructible appears, so it falls into view and settles
         /// rather than being born inside whatever is already stacked there.</summary>
         private const float ProductionDropHeight = 3f;
+
+        /// <summary>
+        /// How long the route stays a carrier short after one is killed, as a share of a round trip.
+        /// </summary>
+        /// <remarks>
+        /// Killing a carrier has to cost the boss something, and the honest cost is the thing the supply model is
+        /// already built on: a carrier's contribution is one load per round trip, so a route missing one for a
+        /// whole round trip is a route that delivered one load fewer. Expressed against the <i>measured</i> trip
+        /// rather than a flat number of seconds, so it stays true when the room is re-authored and the walk gets
+        /// longer or shorter.
+        /// <para>Only a death is punished. Filling the route when the fight starts, and reinforcing it when the
+        /// village steps up, arrive as fast as the game can spawn them.</para>
+        /// </remarks>
+        private const float CarrierReplacementRoundTrips = 1f;
 
         /// <summary>How long a carrier spends loading and again setting down, mirroring the carrier port's own
         /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
@@ -561,7 +575,14 @@ namespace FalseGods.Plugin
             }
 
             var step = Escalation.At(_boss.HealthFraction);
-            _carriers.Advance(deltaSeconds, step.Carriers, step.LoadPerCarrier, sources, at, pile);
+            _carriers.Advance(
+                deltaSeconds,
+                step.Carriers,
+                step.LoadPerCarrier,
+                _measuredRoundTripSeconds * CarrierReplacementRoundTrips,
+                sources,
+                at,
+                pile);
             AdoptMeasuredWalkSpeed();
             ReportSupplyStepChange(step);
         }
