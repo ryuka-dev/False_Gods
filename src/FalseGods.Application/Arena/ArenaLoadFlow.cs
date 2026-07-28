@@ -148,9 +148,18 @@ namespace FalseGods.Application.Arena
         /// <summary>The object carrying the pool's authored hazard sphere — the shape the sludge burns within.</summary>
         public const string MudPoolHazardVolumeName = "PoolBlocker";
 
-        /// <summary>What standing in the sludge costs, and how often — the donor's own numbers, read from the room
-        /// that made the pool.</summary>
-        public const int MudPoolHazardDamage = 5;
+        /// <summary>
+        /// What standing in the sludge costs, and how often. The interval is the donor's; the amount is not.
+        /// </summary>
+        /// <remarks>
+        /// The donor deals five a tick, and measured in game that lands — the call is accepted and health really
+        /// drops — but nobody notices. A player takes half of everything before their resistances are even
+        /// applied, and the game scales its own hurt effect against forty damage, so two and a half points is a
+        /// hit the screen barely draws and the health bar barely moves. Five was authored for a pool the vanilla
+        /// boss switches on for a moment, not for one standing where this fight happens, so the amount is ours to
+        /// choose: enough that stepping in the mud is a mistake you feel and correct, rather than a slow leak.
+        /// </remarks>
+        public const int MudPoolHazardDamage = 20;
 
         public const float MudPoolHazardInterval = 0.25f;
     }

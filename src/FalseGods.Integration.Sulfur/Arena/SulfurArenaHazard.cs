@@ -41,7 +41,10 @@ namespace FalseGods.Integration.Sulfur.Arena
         private readonly ILogger _logger;
 
         private readonly List<SphereCollider> _volumes = new List<SphereCollider>();
-        private readonly HashSet<int> _burning = new HashSet<int>();
+
+        // Who is standing in it, and what their health was when they stepped in — so leaving reports what the
+        // visit actually cost. A hazard's number is only tunable if somebody can see what it does.
+        private readonly Dictionary<int, Visit> _burning = new Dictionary<int, Visit>();
 
         private GameObject _knownRoot;
         private float _sinceLastTick;
@@ -159,20 +162,24 @@ namespace FalseGods.Integration.Sulfur.Arena
                 var id = player.GetInstanceID();
                 if (!Inside(player.transform.position))
                 {
-                    if (_burning.Remove(id))
+                    if (_burning.TryGetValue(id, out var finished))
                     {
-                        _logger?.Log("[hazard] a player is out of the sludge.");
+                        _burning.Remove(id);
+                        _logger?.Log($"[hazard] a player left the sludge after {finished.Ticks} tick(s): "
+                            + $"health {finished.HealthOnEntry:0.##} -> {Health(player):0.##}");
                     }
 
                     continue;
                 }
 
-                if (_burning.Add(id))
+                if (!_burning.TryGetValue(id, out var visit))
                 {
+                    visit = new Visit(Health(player));
                     _logger?.Log($"[hazard] a player is standing in the sludge at {player.transform.position.ToString("0.#")}.");
                 }
 
                 Strike(player);
+                _burning[id] = visit.OneMore();
             }
         }
 
@@ -224,6 +231,27 @@ namespace FalseGods.Integration.Sulfur.Arena
             {
                 _logger?.LogWarning($"[hazard] the sludge could not burn a player ({exception.Message}); skipped.");
             }
+        }
+
+        /// <summary>One stay in a hazard: what the player had when they stepped in, and how many times it has
+        /// burned them since.</summary>
+        private readonly struct Visit
+        {
+            public Visit(float healthOnEntry) : this(healthOnEntry, 0)
+            {
+            }
+
+            private Visit(float healthOnEntry, int ticks)
+            {
+                HealthOnEntry = healthOnEntry;
+                Ticks = ticks;
+            }
+
+            public float HealthOnEntry { get; }
+
+            public int Ticks { get; }
+
+            public Visit OneMore() => new Visit(HealthOnEntry, Ticks + 1);
         }
 
         /// <summary>A player's current health, or a negative number when it cannot be read — never mistaken for
