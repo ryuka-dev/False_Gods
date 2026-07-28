@@ -144,6 +144,12 @@
       <HintPath>$(SulfurManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Only to ask the sound middleware what became of a voice it made for us: AudioSource/AudioListener are
+         the types its own diagnostics hand back. Nothing here creates one. -->
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

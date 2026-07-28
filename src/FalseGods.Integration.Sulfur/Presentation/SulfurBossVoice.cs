@@ -6,6 +6,7 @@ using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.Units;
 using PerfectRandom.Sulfur.Gameplay;
 using Sonity;
+using Sonity.Internal;
 using UnityEngine;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 
@@ -46,7 +47,29 @@ namespace FalseGods.Integration.Sulfur.Presentation
         /// <summary>The helper field the vanilla boss keeps its roar in, played from its own intro animation.</summary>
         private const string RoarFieldName = "roarSoundEvent";
 
+        /// <summary>
+        /// How much further this roar carries than the one the cave boss makes.
+        /// </summary>
+        /// <remarks>
+        /// <para>The sound is authored to reach about twenty-five metres, which is the room the vanilla boss is
+        /// fought in and about a third of ours. Measured: a roar from a boss thirty metres off was culled before it
+        /// made a sound, and one from seven metres was heard. A roar that only the nearest player hears is not a
+        /// roar — it is the whole room being told what just happened.</para>
+        /// <para>Four times twenty-five is a hundred, past the far corner of an eighty-metre room, which is the
+        /// same number and the same reasoning as the arms' reach.</para>
+        /// <para><b>Asked for per play, never written into the asset.</b> The sound belongs to the game and the
+        /// vanilla boss still uses it; changing what it is would change that boss's roar too, for the rest of the
+        /// session.</para>
+        /// </remarks>
+        private const float RoarCarriesTimes = 4f;
+
         private readonly Transform _mouth;
+
+        // Built once: the sound system takes the same array every time, and a roar should not make garbage.
+        private readonly SoundParameterInternals[] _carry =
+        {
+            new SoundParameterDistanceScale(RoarCarriesTimes),
+        };
         private readonly ILogger? _logger;
 
         /// <summary>How many times to go looking before accepting that the sound is not there. Each rage that
@@ -56,6 +79,7 @@ namespace FalseGods.Integration.Sulfur.Presentation
         private SoundEvent? _roar;
         private bool _fetching;
         private int _attempts;
+        private int _roars;
 
         /// <param name="lifetime">What the voice's own object hangs from, so it lives and dies with the plugin
         /// rather than with a level.</param>
@@ -88,11 +112,53 @@ namespace FalseGods.Integration.Sulfur.Presentation
             try
             {
                 _mouth.position = new Vector3(at.X, at.Y, at.Z);
-                roar.Play(_mouth);
+                roar.Play(_mouth, _carry);
+                CheckItCarried(roar, first: ++_roars == 1);
             }
             catch (Exception exception)
             {
                 _logger?.LogWarning($"[voice] the boss's roar would not play ({exception.Message}).");
+            }
+        }
+
+        /// <summary>
+        /// Check that the roar actually became a sound, and say how far it reached.
+        /// </summary>
+        /// <remarks>
+        /// <b>Kept because a silent roar is invisible from here.</b> Finding the sound, playing it and hearing
+        /// nothing looks identical to everything working — which is how a roar culled for being thirty metres away
+        /// survived two attempts at fixing the wrong thing. The middleware will say whether it made a voice at all;
+        /// asking it, with the distance to the ear beside it, turns that failure into one line. The first roar of a
+        /// session also reports the reach it ended up with, which is what says the room-sized carry is really being
+        /// applied.
+        /// </remarks>
+        private void CheckItCarried(SoundEvent roar, bool first)
+        {
+            try
+            {
+                var listener = UnityEngine.Object.FindObjectOfType<AudioListener>();
+                var away = listener != null
+                    ? Vector3.Distance(listener.transform.position, _mouth.position).ToString("0.#") + "m"
+                    : "nobody listening";
+
+                var source = roar.GetLastPlayedAudioSource(_mouth);
+                if (source == null)
+                {
+                    _logger?.LogWarning($"[voice] the roar made no sound: nothing was allocated for it, from "
+                        + $"{_mouth.position.ToString("0.#")} with the ear {away} off.");
+                    return;
+                }
+
+                if (first)
+                {
+                    _logger?.Log($"[voice] the boss roars {source.maxDistance:0.#}m, on the game's "
+                        + $"'{(source.outputAudioMixerGroup == null ? "<none>" : source.outputAudioMixerGroup.name)}' "
+                        + $"mix; the ear was {away} off and heard it at {source.volume:0.##}.");
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[voice] could not tell whether the roar carried ({exception.Message}).");
             }
         }
 
