@@ -285,8 +285,9 @@ namespace FalseGods.Plugin
                 _log,
                 new SulfurMinionSpawnPort(this, _log),
                 // A second, separately tracked band: the rage ends only when the emergency band is dead, so it
-                // cannot share a roster with the ordinary waves that go on around it.
-                new SulfurMinionSpawnPort(this, _log),
+                // cannot share a roster with the ordinary waves that go on around it - and it is outlined, because
+                // a player has to be able to tell which of the goblins on the floor are the ones that matter.
+                new SulfurMinionSpawnPort(this, _log, outlined: true),
                 _crates,
                 new SulfurCarrierPort(
                     this,

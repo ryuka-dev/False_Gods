@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!--
     FalseGods.Integration.Sulfur — the anti-corruption layer to the base game.
@@ -55,6 +55,13 @@
       <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.Gameplay.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- The game's outline pass lives on a URP renderer feature, so marking a minion for it needs the
+         pipeline's own assembly. Presentation only: nothing authoritative crosses this reference. -->
+    <Reference Include="Unity.RenderPipelines.Universal.Runtime">
+      <HintPath>$(SulfurManagedDir)\Unity.RenderPipelines.Universal.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
     <Reference Include="PerfectRandom.Sulfur.LevelGeneration">
       <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.LevelGeneration.dll</HintPath>
       <Private>false</Private>

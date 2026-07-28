@@ -51,14 +51,25 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         private readonly MonoBehaviour _host;
         private readonly ILogger? _logger;
+        private readonly bool _outlined;
         private readonly List<Unit> _spawned = new List<Unit>();
+
+        // The renderers handed to the game's outline pass, kept per minion so exactly what was added is taken back
+        // when it dies. Reading them off a corpse would be too late: the object is on its way out and its
+        // renderers may already be gone, and an entry left in that list outlives the fight.
+        private readonly Dictionary<Unit, Renderer[]> _outlines = new Dictionary<Unit, Renderer[]>();
 
         /// <param name="host">The behaviour whose lifetime scopes the asynchronous load — the game cancels the
         /// spawn if it is destroyed first, which is exactly the behaviour we want on a plugin unload.</param>
-        public SulfurMinionSpawnPort(MonoBehaviour host, ILogger? logger = null)
+        /// <param name="outlined">Whether these minions are drawn with the game's own outline, the one the church
+        /// puts around a piece of furniture you have just unlocked: a bright silhouette that reads through walls.
+        /// A band whose death is the price of calming the boss is worth telling players apart from the ordinary
+        /// wave beside it, and the game already has the vocabulary for "this one, first".</param>
+        public SulfurMinionSpawnPort(MonoBehaviour host, ILogger? logger = null, bool outlined = false)
         {
             _host = host ?? throw new ArgumentNullException(nameof(host));
             _logger = logger;
+            _outlined = outlined;
         }
 
         public int Alive
@@ -123,6 +134,12 @@ namespace FalseGods.Integration.Sulfur.Combat
                 }
             }
 
+            foreach (var outlined in _outlines.Keys)
+            {
+                Unoutline(outlined, keepEntry: true);
+            }
+
+            _outlines.Clear();
             _spawned.Clear();
             if (removed > 0)
             {
@@ -153,6 +170,73 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             SendItAfterThePlayers(unit);
             _spawned.Add(unit);
+            Outline(unit);
+        }
+
+        /// <summary>
+        /// Draw this minion with the game's own outline — the silhouette the church puts around furniture you have
+        /// just unlocked, which reads through walls and through a crowd.
+        /// </summary>
+        /// <remarks>
+        /// Presentation only, and failing at it costs nothing but the hint: a build whose renderer feature is not
+        /// there still gets the fight, just without the marker. The renderers are remembered rather than looked up
+        /// again later, because by the time a minion is dead its renderers are on their way out and an entry left
+        /// in the game's list would outlive the fight.
+        /// </remarks>
+        private void Outline(Unit unit)
+        {
+            if (!_outlined || unit == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var rendering = SulfurCustomRendering.instance;
+                if (rendering == null)
+                {
+                    return;
+                }
+
+                var renderers = unit.GetComponentsInChildren<Renderer>(includeInactive: true);
+                if (renderers == null || renderers.Length == 0)
+                {
+                    return;
+                }
+
+                rendering.AddOutlinedRenderers(renderers);
+                _outlines[unit] = renderers;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[minion] one could not be outlined ({exception.Message}); it fights unmarked.");
+            }
+        }
+
+        /// <summary>Take a minion's renderers back out of the game's outline list. Idempotent, and safe on a unit
+        /// that was never outlined or is already destroyed.</summary>
+        private void Unoutline(Unit? unit, bool keepEntry = false)
+        {
+            if (unit == null || _outlines.Count == 0)
+            {
+                return;
+            }
+
+            if (!_outlines.TryGetValue(unit, out var renderers))
+            {
+                return;
+            }
+
+            try { SulfurCustomRendering.instance?.RemoveOutlinedRenderers(renderers); }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[minion] an outline could not be cleared ({exception.Message}).");
+            }
+
+            if (!keepEntry)
+            {
+                _outlines.Remove(unit);
+            }
         }
 
         /// <summary>
@@ -260,6 +344,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var unit = _spawned[i];
                 if (unit == null || !unit.IsAlive)
                 {
+                    Unoutline(unit);
                     _spawned.RemoveAt(i);
                 }
             }
