@@ -537,10 +537,11 @@ namespace FalseGods.Plugin
             _boss.Advance();
             ReportActivityChange();
 
-            // None of the room's own machinery runs until the fight does. The supply line especially: its carriers
-            // would walk the crates across an arena nobody has entered, and the starvation watch would call a
-            // route that has not been asked to run yet a route that has been cut.
-            if (_boss.HasBegun)
+            // None of the room's own machinery runs until the fight does — and the fight does not start until the
+            // boss has finished announcing it, which is why this asks the same question the boss's own attack
+            // cycle does rather than merely whether it has been triggered. Measured: gated on having begun, the
+            // carriers were already walking their first load while the boss was still roaring.
+            if (!_boss.IsOutsideTheFight)
             {
                 AdvanceSupplyLine(deltaSeconds);
                 AdvanceStarvation(deltaSeconds);
