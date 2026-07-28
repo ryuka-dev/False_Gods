@@ -287,6 +287,26 @@ room prefab out of an AssetRipper export.*
 - Playing the game's own playlist through the game's own player is what makes §3.14 hold for free: the mixer
   snapshot and the player's music volume both apply, and the mod adds no audio setting.
 
+### 2.9 The game's own boss bar
+
+*How to re-take: decompile `BossHealth` (`PerfectRandom.Sulfur.Core.UI`) and `Unit.AttachToBossUI`.*
+
+- `Unit.AttachToBossUI(bool)` is public and null-guards the UI itself; it reaches `UIManager.bossUI`, a
+  `BossHealth`. Our boss carries a real (inert, never spawned) `Npc`, which is a `Unit`, so it can be attached —
+  and `BossHealth.Attach` casts to `Npc`, which it also satisfies.
+- **The bar is driven by `Unit.onHealthChange`, a public delegate field carrying a NORMALISED health** (0–1),
+  not a point count: `Attach` subscribes `health => newFillAmount = health`. So a boss whose health the game does
+  not own is shown by raising that delegate ourselves. Each `Attach` combines another handler, so attach once per
+  creature.
+- `Attach` starts the bar full and plays its arrival; `Detach(unit)` only detaches when the unit matches.
+  `BossHealth.Update` reads `unitTracked.unitSO.useBossTelegraphUI` and `.isInvulnerable` every frame, so the
+  borrowed definition must stay non-null — and a destroyed tracked unit is handled by its own null check.
+- **The label has no seam.** `UpdateLabel` fills a private `bossName` (a TMP text) from
+  `Npc.GetActorName()`, which is `LocalizationManager.TryGetTranslation("UnitNames/" + unitSO.name)` falling back
+  to `unitSO.displayName`. Borrowing a vanilla definition therefore announces the vanilla creature. Writing over
+  the private field after attaching keeps the game's translation and adds our own prefix; it is only rewritten on
+  a language change, which is rare enough to accept.
+
 ---
 
 ## 3. Traps
