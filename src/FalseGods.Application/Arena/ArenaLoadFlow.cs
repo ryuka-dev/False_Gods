@@ -110,45 +110,103 @@ namespace FalseGods.Application.Arena
         public const string CaveBossRoomKey =
             "Assets/_Core/Prefabs/LevelGeneration/Chunks/Caves/CaveCousinNew.prefab";
 
-        public const string MudPoolMarkerPrefix = "Prop_MudPool";
-
-        public const string MudPoolPath = "Enemies/CousinSludgePool";
-
         /// <summary>
-        /// <b>GeometryNoNavMesh, not the prop's own StaticDoodad.</b> The donor room carries the pool on a layer the
-        /// recast scan rasterizes, so cloning it as-is would quietly turn a decorative basin into terrain and let
-        /// it reshape — or split — the arena's navigation. On this layer it stays solid to physics and to the
-        /// boss's thrown destructibles while the scan never sees it, which is exactly how the sculpted cave shell
-        /// is handled.
+        /// Every kind of scenery this arena borrows, each with the markers it fills and what has to be done to a
+        /// copy before it stands here. Adding scenery is a row and a marker; nothing else in the pipeline changes.
         /// </summary>
-        public const string LayerName = "GeometryNoNavMesh";
+        /// <remarks>
+        /// <b>The layer is the design decision in every row.</b> The navigation scan reads meshes on
+        /// {Geometry, StaticDoodad, InvisibleGeometry, ProjectileTrigger} and nothing else, and navigation is the
+        /// only thing that decides where an enemy may be - a collider does not stop one. So a prop left on
+        /// StaticDoodad becomes terrain enemies can stand on, and the same prop moved to GeometryNoNavMesh stays
+        /// solid to players while the scan never sees it. That is the whole difference between a platform both
+        /// sides use and one only a player can climb, and it is why an empty layer here means "leave the donor's
+        /// alone" rather than "we forgot".
+        /// </remarks>
+        public static readonly IReadOnlyList<VanillaPropClone> Props = new[]
+        {
+            // The sludge the boss rises out of. Off the navigation layers: a decorative basin has no business
+            // reshaping - or splitting - the graph the jump links were tuned against. It keeps its damage volume
+            // as the authored shape of the mud, minus the donor boss's own pieces.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_MudPool",
+                CaveBossRoomKey,
+                "Enemies/CousinSludgePool",
+                StripChildNames: new[] { "CousinPosition" },
+                StripComponentNames: new[] { "CousinPool", "ApplyDamageInsideCollider" },
+                LayerName: OffTheNavigationLayers,
+                VolumeChildNames: new[] { MudPoolHazardVolumeName }),
 
-        /// <summary>Removed from the clone: the donor boss's teleport anchor. Our boss is anchored by the room's
-        /// own authored points, and an unused game object has no business standing in our arena.</summary>
-        public static readonly IReadOnlyList<string> MudPoolStripChildren = new[] { "CousinPosition" };
+            // A mushroom big enough to stand on, and the one prop that KEEPS the donor's layer: its cap is meant
+            // to be scanned, so enemies can be fought up there rather than merely looked at. Getting onto it is an
+            // authored jump link's job, as with the terraces - the cap is far above a step. Author it large: the
+            // scan erodes half a metre off every edge, so a cap much under three metres across leaves too little
+            // to stand on, and a link with nowhere to land is dropped without a word.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_Platshroom",
+                CaveBossRoomKey,
+                "Decorations/Mushrooms/Platshroom (2)",
+                StripChildNames: NoNames,
+                StripComponentNames: NoNames,
+                LayerName: KeepTheDonorsLayer,
+                VolumeChildNames: NoNames),
 
-        /// <summary>
-        /// Removed from the clone: the donor boss's pool controller, which is inert without that boss, and the
-        /// donor's own damage component.
-        /// <para>The pool still burns — see <see cref="MudPoolHazardDamage"/> — but not through that component.
-        /// Cloned into this arena it reported nothing to damage, and a game component we cannot instrument is not
-        /// worth more guesses when the hit can go through the path this project already damages players with. What
-        /// the donor <i>authored</i> is still what is used: the shape it drew, the amount it set, the interval it
-        /// chose, and its limit to the player faction.</para>
-        /// </summary>
-        public static readonly IReadOnlyList<string> MudPoolStripComponents =
-            new[] { "CousinPool", "ApplyDamageInsideCollider" };
+            // The same mushroom as scenery: the donor built this one with no collider at all, on a layer nothing
+            // scans. Kept exactly that way - it is a thing to look at, and neither side interacts with it.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_MushroomDecor",
+                CaveBossRoomKey,
+                "Decorations/Mushrooms/Platshroom (Decoration)",
+                StripChildNames: NoNames,
+                StripComponentNames: NoNames,
+                LayerName: KeepTheDonorsLayer,
+                VolumeChildNames: NoNames),
 
-        /// <summary>The pool's hazard volume, kept as the authored shape of the mud. It stays on the layer the
-        /// donor authored — which layer a collider sits on decides which other layers it reports contact with at
-        /// all — and is re-centred over the pool, because the donor placed it off to one side for reasons of its
-        /// own room and any scale we choose multiplies that offset.</summary>
-        public static readonly IReadOnlyList<string> MudPoolVolumeChildren = new[] { MudPoolHazardVolumeName };
+            // A low, wide mushroom for players only. It keeps its collider, so a player can climb it, and loses
+            // the navigation layer, so no enemy ever knows it is there - which is the only way to make a piece of
+            // terrain one-sided, since an agent is stopped by navigation and never by a collider.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_Tickshroom",
+                CaveBossRoomKey,
+                "Decorations/Mushrooms/Tickshroom 1 (1)",
+                StripChildNames: NoNames,
+                StripComponentNames: NoNames,
+                LayerName: OffTheNavigationLayers,
+                VolumeChildNames: NoNames),
 
-        /// <summary>The object carrying the pool's authored hazard sphere — the shape the sludge burns within.</summary>
+            // Not decoration: the donor built this one as a destructible, and it is cloned with its breakable and
+            // its hit mesh intact, on the layer that makes it shootable. Unlike the boss's ammunition, every peer
+            // puts one at the same authored marker, so the session layer's own position-matched breakable sync has
+            // something true to match - worth confirming in a session rather than assuming.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_Stalagmite",
+                CaveBossRoomKey,
+                "Decorations/Stalagmites/Stalagmite",
+                StripChildNames: NoNames,
+                StripComponentNames: NoNames,
+                LayerName: KeepTheDonorsLayer,
+                VolumeChildNames: NoNames),
+        };
+
+        /// <summary>Solid to players and to the boss's thrown destructibles, invisible to the navigation scan -
+        /// the same layer the sculpted cave shell uses.</summary>
+        public const string OffTheNavigationLayers = "GeometryNoNavMesh";
+
+        /// <summary>Leave a clone on whatever layer the donor authored, because that layer is doing a job:
+        /// carrying the prop into the navigation scan, or making it shootable.</summary>
+        public const string KeepTheDonorsLayer = "";
+
+        private static readonly IReadOnlyList<string> NoNames = new string[0];
+
+        /// <summary>The object carrying the pool's authored hazard sphere - the shape the sludge burns within.</summary>
         public const string MudPoolHazardVolumeName = "PoolBlocker";
 
-        /// <summary>What standing in the sludge costs, and how often — the donor's own numbers, read from the room
+        /// <summary>What standing in the sludge costs, and how often - the donor's own numbers, read from the room
         /// that made the pool. Five a tick is plainly felt there, which is the answer to whether it is enough
         /// here.</summary>
         public const int MudPoolHazardDamage = 5;
@@ -466,16 +524,22 @@ namespace FalseGods.Application.Arena
         /// <summary>Place the vanilla scenery the room authored markers for. Runs before navigation so the clones
         /// are already standing — and already on their intended layer — when the level scans; an arena that
         /// authored no prop markers places nothing and succeeds.</summary>
-        private VanillaPropResult CloneVanillaProps() =>
-            _vanillaAssets.CloneProps(new VanillaPropClone(
-                VanillaPropDecoration.ParentPath,
-                VanillaPropDecoration.MudPoolMarkerPrefix,
-                VanillaPropDecoration.CaveBossRoomKey,
-                VanillaPropDecoration.MudPoolPath,
-                VanillaPropDecoration.MudPoolStripChildren,
-                VanillaPropDecoration.MudPoolStripComponents,
-                VanillaPropDecoration.LayerName,
-                VanillaPropDecoration.MudPoolVolumeChildren));
+        private VanillaPropResult CloneVanillaProps()
+        {
+            var placed = 0;
+            foreach (var prop in VanillaPropDecoration.Props)
+            {
+                var result = _vanillaAssets.CloneProps(prop);
+                if (!result.Success)
+                {
+                    return result;
+                }
+
+                placed += result.Cloned;
+            }
+
+            return VanillaPropResult.Placed(placed);
+        }
 
         /// <summary>Paint the sculpted cave shell's surfaces with the vanilla cave materials, reusing the same
         /// carrier the surfaces borrow from. The sculpt arrives in two objects — the solid shell and the walkable

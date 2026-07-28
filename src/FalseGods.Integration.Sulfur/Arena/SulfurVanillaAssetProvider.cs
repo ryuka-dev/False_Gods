@@ -220,8 +220,11 @@ namespace FalseGods.Integration.Sulfur.Arena
             if (markers.Count == 0)
                 return VanillaPropResult.Placed(0);
 
-            var layer = LayerMask.NameToLayer(request.LayerName);
-            if (layer < 0)
+            // An unnamed layer means the donor's own is doing a job worth keeping - carrying the prop into the
+            // navigation scan, or making it shootable - so the clone is left on it.
+            var relayer = !string.IsNullOrEmpty(request.LayerName);
+            var layer = relayer ? LayerMask.NameToLayer(request.LayerName) : -1;
+            if (relayer && layer < 0)
                 return VanillaPropResult.Failed($"prop layer '{request.LayerName}' does not exist in this build");
 
             var donor = LoadCarrier(request.RoomKey, out var donorError);
@@ -250,7 +253,8 @@ namespace FalseGods.Integration.Sulfur.Arena
 
                     StripChildren(clone, request.StripChildNames);
                     StripComponents(clone, request.StripComponentNames);
-                    SetLayerRecursively(clone.transform, layer, request.VolumeChildNames);
+                    if (relayer)
+                        SetLayerRecursively(clone.transform, layer, request.VolumeChildNames);
 
                     // The marker owns placement; the clone keeps the source's own scale as its base, so a marker
                     // left at scale 1 reproduces the prop at its vanilla proportions.
@@ -271,7 +275,7 @@ namespace FalseGods.Integration.Sulfur.Arena
             }
 
             _logger?.Log($"[vanilla-prop] {cloned} '{source.name}' clone(s) placed on '{request.MarkerNamePrefix}*'"
-                + $", layer '{request.LayerName}'");
+                + (relayer ? $", layer '{request.LayerName}'" : ", on the donor's own layer"));
             ReportKeptParts(parent, request);
             return VanillaPropResult.Placed(cloned);
         }

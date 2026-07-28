@@ -242,14 +242,14 @@ namespace FalseGods.ApplicationTests
                 return MaterialBorrowResult.Resolved(0);
             }
 
-            public VanillaPropClone? CapturedPropClone { get; private set; }
+            public List<VanillaPropClone> CapturedPropClones { get; } = new List<VanillaPropClone>();
 
             public bool FailPropClone { get; set; }
 
             public VanillaPropResult CloneProps(VanillaPropClone request)
             {
                 _journal.Add("vanilla.CloneProps");
-                CapturedPropClone = request;
+                CapturedPropClones.Add(request);
                 return FailPropClone
                     ? VanillaPropResult.Failed("donor room did not load")
                     : VanillaPropResult.Placed(0);
@@ -280,6 +280,16 @@ namespace FalseGods.ApplicationTests
 
         private static readonly ArenaWorldPoint Origin = new ArenaWorldPoint(10f, 2f, 20f);
 
+        /// <summary>The scenery step is one call per authored prop, so a journal names it that many times; the
+        /// count comes from the authored list rather than being written out, so adding scenery never edits a
+        /// sequence assertion.</summary>
+        private static object CloneProps(int? times = null) =>
+            Enumerable.Repeat("vanilla.CloneProps", times ?? VanillaPropDecoration.Props.Count).ToArray();
+
+        /// <summary>Flatten a journal expectation whose entries may be a single step or a run of them.</summary>
+        private static string[] Journal(params object[] steps) =>
+            steps.SelectMany(step => step is string one ? new[] { one } : (string[])step).ToArray();
+
         // ---------------------------------------------------------------- happy path
 
         [Fact]
@@ -290,7 +300,7 @@ namespace FalseGods.ApplicationTests
             Assert.True(rig.Flow.Prepare().Success);
             Assert.True(rig.Flow.Realize(Origin).Success);
 
-            Assert.Equal(new[] { "assets.Load", "realize", "vanilla.Resolve", "vanilla.CloneProps", "nav.Apply" }, rig.Journal);
+            Assert.Equal(Journal("assets.Load", "realize", "vanilla.Resolve", CloneProps(), "nav.Apply"), rig.Journal);
             Assert.Equal(ArenaLoadStage.Realized, rig.Flow.Stage);
             Assert.Equal(Origin, rig.Realization.CapturedOrigin);
         }
@@ -485,7 +495,7 @@ namespace FalseGods.ApplicationTests
             Assert.False(result.Success);
             Assert.Contains("navigation failed", result.FailureReason);
             Assert.Equal(
-                new[] { "assets.Load", "realize", "vanilla.Resolve", "vanilla.CloneProps", "nav.Apply", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
+                Journal("assets.Load", "realize", "vanilla.Resolve", CloneProps(), "nav.Apply", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release"),
                 rig.Journal);
             Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
         }
@@ -537,7 +547,7 @@ namespace FalseGods.ApplicationTests
             Assert.Contains("vanilla scenery failed", result.FailureReason);
             // Scenery is cloned after the paints and before navigation, so nav.Apply never runs.
             Assert.Equal(
-                new[] { "assets.Load", "realize", "vanilla.Resolve", "vanilla.CloneProps", "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release" },
+                Journal("assets.Load", "realize", "vanilla.Resolve", CloneProps(1), "nav.Remove", "realize.Teardown", "vanilla.Release", "assets.Release"),
                 rig.Journal);
             Assert.Equal(ArenaLoadStage.NotLoaded, rig.Flow.Stage);
         }
@@ -548,31 +558,60 @@ namespace FalseGods.ApplicationTests
             var rig = new Rig();
 
             rig.Flow.Prepare();
-            var result = rig.Flow.Realize(Origin);
+            Assert.True(rig.Flow.Realize(Origin).Success);
 
-            Assert.True(result.Success);
-            var request = rig.Vanilla.CapturedPropClone!;
-            Assert.Equal("VisualRoot/VanillaProps", request.ParentPath);
-            Assert.Equal("Prop_MudPool", request.MarkerNamePrefix);
-            Assert.Equal("Enemies/CousinSludgePool", request.PropPath);
+            var pool = rig.Vanilla.CapturedPropClones.Single(p => p.PropPath.EndsWith("CousinSludgePool"));
+            Assert.Equal("VisualRoot/VanillaProps", pool.ParentPath);
+            Assert.Equal("Prop_MudPool", pool.MarkerNamePrefix);
 
             // The donor room is named by the key the running game answers to, not by an exported GUID.
-            Assert.EndsWith("CaveCousinNew.prefab", request.RoomKey);
+            Assert.EndsWith("CaveCousinNew.prefab", pool.RoomKey);
 
-            // The prop's own layer is rasterized by the navigation scan; ours must not be, or a decorative
+            // The prop's own layer is rasterized by the navigation scan; the pool's must not be, or a decorative
             // basin silently becomes terrain.
-            Assert.Equal("GeometryNoNavMesh", request.LayerName);
+            Assert.Equal(VanillaPropDecoration.OffTheNavigationLayers, pool.LayerName);
 
-            // The donor boss's anchor and its pool controller stay in the donor room.
-            Assert.Contains("CousinPosition", request.StripChildNames);
-            Assert.Contains("CousinPool", request.StripComponentNames);
+            // The donor boss's anchor and its pool controller stay in the donor room, and so does the donor's own
+            // damage component - the sludge burns through the path this project already damages players with.
+            Assert.Contains("CousinPosition", pool.StripChildNames);
+            Assert.Contains("CousinPool", pool.StripComponentNames);
+            Assert.Contains("ApplyDamageInsideCollider", pool.StripComponentNames);
 
-            // The donor's own damage component goes too: cloned here it reported nothing to damage, and the
-            // sludge burns through the path this project already damages players with.
-            Assert.Contains("ApplyDamageInsideCollider", request.StripComponentNames);
+            // Its volume is kept, as the authored shape of the mud.
+            Assert.Contains(VanillaPropDecoration.MudPoolHazardVolumeName, pool.VolumeChildNames);
+        }
 
-            // Its volume stays, as the authored shape of the mud, on the layer it was authored for.
-            Assert.Contains(VanillaPropDecoration.MudPoolHazardVolumeName, request.VolumeChildNames);
+        [Fact]
+        public void A_prop_meant_to_be_stood_on_keeps_the_layer_the_scan_reads()
+        {
+            var rig = new Rig();
+
+            rig.Flow.Prepare();
+            Assert.True(rig.Flow.Realize(Origin).Success);
+
+            // Navigation is the only thing that decides where an enemy may be, and it reads the donor's own layer.
+            // Re-layering the platform mushroom would leave it standing there with nobody able to reach it.
+            var platform = rig.Vanilla.CapturedPropClones.Single(p => p.MarkerNamePrefix == "Prop_Platshroom");
+            Assert.Equal(VanillaPropDecoration.KeepTheDonorsLayer, platform.LayerName);
+
+            // The small one is the opposite decision: solid, so a player can climb it, and off the scan, so no
+            // enemy ever knows it is there.
+            var small = rig.Vanilla.CapturedPropClones.Single(p => p.MarkerNamePrefix == "Prop_Tickshroom");
+            Assert.Equal(VanillaPropDecoration.OffTheNavigationLayers, small.LayerName);
+        }
+
+        [Fact]
+        public void Every_authored_prop_is_offered_to_the_provider_once()
+        {
+            var rig = new Rig();
+
+            rig.Flow.Prepare();
+            Assert.True(rig.Flow.Realize(Origin).Success);
+
+            Assert.Equal(VanillaPropDecoration.Props.Count, rig.Vanilla.CapturedPropClones.Count);
+            Assert.Equal(
+                VanillaPropDecoration.Props.Select(p => p.MarkerNamePrefix).ToArray(),
+                rig.Vanilla.CapturedPropClones.Select(p => p.MarkerNamePrefix).ToArray());
         }
 
         // ---------------------------------------------------------------- teardown & guards
