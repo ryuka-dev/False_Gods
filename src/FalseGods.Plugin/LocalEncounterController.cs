@@ -347,6 +347,9 @@ namespace FalseGods.Plugin
             _encounter = encounter;
             _hostIntegration = hostIntegration;
 
+            // A fight is starting, so the game is loaded and the boss's voice can be fetched before it is wanted.
+            _voice.Warm();
+
             // ── The arena may already be here. A hijacked level load realized our arena AS the level, through
             // this same load flow — same content hash, same parity check, same borrowed materials — so the
             // encounter fights in that one rather than loading a second copy of it on top of itself. The arena

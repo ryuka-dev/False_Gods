@@ -278,10 +278,9 @@ namespace FalseGods.Plugin
 
             _hijack = new SulfurArenaHijackPort(_log);
 
-            // Fetched now rather than at the first rage: taking the vanilla boss's roar means loading its prefab,
-            // and a fight is the wrong moment to wait for one.
+            // Warmed when an encounter starts rather than here: taking the vanilla boss's roar means reading the
+            // game's creature database, which it loads asynchronously and has not built yet at plugin load.
             _voice = new SulfurBossVoice(transform, _log);
-            _voice.Warm();
 
             // When a hijacked level left our arena standing, a raise fights in that one instead of loading a
             // second copy of the same content on top of itself.

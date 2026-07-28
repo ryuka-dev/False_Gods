@@ -352,6 +352,26 @@ unit's transform and subtract it. That survives the prefab changing between vers
 multiplied by whatever scale the object is wearing, which a constant does not. Correct the horizontal part only —
 how deep something sits is a look, set by eye, and folding it into a correction hides it.
 
+### 3.14 Giving a sound its own volume
+**Symptom:** a player turns the game's sound off and still hears the boss. Or they turn the music down and ours
+keeps playing, so the only way to quiet it is a setting of ours that nobody thinks to look for.
+
+**Every sound we make has to obey the settings the player already has.** The game's volumes are parameters on one
+Unity `AudioMixer`, applied through named mixer groups; a raw `AudioSource` with no output group bypasses all of
+it, and so does a volume control of our own. Neither is ever acceptable — a mod does not get its own audio
+settings.
+
+Playing one of the *game's* sounds is free: a Sonity `SoundEvent` asset carries its own output group (the cave
+boss's roar routes to `Units`), so playing one behaves exactly as the game playing it would. For sound of our own,
+route it through the game's groups — `AudioSettingsManager.gameWorldMixerGroup` for effects,
+`musicOutputMixerGroup` for music — and add no setting.
+
+**Related trap: asking for a game asset too early.** Creature definitions resolve through
+`AsyncAssetLoading.unitDatabase`, which the game builds asynchronously; at plugin load the singleton is not even
+there, so asking throws exactly as loudly as asking for something that does not exist. Fetch when an encounter
+starts, and retry a bounded number of times rather than treating the first failure as final — that mistake made
+the boss silent for a whole session.
+
 ---
 
 ## 4. Decisions worth not re-litigating
