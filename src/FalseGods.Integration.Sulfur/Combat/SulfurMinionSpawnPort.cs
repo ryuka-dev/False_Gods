@@ -59,70 +59,6 @@ namespace FalseGods.Integration.Sulfur.Combat
         // renderers may already be gone, and an entry left in that list outlives the fight.
         private readonly Dictionary<Unit, Renderer[]> _outlines = new Dictionary<Unit, Renderer[]>();
 
-        // The rim built around each marked creature, one object per minion, destroyed with it.
-        private readonly Dictionary<Unit, GameObject> _halos = new Dictionary<Unit, GameObject>();
-
-        /// <summary>How much larger the rim copy is than the picture it rings. Enough to read across a room,
-        /// little enough that it stays a rim rather than a shadow.</summary>
-        private const float HaloScale = 1.12f;
-
-        /// <summary>Flat-colour shaders the build is likely to keep, best first — the same chain the boss's own
-        /// art resolves through, because that one was measured against this game rather than assumed.</summary>
-        private static readonly string[] HaloShaders =
-        {
-            "Universal Render Pipeline/Unlit",
-            "Sprites/Default",
-            "Unlit/Color",
-            "Hidden/Internal-Colored",
-        };
-
-        private const string BaseColourProperty = "_BaseColor";
-        private const string ColourProperty = "_Color";
-
-        // Looked up once for the whole session. Shader.Find walks every shader the build has, which is far too
-        // much to do while a creature is arriving — it was measured as a hitch on every summon.
-        private static Shader? _haloShader;
-        private static bool _haloShaderSearched;
-
-        private static Shader? HaloShaderOrNull()
-        {
-            if (_haloShaderSearched)
-            {
-                return _haloShader;
-            }
-
-            _haloShaderSearched = true;
-            foreach (var name in HaloShaders)
-            {
-                var shader = Shader.Find(name);
-                if (shader != null && shader.isSupported)
-                {
-                    _haloShader = shader;
-                    break;
-                }
-            }
-
-            return _haloShader;
-        }
-
-        // One line per session about how the rim was built, or why it was not. Repeating it once a minion would
-        // say nothing new and drown the log.
-        private bool _reported;
-
-        private void ReportOnce(string what)
-        {
-            if (_reported)
-            {
-                return;
-            }
-
-            _reported = true;
-            _logger?.Log($"[minion] {what}.");
-        }
-
-        /// <summary>What "kill this one first" looks like. Warm and bright against a cave.</summary>
-        private static readonly Color PriorityColour = new Color(1f, 0.45f, 0.15f, 1f);
-
         /// <param name="host">The behaviour whose lifetime scopes the asynchronous load — the game cancels the
         /// spawn if it is destroyed first, which is exactly the behaviour we want on a plugin unload.</param>
         /// <param name="outlined">Whether these minions are drawn with the game's own outline, the one the church
@@ -203,15 +139,6 @@ namespace FalseGods.Integration.Sulfur.Combat
                 Unoutline(outlined, keepEntry: true);
             }
 
-            foreach (var halo in _halos.Values)
-            {
-                if (halo != null)
-                {
-                    try { UnityEngine.Object.Destroy(halo); } catch (Exception) { /* going away anyway */ }
-                }
-            }
-
-            _halos.Clear();
             _outlines.Clear();
             _spawned.Clear();
             if (removed > 0)
@@ -283,147 +210,6 @@ namespace FalseGods.Integration.Sulfur.Combat
             catch (Exception exception)
             {
                 _logger?.LogWarning($"[minion] one could not be outlined ({exception.Message}); it fights unmarked.");
-            }
-
-            Highlight(unit);
-        }
-
-        /// <summary>
-        /// Give the creature a rim, so it is marked when looked at and not only when something is in the way.
-        /// </summary>
-        /// <remarks>
-        /// <para><b>Why not the game's outline on its own.</b> That one is an <i>occlusion</i> cue: it draws the
-        /// silhouette a wall is hiding, which is what finding furniture through a building needs. In plain sight
-        /// it has nothing to draw, and in plain sight is where these enemies usually are.</para>
-        /// <para><b>Why not the unit shader's own highlight either.</b> It exists, and it works — but it is a wash
-        /// of colour over the whole picture rather than a rim, and it is gated behind the same switch that turns on
-        /// the hit flash and the burning and frozen looks, so a creature shows nothing until something hits it.
-        /// Measured, after trying it.</para>
-        /// <para><b>So the rim is built.</b> A copy of the creature's own sprite, a little larger, in flat colour,
-        /// drawn just before the creature itself: the middle is covered by the real picture and what is left
-        /// showing is an edge. It rides the sprite's own transform, so it turns and leans with it for free, and it
-        /// costs one object and one material per marked creature — which die with it.</para>
-        /// </remarks>
-        private void Highlight(Unit unit)
-        {
-            try
-            {
-                var sprite = FindSpriteRenderer(unit);
-                if (sprite == null)
-                {
-                    ReportOnce("no renderer with a mesh to copy");
-                    return;
-                }
-
-                var mesh = sprite.GetComponent<MeshFilter>();
-                var source = sprite.sharedMaterial;
-                if (mesh == null || mesh.sharedMesh == null || source == null)
-                {
-                    ReportOnce($"'{sprite.name}' has no mesh or material to copy");
-                    return;
-                }
-
-                var shader = HaloShaderOrNull();
-                if (shader == null)
-                {
-                    ReportOnce("this build has none of the flat-colour shaders the rim needs");
-                    return;
-                }
-
-                var halo = new GameObject("FalseGodsPriorityHalo");
-                halo.layer = sprite.gameObject.layer;
-                halo.transform.SetParent(sprite.transform, worldPositionStays: false);
-                halo.transform.localPosition = Vector3.zero;
-                halo.transform.localRotation = Quaternion.identity;
-                halo.transform.localScale = Vector3.one * HaloScale;
-
-                halo.AddComponent<MeshFilter>().sharedMesh = mesh.sharedMesh;
-                var renderer = halo.AddComponent<MeshRenderer>();
-                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
-                var material = BuildHaloMaterial(shader);
-                // Drawn just before the creature, so the creature paints over its middle and leaves the edge.
-                material.renderQueue = source.renderQueue - 1;
-                renderer.material = material;
-
-                _halos[unit] = halo;
-
-                // Said once, with everything that decides whether a rim can be seen at all: which renderer was
-                // copied, whether its picture was found, and where the copy lands in the drawing order. Guessing
-                // at any of those from outside the game is how the last two attempts were spent.
-                ReportOnce($"rim on '{sprite.name}' (mesh '{mesh.sharedMesh.name}', {mesh.sharedMesh.vertexCount} verts) "
-                    + $"in flat colour via '{shader.name}' (supported={shader.isSupported}), "
-                    + $"queue {material.renderQueue} vs the creature's {source.renderQueue}, "
-                    + $"layer '{LayerMask.LayerToName(halo.layer)}', scale {HaloScale:0.##}");
-            }
-            catch (Exception exception)
-            {
-                _logger?.LogWarning($"[minion] one could not be given a rim ({exception.Message}); it fights unmarked.");
-            }
-        }
-
-        /// <summary>
-        /// A flat-colour copy of the creature's own shape.
-        /// </summary>
-        /// <remarks>
-        /// <b>No texture, deliberately.</b> These sprites are drawn on a mesh cut to the outline of the art -
-        /// sixteen hundred vertices for one goblin - so the shape is already in the geometry and painting it one
-        /// colour gives the silhouette directly. Sampling the creature's own picture instead would mean matching
-        /// how its shader picks a region out of a sheet, which is a guess we do not need to make.
-        /// </remarks>
-        private static Material BuildHaloMaterial(Shader shader)
-        {
-            var material = new Material(shader);
-            SetColour(material, PriorityColour);
-            return material;
-        }
-
-        /// <summary>Colour a material whichever way its shader takes one.</summary>
-        private static void SetColour(Material material, Color colour)
-        {
-            if (material.HasProperty(BaseColourProperty))
-            {
-                material.SetColor(BaseColourProperty, colour);
-            }
-
-            if (material.HasProperty(ColourProperty))
-            {
-                material.SetColor(ColourProperty, colour);
-            }
-        }
-
-        /// <summary>The renderer carrying the creature's picture — the one with a mesh to copy.</summary>
-        private static Renderer? FindSpriteRenderer(Unit unit)
-        {
-            foreach (var renderer in unit.GetComponentsInChildren<Renderer>(includeInactive: true))
-            {
-                if (renderer != null && renderer.GetComponent<MeshFilter>() != null)
-                {
-                    return renderer;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>Take a creature's rim away. Idempotent, and safe on one that never had it.</summary>
-        private void Unhighlight(Unit? unit)
-        {
-            if (unit == null || _halos.Count == 0 || !_halos.TryGetValue(unit, out var halo))
-            {
-                return;
-            }
-
-            _halos.Remove(unit);
-            if (halo == null)
-            {
-                return;
-            }
-
-            try { UnityEngine.Object.Destroy(halo); }
-            catch (Exception exception)
-            {
-                _logger?.LogWarning($"[minion] a rim could not be cleared ({exception.Message}).");
             }
         }
 
@@ -559,7 +345,6 @@ namespace FalseGods.Integration.Sulfur.Combat
                 if (unit == null || !unit.IsAlive)
                 {
                     Unoutline(unit);
-                    Unhighlight(unit);
                     _spawned.RemoveAt(i);
                 }
             }
