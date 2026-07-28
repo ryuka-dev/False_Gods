@@ -82,6 +82,8 @@ namespace FalseGods.Integration.Sulfur.Combat
         // One list per arm and never shared, because the game takes the reference and prunes it as it reads it.
         private readonly List<List<Unit>> _quarry = new List<List<Unit>>();
 
+        private static readonly List<Unit> EmptyQuarry = new List<Unit>(0);
+
         // Where the arms were last told to be, so one that finishes loading after the others can be put in its
         // place immediately rather than standing at its spawn point until the next frame.
         private ArmPlacement _placement;
@@ -90,6 +92,10 @@ namespace FalseGods.Integration.Sulfur.Combat
         // one is still on its way would otherwise leave it standing and throwing after the boss had calmed: the
         // arrival checks that it is still wanted before it is kept.
         private int _generation;
+
+        // False while the arms were adopted rather than raised. An adopted arm belongs to the host: this peer only
+        // carries it, and must not tell a puppet who to throw at.
+        private bool _ours;
 
         /// <param name="host">The behaviour whose lifetime scopes the asynchronous load — the game cancels the
         /// spawn if it is destroyed first, which is what should happen on a plugin unload.</param>
@@ -124,6 +130,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             _placement = placement;
+            _ours = true;
             var generation = ++_generation;
             for (var i = 0; i < count; i++)
             {
@@ -141,8 +148,82 @@ namespace FalseGods.Integration.Sulfur.Combat
             for (var i = 0; i < _raised.Count; i++)
             {
                 Put(_raised[i], _artRoots[i], _stations[i], placement);
-                FightingPlayers.FillFighting(_quarry[i]);
+                if (_ours)
+                {
+                    FightingPlayers.FillFighting(_quarry[i]);
+                }
             }
+        }
+
+        public void Adopt(int count)
+        {
+            if (count <= 0 || Raised >= count)
+            {
+                return; // nothing wanted, or already carrying them
+            }
+
+            var gameManager = StaticInstance<GameManager>.Instance;
+            var npcs = gameManager != null ? gameManager.aliveNpcs : null;
+            if (npcs == null)
+            {
+                return;
+            }
+
+            var wanted = UnitIds.GoblinCousinArm.value;
+            for (var i = 0; i < npcs.Count && _raised.Count < count; i++)
+            {
+                var npc = npcs[i];
+                if (npc == null || !npc.IsAlive || npc.unitSO == null || npc.unitSO.id.value != wanted)
+                {
+                    continue;
+                }
+
+                if (Holding(npc))
+                {
+                    continue;
+                }
+
+                _ours = false;
+                _raised.Add(npc);
+                _stations.Add(_raised.Count - 1);
+                _artRoots.Add(FindArtRoot(npc));
+                _quarry.Add(EmptyQuarry); // never read: an adopted arm is a puppet and decides nothing
+            }
+
+            if (_raised.Count > 0)
+            {
+                _logger?.Log($"[arm] carrying {_raised.Count} arm(s) the session put here; this peer places them "
+                    + "itself from now on.");
+            }
+        }
+
+        public void Release()
+        {
+            if (_raised.Count == 0)
+            {
+                return;
+            }
+
+            _generation++;
+            _logger?.Log($"[arm] letting go of {_raised.Count} arm(s); they are the host's to end.");
+            _raised.Clear();
+            _stations.Clear();
+            _artRoots.Clear();
+            _quarry.Clear();
+        }
+
+        /// <summary>Whether this arm is already one of ours, so a repeated adopt cannot take it twice.</summary>
+        private bool Holding(Unit arm)
+        {
+            for (var i = 0; i < _raised.Count; i++)
+            {
+                if (ReferenceEquals(_raised[i], arm))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public void LowerAll()

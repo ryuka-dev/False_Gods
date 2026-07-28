@@ -1050,7 +1050,7 @@ namespace FalseGods.Plugin
             {
                 // Same hand-off the local controller gets: when a hijacked level left our arena standing on this
                 // peer, the client fights in that one instead of realizing a second copy of it.
-                _client = new ClientBossController(_log, integration) { LevelArena = _levelArena };
+                _client = new ClientBossController(_log, this, integration) { LevelArena = _levelArena };
                 _clientIntegration = integration;
             }
 

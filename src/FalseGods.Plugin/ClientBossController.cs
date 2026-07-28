@@ -56,6 +56,7 @@ namespace FalseGods.Plugin
         private readonly IDamagePort _damagePort;
         private readonly SulfurLocalPlayer _localPlayer;
         private readonly IBattlefieldCleanupPort _battlefield;
+        private readonly IBossArmPort _rageArms;
 
         private ReplicationReceiver _receiver;
         private IDisposable? _hitBinding;
@@ -79,7 +80,7 @@ namespace FalseGods.Plugin
         // fight there, so tearing the encounter down must not take the level's start area with it.
         private bool _ownsArena;
 
-        public ClientBossController(ILogger logger, IFalseGodsIntegration integration)
+        public ClientBossController(ILogger logger, MonoBehaviour host, IFalseGodsIntegration integration)
         {
             _logger = logger;
             _integration = integration ?? throw new ArgumentNullException(nameof(integration));
@@ -89,6 +90,7 @@ namespace FalseGods.Plugin
             _damagePort = new SulfurDamagePort(logger);
             _localPlayer = new SulfurLocalPlayer();
             _battlefield = new SulfurBattlefieldCleanup(logger);
+            _rageArms = new SulfurBossArmPort(host, logger);
             _controlFlow = new ClientEncounterFlow(integration.Channel, integration.Session)
             {
                 OnEnterArena = HandleEnterArena,
@@ -164,7 +166,37 @@ namespace FalseGods.Plugin
             }
 
             _presentation!.Apply(WirePresentationMapping.ToState(snapshot));
+            CarryTheHostsArms(snapshot);
             _presentation.Render(deltaSeconds);
+        }
+
+        /// <summary>
+        /// Put the host's arms where they belong on this machine.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>The session layer mirrors a spawn, not a journey.</b> Measured in a two-peer session: the
+        /// host's arms follow its boss across the room while a client's copies stand exactly where they first
+        /// appeared, so by the boss's next station they are throwing mud from a place with no boss in it.</para>
+        /// <para>Nothing has to be sent for this. The boss's pose is already replicated, and so is whether it is
+        /// enraged, so the client works the arms' places out with the same rule the host used and arrives at the
+        /// same answer. Raising and killing them stay the host's; this peer only carries.</para>
+        /// </remarks>
+        private void CarryTheHostsArms(BossSnapshot snapshot)
+        {
+            if (!snapshot.Enraged)
+            {
+                _rageArms.Release();
+                return;
+            }
+
+            _rageArms.Adopt(RageArms.Count);
+            _rageArms.Follow(new ArmPlacement(
+                new ArenaWorldPoint(snapshot.Position.X, snapshot.PositionHeight, snapshot.Position.Z),
+                snapshot.Facing,
+                RageArms.SideDistance,
+                RageArms.ForwardOffset,
+                RageArms.Lift,
+                RageArms.Scale));
         }
 
         /// <summary>

@@ -49,8 +49,9 @@ namespace FalseGods.Application.Combat
     /// <para><b>They belong to the boss, not to a spot on the floor.</b> The creature has no navigation agent and
     /// cannot take a step, so an arm left where it first went up would be abandoned the moment the boss moved on.
     /// Driving them from the boss every frame is what keeps them its arms.</para>
-    /// <para><b>Host only</b>, like every other thing the boss puts in the world: arms a client raised for itself
-    /// would double the barrage and aim it from places nobody else has an arm.</para>
+    /// <para><b>Raising is host only</b>, like every other thing the boss puts in the world: arms a client raised
+    /// for itself would double the barrage. <b>Carrying them is every peer's own job</b>, because the session layer
+    /// mirrors the raising and not the following — see <see cref="Adopt"/>.</para>
     /// </remarks>
     public interface IBossArmPort
     {
@@ -74,5 +75,53 @@ namespace FalseGods.Application.Combat
         /// that ended, must not leave them throwing.
         /// </summary>
         void LowerAll();
+
+        /// <summary>
+        /// Take charge of arms that are already standing in the world without having raised them, so they can be
+        /// carried with the boss. Repeating it is free once they are held.
+        /// </summary>
+        /// <remarks>
+        /// This is what a peer that is not the host does. The session layer puts the host's arms into a client's
+        /// world when they are raised but does not go on telling it where they are afterwards, so a client's copies
+        /// stand wherever they first appeared while the host's follow the boss across the room. The client has
+        /// everything it needs to place them itself — the boss's replicated pose, and whether it is enraged — so it
+        /// does, and the two ends agree again.
+        /// </remarks>
+        void Adopt(int count);
+
+        /// <summary>
+        /// Let go of the arms without taking them down: they are somebody else's to end.
+        /// </summary>
+        /// <remarks>
+        /// The counterpart to <see cref="Adopt"/>. A client must not kill the host's arms — the session layer
+        /// already mirrors their deaths — it only has to stop carrying them.
+        /// </remarks>
+        void Release();
+    }
+
+    /// <summary>
+    /// Where a starved boss's arms stand and how large they are drawn, shared so that every peer places them the
+    /// same way.
+    /// </summary>
+    /// <remarks>
+    /// <b>Found by eye, in the room.</b> There is no reasoning that produces these; they were tuned live against
+    /// the boss until the arms read as its own. Just far enough apart to clear its body, a pace in front so they
+    /// are between it and the fight, lifted out of the ground to where the creature's own footing sits, and at the
+    /// same enlargement the boss body is shown at — the arms are drawn for a boss the size of the vanilla one, and
+    /// ours is one and a half times that (Docs/BossEncounterRunbook.md §2.5).
+    /// <para>Boss design, and code rather than content for the same reason as the boss's itinerary: there is no
+    /// boss-content pipeline yet and one boss does not justify inventing one (Docs/DefinitionOfDone.md §3).</para>
+    /// </remarks>
+    public static class RageArms
+    {
+        public const int Count = 2;
+
+        public const float SideDistance = 3.1f;
+
+        public const float ForwardOffset = 1f;
+
+        public const float Lift = 1.5f;
+
+        public const float Scale = 1.5f;
     }
 }

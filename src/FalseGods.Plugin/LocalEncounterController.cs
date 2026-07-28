@@ -140,16 +140,6 @@ namespace FalseGods.Plugin
         /// them is half of what it takes to calm it.</summary>
         private const int EmergencyBandSize = 4;
 
-        /// <summary>
-        /// How many arms a starved boss puts up beside itself.
-        /// </summary>
-        /// <remarks>
-        /// Two, flanking it, because that is what the creature reads as: a boss reaching out of the sludge with
-        /// the hands it has left now that there is nothing on its pile to throw. Where they stand is carried by
-        /// <see cref="ArmPlacement"/> and set from outside, because it is being tuned in the room.
-        /// </remarks>
-        private const int RageArmCount = 2;
-
         /// <summary>How long a carrier spends loading and again setting down, mirroring the carrier port's own
         /// pause, so the round-trip estimate accounts for the two ends of the walk and not just the walking.</summary>
         private const float CarrierHandlingSeconds = 0.75f;
@@ -199,28 +189,6 @@ namespace FalseGods.Plugin
         private readonly IMinionSpawnPort _emergencyMinions;
         private readonly IBossArmPort _rageArms;
         private readonly IBattlefieldCleanupPort _battlefield;
-
-        /// <summary>
-        /// Where the rage's arms stand relative to the boss, and how large they are drawn.
-        /// </summary>
-        /// <remarks>
-        /// <para><b>Found by eye, in the room.</b> There is no reasoning that produces these four; they were tuned
-        /// live against the boss until the arms read as its own, and these are the values that did. Just far
-        /// enough apart to clear its body, a pace in front so they are between it and the fight, lifted out of the
-        /// ground to where the creature's own footing sits, and at the same enlargement the boss body is shown at
-        /// — the arms are drawn for a boss the size of the vanilla one, and ours is one and a half times that
-        /// (Docs/BossEncounterRunbook.md §2.5).</para>
-        /// <para>Boss design, so they live with the boss, and code rather than content for the same reason as the
-        /// itinerary above: there is no boss-content pipeline yet and one boss does not justify inventing one
-        /// (Docs/DefinitionOfDone.md §3).</para>
-        /// </remarks>
-        private const float ArmSideDistance = 3.1f;
-
-        private const float ArmForwardOffset = 1f;
-
-        private const float ArmLift = 1.5f;
-
-        private const float ArmScale = 1.5f;
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();
@@ -1068,7 +1036,7 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>Put the starved boss's arms up at its sides.</summary>
-        private void RaiseRageArms() => _rageArms.Raise(RageArmCount, ArmsAroundTheBoss());
+        private void RaiseRageArms() => _rageArms.Raise(RageArms.Count, ArmsAroundTheBoss());
 
         /// <summary>
         /// Keep the arms at the boss's sides. Cheap and unconditional while a fight is up: the port does nothing
@@ -1103,7 +1071,8 @@ namespace FalseGods.Plugin
                 ? default
                 : new ArenaWorldPoint(_boss.Position.X, _boss.PositionHeight, _boss.Position.Z);
             var facing = _boss?.Facing ?? default;
-            return new ArmPlacement(at, facing, ArmSideDistance, ArmForwardOffset, ArmLift, ArmScale);
+            return new ArmPlacement(
+                at, facing, RageArms.SideDistance, RageArms.ForwardOffset, RageArms.Lift, RageArms.Scale);
         }
 
         private void Summon(SummonRequest request)
