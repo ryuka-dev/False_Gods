@@ -199,21 +199,26 @@ namespace FalseGods.Plugin
         private readonly IBossArmPort _rageArms;
 
         /// <summary>
-        /// Where the rage's arms stand relative to the boss. Set by the Composition Root and re-read every frame,
-        /// so it can be moved while the fight is running.
+        /// Where the rage's arms stand relative to the boss, and how large they are drawn.
         /// </summary>
         /// <remarks>
-        /// <b>Temporary as a setting, not as a concept.</b> The three distances are boss design and belong in
-        /// authored boss content once there is a pipeline for it; they are exposed only so the look can be found
-        /// in-engine rather than by rebuilding. See Docs/DefinitionOfDone.md §3.
+        /// <para><b>Found by eye, in the room.</b> There is no reasoning that produces these four; they were tuned
+        /// live against the boss until the arms read as its own, and these are the values that did. Just far
+        /// enough apart to clear its body, a pace in front so they are between it and the fight, lifted out of the
+        /// ground to where the creature's own footing sits, and at the same enlargement the boss body is shown at
+        /// — the arms are drawn for a boss the size of the vanilla one, and ours is one and a half times that
+        /// (Docs/BossEncounterRunbook.md §2.5).</para>
+        /// <para>Boss design, so they live with the boss, and code rather than content for the same reason as the
+        /// itinerary above: there is no boss-content pipeline yet and one boss does not justify inventing one
+        /// (Docs/DefinitionOfDone.md §3).</para>
         /// </remarks>
-        public float ArmSideDistance { get; set; } = 3f;
+        private const float ArmSideDistance = 3.1f;
 
-        public float ArmForwardOffset { get; set; }
+        private const float ArmForwardOffset = 1f;
 
-        public float ArmLift { get; set; } = 1.5f;
+        private const float ArmLift = 1.5f;
 
-        public float ArmScale { get; set; } = 1.5f;
+        private const float ArmScale = 1.5f;
 
         /// <summary>Watches the boss's pile and decides when running dry has gone on long enough to answer.</summary>
         private readonly StarvationWatch _starvation = new StarvationWatch();

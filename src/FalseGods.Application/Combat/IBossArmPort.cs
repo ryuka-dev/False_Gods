@@ -11,9 +11,9 @@ namespace FalseGods.Application.Combat
     /// level happens to be — under a prop, on the floor beneath a pool, in a rock. The boss already stands
     /// somewhere the room authored for it, at a height the room authored for it, so taking the arm's place from
     /// the boss inherits both and needs to measure nothing.</para>
-    /// <para>The offsets and the size are boss design and are expected to be tuned; they are carried per call
-    /// rather than fixed in the adapter, so the same port serves whatever a boss asks for and a change reaches
-    /// arms that are already standing.</para>
+    /// <para>The offsets and the size are the <i>boss's</i>, not the adapter's, and are carried per call rather
+    /// than settled once: the same port then serves whatever a second boss asks for, and a change reaches arms
+    /// that are already standing rather than waiting for the next ones.</para>
     /// </remarks>
     /// <param name="BossAt">Where the boss is standing, in world space.</param>
     /// <param name="BossFacing">Which way it is facing on the ground plane; a zero vector means "not facing
