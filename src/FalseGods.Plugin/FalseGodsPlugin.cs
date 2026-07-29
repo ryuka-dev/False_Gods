@@ -152,6 +152,10 @@ namespace FalseGods.Plugin
         // raise: dropping the boss by hand must not be undone by the next frame, and the next visit to the arena
         // is a new run and so gets a new one.
         private int _raisedForRun;
+
+        // Whether the destructible content has been assembled for the arena currently standing. Not keyed to the
+        // raise's run counter: this happens while that run is still generating, so the run has not finished yet.
+        private bool _warmedThisArena;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
 
@@ -288,6 +292,7 @@ namespace FalseGods.Plugin
         {
             // The session's agreement on which level is the boss arena has to exist before anyone asks to go
             // there, so it is maintained every frame rather than only while an encounter is up.
+            WarmContentWhileTheScreenIsBlack();
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
             MaintainSpawnOwnership(FalseGodsIntegrations.Current);
             MaintainCrateFlow(FalseGodsIntegrations.Current);
@@ -876,9 +881,45 @@ namespace FalseGods.Plugin
                 _boss.Drop();
             }
 
+            // And the last visit's cargo goes with it. Crates deliberately outlive the encounter that made them,
+            // but they are nobody's children and nothing else clears them, so without this a room generated over
+            // the top of the last one opens with the previous fight's barrage still lying on its floor.
+            _crates.Clear();
+
             Logger.LogMessage("The boss arena is standing; raising the boss in it. It waits, untouchable, until a "
                 + "player walks into the room.");
             Raise(integration, role);
+        }
+
+        /// <summary>
+        /// Assemble the room's destructible content the moment the arena exists, which is in the middle of the
+        /// level's own generation — behind the loading screen.
+        /// </summary>
+        /// <remarks>
+        /// <para>Three models, three materials and three break effects come out of the player's install
+        /// synchronously, and the first time that happens it costs a visible frame. Doing it when the fight starts
+        /// put that frame at the worst moment in the encounter; doing it when the fight is <i>raised</i> moved it
+        /// to a quieter one but still a visible one. The arena is instantiated a third of the way through
+        /// generation, so asking here spends the frame where the player is already looking at a black screen —
+        /// measured: the hitch was gone from the second load onwards, which is exactly the shape of a one-time
+        /// load, so the fix is to make the first time happen somewhere it does not matter.</para>
+        /// <para>Once per arena, and cheap to ask again: preparing is idempotent.</para>
+        /// </remarks>
+        private void WarmContentWhileTheScreenIsBlack()
+        {
+            if (!_levelArena.IsLive)
+            {
+                _warmedThisArena = false; // the players left; the next arena warms itself
+                return;
+            }
+
+            if (_warmedThisArena)
+            {
+                return;
+            }
+
+            _warmedThisArena = true;
+            _crates.Prepare();
         }
 
         private void Raise(IFalseGodsIntegration? integration, CompositionRole role)

@@ -1802,6 +1802,35 @@ namespace FalseGods.Integration.Sulfur.Combat
             return taken;
         }
 
+        public void Clear()
+        {
+            var removed = 0;
+            for (var index = 0; index < _crates.Count; index++)
+            {
+                var crate = _crates[index];
+                if (crate.Unit == null)
+                {
+                    continue; // the level already took it; only the bookkeeping is left
+                }
+
+                try
+                {
+                    UnityEngine.Object.Destroy(crate.Unit.gameObject);
+                    removed++;
+                }
+                catch (Exception exception)
+                {
+                    _logger?.LogWarning($"[crate] one could not be cleared ({exception.Message}).");
+                }
+            }
+
+            _crates.Clear();
+            if (removed > 0)
+            {
+                _logger?.Log($"[crate] {removed} destructible(s) cleared with the level.");
+            }
+        }
+
         public bool TryFindNearestResting(
             CratePileId pile,
             ArenaWorldPoint near,

@@ -53,6 +53,18 @@ namespace FalseGods.Application.Combat
         bool Drop(ArenaWorldPoint at, CratePileId pile, bool explosive = false);
 
         /// <summary>
+        /// Take every destructible this port made out of the world.
+        /// </summary>
+        /// <remarks>
+        /// For a level ending. Crates deliberately outlive the encounter that made them — they are the game's own
+        /// breakables standing in a room, and a player may still want to shoot one after the boss is dead — but
+        /// they must not outlive the <i>room</i>. Nothing else clears them: they are spawned as ordinary units and
+        /// are nobody's children, so a level that generated over the top of the last one left its floor covered in
+        /// the previous visit's cargo.
+        /// </remarks>
+        void Clear();
+
+        /// <summary>
         /// Lift up to <see cref="CrateVolleyShape.Count"/> crates off <paramref name="pile"/> — floating them up
         /// under our control rather than gravity — hold them a beat, then throw them as a shotgun spread.
         /// <para>Each crate picks one of <paramref name="aims"/> — one per player worth throwing at — and then
