@@ -47,8 +47,12 @@ namespace FalseGods.Protocol.Wire
     /// carrier that was killed holding it, which is why the pile it lands on travels with it. The seed is the
     /// whole layout: every peer rings the same crates around the same spot from it, so no crate position is sent.
     /// </remarks>
+    /// <param name="Explosives">How many of the load were barrels that go off. Sent because it is the one thing
+    /// about a load a peer cannot work out for itself — the ring's positions come from the seed, but what a
+    /// carrier was holding was decided when it collected, and a player who watched it walk is owed the same
+    /// contents on the ground.</param>
     public sealed record CratesSetDown(
-        WorldPosition From, WorldPosition At, int PileKind, int PileIndex, int Count, int Seed);
+        WorldPosition From, WorldPosition At, int PileKind, int PileIndex, int Count, int Seed, int Explosives);
 
     /// <summary>
     /// Host → all peers, reliable-ordered: throw one destructible from <see cref="From"/> so it lands on

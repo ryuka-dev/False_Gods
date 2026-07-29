@@ -81,7 +81,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         private readonly IThrownCratePort _crates;
         private readonly ILogger _logger;
         private readonly Action<ArenaWorldPoint, CratePileId, int, float> _announceTaken;
-        private readonly Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int> _announceSetDown;
+        private readonly Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int, int> _announceSetDown;
         private readonly List<Carrier> _carriers = new List<Carrier>();
 
         private bool _reportedDeactivationTrap;
@@ -110,7 +110,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             IThrownCratePort crates,
             ILogger logger = null,
             Action<ArenaWorldPoint, CratePileId, int, float> announceTaken = null,
-            Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int> announceSetDown = null)
+            Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int, int> announceSetDown = null)
         {
             _host = host ?? throw new ArgumentNullException(nameof(host));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
@@ -439,10 +439,14 @@ namespace FalseGods.Integration.Sulfur.Combat
             var from = new ArenaWorldPoint(head.x, head.y + StackBase, head.z);
 
             var seed = _nextSetDownSeed++;
-            var placed = _crates.TossRing(from, at, pile, load, seed);
+
+            // What comes out is what it was carrying. Anything else and a carrier a player watched walking with a
+            // barrel on its back could burst into cargo with no barrel in it.
+            var explosives = carrier.ExplosivesHeld;
+            var placed = _crates.TossRing(from, at, pile, load, seed, explosives);
 
             // Every peer lays the same load out from these few numbers; no crate position is ever sent.
-            _announceSetDown?.Invoke(from, at, pile, load, seed);
+            _announceSetDown?.Invoke(from, at, pile, load, seed, explosives);
             return placed;
         }
 
@@ -755,6 +759,25 @@ namespace FalseGods.Integration.Sulfur.Combat
             private readonly List<SulfurThrownCratePort.CrateLook> _carried =
                 new List<SulfurThrownCratePort.CrateLook>();
 
+            /// <summary>How many of what it is holding go off. What the stack has to be honest about, and what
+            /// comes back out of it when the load is put down or the carrier is killed holding it.</summary>
+            public int ExplosivesHeld
+            {
+                get
+                {
+                    var count = 0;
+                    for (var i = 0; i < _carried.Count; i++)
+                    {
+                        if (_carried[i].Explosive)
+                        {
+                            count++;
+                        }
+                    }
+
+                    return count;
+                }
+            }
+
             public Carrier(Unit unit, int sourceIndex)
             {
                 Unit = unit;
@@ -844,14 +867,60 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 while (_drawn.Count < drawn)
                 {
-                    _drawn.Add(MakeOne(Unit.transform, _drawn.Count, LookAt(_drawn.Count)));
+                    _drawn.Add(MakeOne(Unit.transform, _drawn.Count, LookAt(_drawn.Count, drawn)));
                 }
             }
 
-            /// <summary>The look of the nth thing on this carrier's back, or nothing when it was never itemised.
-            /// Drawn top of the stack last, which is the order they were picked up in.</summary>
-            private SulfurThrownCratePort.CrateLook LookAt(int place) =>
-                place < _carried.Count ? _carried[place] : default(SulfurThrownCratePort.CrateLook);
+            /// <summary>
+            /// The look of the nth thing drawn on this carrier's back.
+            /// </summary>
+            /// <remarks>
+            /// <b>The cap must not hide a barrel.</b> Only the first few of a load are drawn, so that a carrier
+            /// hauling a dozen does not wear a mast — but a player deciding whether to shoot this goblin is
+            /// reading that stack, and a barrel that was carried but not drawn makes the stack a lie. So when the
+            /// load holds one and none of the drawn places would have shown it, the last drawn place becomes a
+            /// barrel. What is hidden is then only ever ordinary cargo, which is the thing the cap was for.
+            /// </remarks>
+            private SulfurThrownCratePort.CrateLook LookAt(int place, int drawn)
+            {
+                if (place >= _carried.Count)
+                {
+                    return default(SulfurThrownCratePort.CrateLook);
+                }
+
+                if (place == drawn - 1 && _carried.Count > drawn && ExplosivesHeld > 0 && !AnyExplosiveWithin(drawn - 1))
+                {
+                    return FirstExplosive();
+                }
+
+                return _carried[place];
+            }
+
+            private bool AnyExplosiveWithin(int places)
+            {
+                for (var i = 0; i < places && i < _carried.Count; i++)
+                {
+                    if (_carried[i].Explosive)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            private SulfurThrownCratePort.CrateLook FirstExplosive()
+            {
+                for (var i = 0; i < _carried.Count; i++)
+                {
+                    if (_carried[i].Explosive)
+                    {
+                        return _carried[i];
+                    }
+                }
+
+                return default(SulfurThrownCratePort.CrateLook);
+            }
 
             /// <summary>One crate of the stack: a bare mesh renderer parented to the goblin, no collider and no
             /// body, so it rides along without touching physics. Falls back to a plain cube when the crate

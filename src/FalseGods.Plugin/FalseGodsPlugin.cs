@@ -266,7 +266,8 @@ namespace FalseGods.Plugin
                     _crates,
                     _log,
                     (at, pile, count, radius) => _crateFlow?.BroadcastTaken(at, pile, count, radius),
-                    (from, at, pile, count, seed) => _crateFlow?.BroadcastSetDown(from, at, pile, count, seed)),
+                    (from, at, pile, count, seed, explosives) =>
+                        _crateFlow?.BroadcastSetDown(from, at, pile, count, seed, explosives)),
                 (at, pile) => _crateFlow?.BroadcastDropped(at, pile),
                 LaunchCrateVolley,
                 _maxClientHitDamage.Value) { LevelArena = _levelArena };
@@ -380,12 +381,12 @@ namespace FalseGods.Plugin
                         _log.Log($"[carrier] host collected {count} off {pile}; {took} taken here, "
                             + $"{_crates.RestingOn(pile)} left on it.");
                     },
-                    OnSetDown = (from, at, pile, count, seed) =>
+                    OnSetDown = (from, at, pile, count, seed, explosives) =>
                     {
-                        var placed = _crates.TossRing(from, at, pile, count, seed);
+                        var placed = _crates.TossRing(from, at, pile, count, seed, explosives);
                         _carriedLoads?.PutDown(from);
-                        _log.Log($"[carrier] host put {count} down on {pile} (seed {seed}); {placed} laid out "
-                            + $"here, {_crates.RestingOn(pile)} on that pile.");
+                        _log.Log($"[carrier] host put {count} down on {pile} (seed {seed}, {explosives} that go "
+                            + $"off); {placed} laid out here, {_crates.RestingOn(pile)} on that pile.");
                     },
                     OnVolleyFired = (pile, aims, shape) =>
                     {

@@ -133,7 +133,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// barrage needs something else — a moment where it has landed, is plainly about to go off, and can still
         /// be run away from. Without it a barrel is just a crate that does more damage.
         /// </remarks>
-        private const float LandedFuseSeconds = 3f;
+        private const float LandedFuseSeconds = 1.5f;
 
         // The layer the vanilla destructibles sit on, so the game's weapon fire finds our body the same way.
         private const string BreakableLayerName = "Breakable";
@@ -402,7 +402,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             template.Template = body;
             template.Explodes = spec.Explosion != ExplosionTypes.None
                 && GiveItAnExplosion(body, spec.Explosion);
-            template.Look = LookOf(body);
+            template.Look = LookOf(body, template.Explodes);
             return template;
         }
 
@@ -442,13 +442,13 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         /// <summary>What an assembled kind looks like — its own mesh and material, or nothing when it was built
         /// on something that carries neither.</summary>
-        private static CrateLook LookOf(GameObject template)
+        private static CrateLook LookOf(GameObject template, bool explosive)
         {
-            var filter = template.GetComponentInChildren<MeshFilter>(true);
-            var renderer = template.GetComponentInChildren<MeshRenderer>(true);
+            var filter = template.GetComponent<MeshFilter>();
+            var renderer = template.GetComponent<MeshRenderer>();
             return filter == null || renderer == null
                 ? default(CrateLook)
-                : new CrateLook(filter.sharedMesh, renderer.sharedMaterial);
+                : new CrateLook(filter.sharedMesh, renderer.sharedMaterial, explosive);
         }
 
         /// <summary>
@@ -703,7 +703,18 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public int TossRing(ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed)
+        /// <summary>
+        /// Put a load on the ground in a ring, <paramref name="explosives"/> of them barrels.
+        /// </summary>
+        /// <remarks>
+        /// <b>What comes out is what went in.</b> These used to be freshly rolled kinds, which meant a carrier a
+        /// player had watched walking with a barrel on its back could burst into cargo with no barrel in it — the
+        /// one thing the stack on its back is there to promise. So the composition rides with the load and is
+        /// laid out here; the ring positions still come from the seed alone, so no peer is told where anything
+        /// lands.
+        /// </remarks>
+        public int TossRing(
+            ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed, int explosives)
         {
             if (count <= 0 || !Prepare())
             {
@@ -715,7 +726,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 var ring = ShotgunSpread.Offset(seed, i, count, SetDownMinRadius, SetDownMaxRadius);
                 var to = new ArenaWorldPoint(at.X + ring.X, at.Y + SetDownHeight, at.Z + ring.Z);
-                if (Toss(from, to, pile, SetDownFlightSeconds, SetDownApexHeight))
+                if (Toss(from, to, pile, SetDownFlightSeconds, SetDownApexHeight, i < explosives))
                 {
                     placed++;
                 }
@@ -724,7 +735,13 @@ namespace FalseGods.Integration.Sulfur.Combat
             return placed;
         }
 
-        private bool Toss(ArenaWorldPoint from, ArenaWorldPoint to, CratePileId pile, float flightSeconds, float apexHeight)
+        private bool Toss(
+            ArenaWorldPoint from,
+            ArenaWorldPoint to,
+            CratePileId pile,
+            float flightSeconds,
+            float apexHeight,
+            bool explosive = false)
         {
             if (!Prepare())
             {
@@ -734,7 +751,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             try
             {
                 var start = new Vector3(from.X, from.Y, from.Z);
-                var kind = PickKind();
+                var kind = explosive && _explosive != null ? _explosive : PickKind();
                 var unit = SpawnFrom(kind, start, out var breakable);
                 if (unit == null)
                 {
@@ -1483,6 +1500,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 crate.Fuse = LandedFuseSeconds;
                 crate.RestWhereItLanded();
+                HandBackToPhysics(crate);
                 _logger?.Log($"[crate] a barrel landed at ({crate.Target.x:0.0}, {crate.Target.y:0.0}, "
                     + $"{crate.Target.z:0.0}); {LandedFuseSeconds:0.#}s to get clear.");
                 return false;
@@ -1490,6 +1508,27 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             BreakNoLoot(crate);
             return true;
+        }
+
+        /// <summary>
+        /// Give a crate back to the game's own physics: it was flown here kinematically, and from now on it should
+        /// fall, roll and settle like anything else lying on the floor.
+        /// </summary>
+        /// <remarks>
+        /// A barrel pinned exactly where its arc ended reads as stuck to the ground — it arrived at speed and then
+        /// simply stopped. Handing the body back lets the landing finish itself. Collision damage stays off: the
+        /// fuse is what decides when it goes off, and a barrel that killed itself on the floor it landed on would
+        /// have no fuse at all.
+        /// </remarks>
+        private static void HandBackToPhysics(ManagedCrate crate)
+        {
+            if (crate.Unit == null || crate.Unit.Rigidbody == null)
+            {
+                return;
+            }
+
+            crate.Unit.Rigidbody.isKinematic = false;
+            crate.Unit.Rigidbody.useGravity = true;
         }
 
         /// <summary>
@@ -1846,15 +1885,20 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </remarks>
         internal readonly struct CrateLook
         {
-            public CrateLook(Mesh mesh, Material material)
+            public CrateLook(Mesh mesh, Material material, bool explosive)
             {
                 Mesh = mesh;
                 Material = material;
+                Explosive = explosive;
             }
 
             public Mesh Mesh { get; }
 
             public Material Material { get; }
+
+            /// <summary>Whether the thing that looks like this is one that goes off. What a carrier's stack has to
+            /// be honest about, because a player deciding whether to shoot a goblin is reading it.</summary>
+            public bool Explosive { get; }
 
             public bool Known => Mesh != null && Material != null;
         }

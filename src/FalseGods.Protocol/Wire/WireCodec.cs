@@ -325,6 +325,7 @@ namespace FalseGods.Protocol.Wire
             WriteInt(w, message.PileIndex);
             WriteInt(w, message.Count);
             WriteInt(w, message.Seed);
+            WriteInt(w, message.Explosives);
             return w.ToArray();
         }
 
@@ -334,6 +335,7 @@ namespace FalseGods.Protocol.Wire
             var message = new CratesSetDown(
                 ReadWorldPosition(r),
                 ReadWorldPosition(r),
+                r.ReadInt32(),
                 r.ReadInt32(),
                 r.ReadInt32(),
                 r.ReadInt32(),

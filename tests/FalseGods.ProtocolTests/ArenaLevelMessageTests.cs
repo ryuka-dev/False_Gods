@@ -38,6 +38,7 @@ namespace FalseGods.ProtocolTests
                 PileKind: 2,
                 PileIndex: 1,
                 Count: 7,
+                Explosives: 2,
                 Seed: 4242);
 
             Assert.Equal(original, WireCodec.DeserializeCratesSetDown(WireCodec.Serialize(original)));

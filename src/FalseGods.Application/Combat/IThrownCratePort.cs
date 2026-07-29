@@ -80,7 +80,8 @@ namespace FalseGods.Application.Combat
         /// <para><b>Seeded, and here rather than with the carriers</b>, because every peer has to lay the same
         /// load out the same way from the same few numbers — a client has no carriers of its own to ask.</para>
         /// </remarks>
-        int TossRing(ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed);
+        int TossRing(
+            ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed, int explosives);
 
         /// <summary>How many crates are resting on one pile. This is what the supply line is told to decide
         /// whether a production point is full and whether a delivery pile has room.</summary>

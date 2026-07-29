@@ -71,7 +71,7 @@ namespace FalseGods.Application.Combat
         public Action<ArenaWorldPoint, CratePileId, int, float>? OnTaken { get; set; }
 
         /// <summary>A load was set down or spilled on the host; lay the same ring out here.</summary>
-        public Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int>? OnSetDown { get; set; }
+        public Action<ArenaWorldPoint, ArenaWorldPoint, CratePileId, int, int, int>? OnSetDown { get; set; }
 
         /// <summary>The host settled that a destructible is gone; destroy the same one here, the same way.</summary>
         public Action<int, CrateDeath>? OnDestroyed { get; set; }
@@ -147,12 +147,12 @@ namespace FalseGods.Application.Combat
 
         /// <summary>Host: tell every client that a load was put down, and how its ring was laid out.</summary>
         public void BroadcastSetDown(
-            ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed)
+            ArenaWorldPoint from, ArenaWorldPoint at, CratePileId pile, int count, int seed, int explosives)
         {
             if (IsHosting)
             {
-                Broadcast(EncounterCodec.Encode(
-                    new CratesSetDown(ToWire(from), ToWire(at), (int)pile.Kind, pile.Index, count, seed)));
+                Broadcast(EncounterCodec.Encode(new CratesSetDown(
+                    ToWire(from), ToWire(at), (int)pile.Kind, pile.Index, count, seed, explosives)));
             }
         }
 
@@ -262,8 +262,11 @@ namespace FalseGods.Application.Combat
                     && IsFinite(down.At)
                     && down.Count > 0
                     && down.Count <= MaxLoad
+                    && down.Explosives >= 0
+                    && down.Explosives <= down.Count
                     && CratePileId.TryFrom(down.PileKind, down.PileIndex, out var downPile):
-                    OnSetDown?.Invoke(FromWire(down.From), FromWire(down.At), downPile, down.Count, down.Seed);
+                    OnSetDown?.Invoke(
+                        FromWire(down.From), FromWire(down.At), downPile, down.Count, down.Seed, down.Explosives);
                     break;
 
                 case CrateVolleyFired volley when IsSaneVolley(volley)
