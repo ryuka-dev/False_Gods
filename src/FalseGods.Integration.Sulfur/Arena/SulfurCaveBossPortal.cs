@@ -48,17 +48,54 @@ namespace FalseGods.Integration.Sulfur.Arena
 
         private static readonly Vector3 DoorwaySize = new Vector3(5.73f, 6.35f, 1f);
 
-        /// <summary>The room whose pit this borrows its embers from — the same donor the arena's own way out is.
+        /// <summary>
+        /// Where this borrows its look from: the game's own portal, in the safe area.
         /// </summary>
-        private const string EmberDonorKey =
-            "Assets/_Core/Prefabs/LevelGeneration/Chunks/Caves/CaveEndRoom1.prefab";
+        /// <remarks>
+        /// <para><b>Not the cave's own exit.</b> Every way in or out of a cave in this game is a shaft — a hole in
+        /// the floor with embers rising out of it — so the cave has no standing doorway to copy. The church does,
+        /// and it is the one every player has already walked through: a lit plate in the opening, a cone of light
+        /// thrown out of it, and embers drifting around it. That is what reads as "through here".</para>
+        /// <para><b>It already faces the right way.</b> The plate is seven across and five high with its thin axis
+        /// along Z, which is how this doorway is oriented too, so nothing has to be turned to make it stand — and
+        /// it is left at the size the game itself uses, which is a door built for a player to walk through.</para>
+        /// <para>Its wooden gateposts are deliberately left behind. They are the church's carpentry and would read
+        /// as somebody having built a door in a goblin cave.</para>
+        /// </remarks>
+        private const string DoorDonorKey =
+            "Assets/_Core/Prefabs/LevelGeneration/Chunks/Hub/ChurchHub.prefab";
 
-        private const string EmberPath = "CaveEndParticles";
+        private const string PortalPath = "LODing/9/HedgemazePortal/ON";
 
-        /// <summary>How the embers are turned once they stand in the doorway. The donor's own pit points them
-        /// straight up out of the floor, which is what a hole in the ground wants and not what a door does.
+        /// <summary>
+        /// The pieces of the portal, and where each sits relative to the lit plate.
         /// </summary>
-        private static readonly Vector3 EmberRotation = new Vector3(270f, 0f, 0f);
+        /// <remarks>
+        /// <para>Offsets measured off the donor rather than read from its transforms, because a vanilla prop's
+        /// origin is not where it is drawn — this plate's transform sits three metres away from the plate. What is
+        /// carried across is each piece's offset from where the plate is <i>drawn</i>, so the composition survives
+        /// the move.</para>
+        /// <para>The emitters are the exception, and are placed by their transform: a particle system's bounds are
+        /// whatever it happens to have thrown into the air at the moment you ask, which is no way to centre
+        /// anything.</para>
+        /// </remarks>
+        private static readonly (string Path, Vector3 Offset, bool ByDrawnCentre)[] DoorPieces =
+        {
+            ("Shine", Vector3.zero, true),                                     // the lit plate: Sulfur, 7 x 5
+            ("HedgeMazeShine", new Vector3(0.01f, 0.02f, 3.25f), true),        // the cone, thrown out of its face
+            ("PortalParticleEffects", new Vector3(-0.34f, -0.47f, -1.25f), false),
+        };
+
+        /// <summary>
+        /// How the borrowed portal is turned to stand in this doorway. Zero because the donor already faces along
+        /// Z, as this doorway does. <b>If the light ends up shining into the wall, this is the number to change
+        /// and nothing else.</b>
+        /// </summary>
+        private const float PortalTurnDegrees = 0f;
+
+        /// <summary>How far the plate stands proud of the wall it is set into, so the two do not fight over the
+        /// same pixels.</summary>
+        private const float ProudOfTheWall = 0.1f;
 
         private readonly ILogger _logger;
         private readonly Action _walkThrough;
@@ -222,7 +259,7 @@ namespace FalseGods.Integration.Sulfur.Arena
                     _doorway.layer = manager.TriggerLayer;
                 }
 
-                AddEmbers(_doorway.transform);
+                AddTheDoor(_doorway.transform);
                 _doorway.AddComponent<CaveDoorTrigger>().WalkedThrough = _walkThrough;
 
                 _logger?.Log($"[cave-door] the cave boss is dead; a way through has opened in its room at "
@@ -236,50 +273,142 @@ namespace FalseGods.Integration.Sulfur.Arena
         }
 
         /// <summary>
-        /// Put the game's own pit embers in the doorway.
+        /// Build the doorway's look out of the church portal's pieces.
         /// </summary>
         /// <remarks>
-        /// Borrowed rather than made: this is the light the game already uses to say "through here", so a player
-        /// who has seen one cave exit knows what this is without being told. Failing to load it costs the look and
-        /// not the door — a way through that nobody notices is still a way through, and it is better than none.
+        /// Borrowed rather than made: this is the door the game already uses, so a player who has walked through
+        /// the one in the church knows what this is without being told. Failing to load it costs the look and not
+        /// the way through — a door nobody notices is still a door, and better than none.
         /// </remarks>
-        private void AddEmbers(Transform doorway)
+        private void AddTheDoor(Transform doorway)
         {
-            GameObject donor;
+            var donor = LoadDonor();
+            if (donor == null)
+            {
+                return;
+            }
+
+            var portal = donor.transform.Find(PortalPath);
+            if (portal == null)
+            {
+                _logger?.LogWarning($"[cave-door] the donor has no '{PortalPath}'; the way through is unlit.");
+                return;
+            }
+
+            var plate = portal.Find(DoorPieces[0].Path);
+            if (plate == null)
+            {
+                _logger?.LogWarning("[cave-door] the donor portal has no lit plate to measure the rest against; "
+                    + "the way through is unlit.");
+                return;
+            }
+
+            // Everything is placed against where the plate is DRAWN, which is not where its transform is.
+            var origin = DrawnCentre(plate);
+            var placed = 0;
+            for (var i = 0; i < DoorPieces.Length; i++)
+            {
+                if (Clone(portal, DoorPieces[i], origin, doorway))
+                {
+                    placed++;
+                }
+            }
+
+            _logger?.Log($"[cave-door] {placed} of {DoorPieces.Length} piece(s) of the church's portal now stand "
+                + "in the doorway.");
+        }
+
+        private GameObject LoadDonor()
+        {
             try
             {
-                _donor = new AssetReference(EmberDonorKey);
+                _donor = new AssetReference(DoorDonorKey);
                 var handle = _donor.LoadAssetAsync<GameObject>();
-                donor = handle.WaitForCompletion();
-                if (handle.Status != AsyncOperationStatus.Succeeded || donor == null)
+                var donor = handle.WaitForCompletion();
+                if (handle.Status == AsyncOperationStatus.Succeeded && donor != null)
                 {
-                    _logger?.LogWarning($"[cave-door] the embers' donor room did not load ({handle.Status}); the "
-                        + "door is there but unlit.");
-                    Release();
-                    return;
+                    return donor;
                 }
+
+                _logger?.LogWarning($"[cave-door] the portal's donor did not load ({handle.Status}); the way "
+                    + "through is there but unlit.");
             }
             catch (Exception exception)
             {
-                _logger?.LogWarning($"[cave-door] the embers' donor room did not load ({exception.Message}); the "
-                    + "door is there but unlit.");
-                Release();
-                return;
+                _logger?.LogWarning($"[cave-door] the portal's donor did not load ({exception.Message}); the way "
+                    + "through is there but unlit.");
             }
 
-            var source = donor.transform.Find(EmberPath);
+            Release();
+            return null;
+        }
+
+        /// <summary>
+        /// Copy one piece of the donor's portal into ours, keeping the turn it was authored with.
+        /// </summary>
+        /// <remarks>
+        /// Staged inactive so nothing of the donor's gets a lifecycle, and stripped of colliders: this is a thing
+        /// to walk through, and the plate the donor uses is solid. Each piece keeps its own authored rotation —
+        /// the emitters are turned on their side in the donor and are not decoration if they are not.
+        /// </remarks>
+        private bool Clone(
+            Transform portal, (string Path, Vector3 Offset, bool ByDrawnCentre) piece, Vector3 origin,
+            Transform doorway)
+        {
+            var source = portal.Find(piece.Path);
             if (source == null)
             {
-                _logger?.LogWarning($"[cave-door] the donor room has no '{EmberPath}'; the door is there but "
-                    + "unlit.");
-                return;
+                _logger?.LogWarning($"[cave-door] the donor portal has no '{piece.Path}'; that piece is missing.");
+                return false;
             }
 
-            var embers = UnityEngine.Object.Instantiate(source.gameObject, doorway);
-            embers.name = "Embers";
-            embers.transform.localPosition = Vector3.zero;
-            embers.transform.localRotation = Quaternion.Euler(EmberRotation);
-            embers.transform.localScale = source.localScale;
+            var staging = new GameObject("FalseGodsDoorStaging");
+            staging.SetActive(false);
+            try
+            {
+                var clone = UnityEngine.Object.Instantiate(source.gameObject, staging.transform);
+                clone.name = source.name;
+                foreach (var collider in clone.GetComponentsInChildren<Collider>(includeInactive: true))
+                {
+                    UnityEngine.Object.DestroyImmediate(collider);
+                }
+
+                // What the piece is drawn around, versus where its transform is - the correction that has to come
+                // out before it can be placed by an offset.
+                var drawn = piece.ByDrawnCentre ? DrawnCentre(source) : source.position;
+                var toItsOwnOrigin = source.position - drawn;
+
+                var turn = Quaternion.Euler(0f, PortalTurnDegrees, 0f);
+                clone.transform.SetParent(doorway, worldPositionStays: false);
+                clone.transform.localRotation = turn * source.localRotation;
+                clone.transform.localScale = source.localScale;
+                clone.transform.localPosition =
+                    turn * (piece.Offset + toItsOwnOrigin) + new Vector3(0f, 0f, ProudOfTheWall);
+                clone.SetActive(true);
+                return true;
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(staging);
+            }
+        }
+
+        /// <summary>Where a piece is actually drawn, which for a vanilla prop is not where its transform is.</summary>
+        private static Vector3 DrawnCentre(Transform piece)
+        {
+            var renderers = piece.GetComponentsInChildren<Renderer>(includeInactive: true);
+            if (renderers.Length == 0)
+            {
+                return piece.position;
+            }
+
+            var bounds = renderers[0].bounds;
+            for (var i = 1; i < renderers.Length; i++)
+            {
+                bounds.Encapsulate(renderers[i].bounds);
+            }
+
+            return bounds.center;
         }
 
         private void Release()
