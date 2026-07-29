@@ -117,9 +117,22 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </remarks>
         private const float LandedFuseSeconds = 1.5f;
 
-        /// <summary>How much of the throw's speed a landed barrel keeps. A fifth is enough to roll and settle;
-        /// more and it skates away from where the boss aimed it.</summary>
-        private const float LandingSpeedKept = 0.2f;
+        /// <summary>
+        /// How much of the throw's speed a landed barrel keeps, split by direction.
+        /// </summary>
+        /// <remarks>
+        /// <b>Split because the end of a parabola is almost entirely downwards.</b> Keeping a flat fraction of it
+        /// put nearly all of what was left into the floor the barrel was already touching, which is a barrel that
+        /// lands and stands there — exactly what keeping some speed was supposed to stop. The travel is in the
+        /// horizontal part, so that is the part worth keeping; the fall has already happened by then.
+        /// </remarks>
+        private const float LandingSpeedKeptAlong = 0.5f;
+
+        private const float LandingSpeedKeptDown = 0.05f;
+
+        /// <summary>How much the landing tumbles, taken across the direction of travel so it rolls the way it was
+        /// going rather than spinning on the spot.</summary>
+        private const float LandingSpinKept = 0.25f;
 
         /// <summary>
         /// What one of these costs a player it goes off next to.
@@ -1527,7 +1540,15 @@ namespace FalseGods.Integration.Sulfur.Combat
             // Carrying a little of the throw through, so it tumbles on rather than stopping dead where the arc
             // ended and dropping straight down. Only a little: the arc's real speed is a boss's throw across a
             // room, and handing all of it to the physics engine skitters the barrel out of the fight.
-            crate.Unit.Rigidbody.linearVelocity = ArcVelocityAtLanding(crate) * LandingSpeedKept;
+            var arc = ArcVelocityAtLanding(crate);
+            crate.Unit.Rigidbody.linearVelocity = new Vector3(
+                arc.x * LandingSpeedKeptAlong,
+                arc.y * LandingSpeedKeptDown,
+                arc.z * LandingSpeedKeptAlong);
+
+            // A barrel that only slides is still a barrel that looks stuck; the throw's own spin is what makes it
+            // read as having been thrown, and a sphere-less box needs to be told to turn.
+            crate.Unit.Rigidbody.angularVelocity = new Vector3(arc.z, 0f, -arc.x) * LandingSpinKept;
         }
 
         /// <summary>How fast the arc was travelling as it finished — the last stretch of it, over the time that
