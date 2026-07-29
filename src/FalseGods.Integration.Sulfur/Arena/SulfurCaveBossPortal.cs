@@ -126,15 +126,33 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// How long the way through takes to open, once the boss is down.
         /// </summary>
         /// <remarks>
-        /// It arriving at full size on the frame the boss dies reads as a mistake — a thing that was always there
-        /// and had been hidden. Growing out of nothing over a second makes it the answer to the kill, which is
-        /// what it is. Eased at both ends rather than linear, so it does not start and stop dead.
+        /// It arriving whole on the frame the boss dies reads as a mistake — a thing that was always there and had
+        /// been hidden. Coming up out of nothing over a second makes it the answer to the kill, which is what it
+        /// is. Eased at both ends rather than linear, so it does not start and stop dead.
         /// </remarks>
         private const float OpeningSeconds = 1f;
+
+        /// <summary>
+        /// The transparent render state, and the opaque one to put back afterwards.
+        /// </summary>
+        /// <remarks>
+        /// <b>The lit plate is an opaque material</b> — measured: surface 0, queue 2000, blend One/Zero — so it has
+        /// an alpha nothing reads. Fading it means making it transparent for as long as the fade lasts, and the
+        /// values to do that are not guessed either: they are copied off the cone standing next to it, which is
+        /// the same shader already set up transparent (surface 1, queue 3000, blend SrcAlpha/OneMinusSrcAlpha).
+        /// <para>Put back at the end so that what stands there afterwards is exactly the material the game
+        /// authored, sorting and all, rather than a transparent copy that happens to be at full alpha.</para>
+        /// </remarks>
+        private const string TransparentKeyword = "_SURFACE_TYPE_TRANSPARENT";
 
         /// <summary>How far the plate stands proud of the wall it is set into, so the two do not fight over the
         /// same pixels.</summary>
         private const float ProudOfTheWall = 0.1f;
+
+        /// <summary>How far the whole doorway sits forward of the panel it was measured on, into the room. The
+        /// niche it stands in is cut back into the rock, and a door flush with the back of one is a door seen
+        /// through a hole rather than a door standing in it.</summary>
+        private const float StandsIntoTheRoom = 0.2f;
 
         private readonly ILogger _logger;
         private readonly Action _walkThrough;
@@ -151,9 +169,13 @@ namespace FalseGods.Integration.Sulfur.Arena
         private Vector3 _doorwayAt;
         private Quaternion _doorwayFacing;
 
-        // What grows: the look, on its own holder, so opening it does not touch the volume a player walks into.
+        // What comes up: the look, on its own holder, so opening it does not touch the volume a player walks into.
         private Transform _look;
         private float _sinceOpened = -1f;
+
+        // The material copies the fade is driven on, and whether each has to be put back to opaque at the end.
+        private readonly System.Collections.Generic.List<FadingSurface> _fading =
+            new System.Collections.Generic.List<FadingSurface>();
 
         /// <param name="walkThrough">Called when a player walks into the door. What that <i>does</i> is not this
         /// class's business — it says a player asked to go, and whoever owns the session decides the rest.</param>
@@ -232,15 +254,24 @@ namespace FalseGods.Integration.Sulfur.Arena
             var through = Mathf.Clamp01(_sinceOpened / OpeningSeconds);
             var eased = through * through * (3f - 2f * through);
 
-            // Never exactly zero: a zero scale is a matrix nothing can be drawn through, and some of this is
-            // emitters that would rather be told they are small than told they do not exist.
-            _look.localScale = Vector3.one * Mathf.Max(eased, 0.001f);
-            if (through >= 1f)
+            for (var i = 0; i < _fading.Count; i++)
             {
-                _look.localScale = Vector3.one;
-                _sinceOpened = -1f;
-                _logger?.Log("[cave-door] the way through has finished opening.");
+                _fading[i].SetAlpha(eased);
             }
+
+            if (through < 1f)
+            {
+                return;
+            }
+
+            for (var i = 0; i < _fading.Count; i++)
+            {
+                _fading[i].Finish();
+            }
+
+            _fading.Clear();
+            _sinceOpened = -1f;
+            _logger?.Log("[cave-door] the way through has finished opening.");
         }
 
         /// <summary>Drop everything held for a level that is going away. Safe to call twice.</summary>
@@ -256,6 +287,7 @@ namespace FalseGods.Integration.Sulfur.Arena
             _doorwayKnown = false;
             _look = null;
             _sinceOpened = -1f;
+            _fading.Clear();
             if (_doorway != null)
             {
                 // Ours to destroy: it stands free in the level rather than under the room, so that nothing about
@@ -313,6 +345,9 @@ namespace FalseGods.Integration.Sulfur.Arena
                 _doorwayFacing *= Quaternion.Euler(0f, 180f, 0f);
             }
 
+            // Forward of the panel now that which way is forward has been settled.
+            _doorwayAt += _doorwayFacing * Vector3.forward * StandsIntoTheRoom;
+
             _doorwayKnown = true;
             _logger?.Log($"[cave-door] the cave boss is in this level ({how}); a way through will open at "
                 + $"{_doorwayAt} when it falls, facing {(turnedAway ? "the room (turned about)" : "the room")}.");
@@ -359,8 +394,8 @@ namespace FalseGods.Integration.Sulfur.Arena
                 var look = new GameObject("Look");
                 look.transform.SetParent(_doorway.transform, worldPositionStays: false);
                 _look = look.transform;
-                _look.localScale = Vector3.one * 0.001f;
                 AddTheDoor(_look);
+                CollectSurfacesToFade(_look);
                 _sinceOpened = 0f;
                 _doorway.AddComponent<CaveDoorTrigger>().WalkedThrough = _walkThrough;
 
@@ -406,6 +441,13 @@ namespace FalseGods.Integration.Sulfur.Arena
 
             // Everything is placed against where the plate is DRAWN, which is not where its transform is.
             var origin = DrawnCentre(plate);
+
+            // ...and sized against the panel the room authored, rather than left at whatever the donor's own
+            // opening happened to be. The church's is a landscape arch; this niche is upright and cut back into
+            // rock, and a plate that does not reach its top and bottom leaves the light with no edges. Fitted to
+            // COVER, so any excess is buried in the rock rather than showing as a gap.
+            FitToTheDoorway(plate, doorway);
+
             var placed = 0;
             for (var i = 0; i < DoorPieces.Length; i++)
             {
@@ -463,6 +505,42 @@ namespace FalseGods.Integration.Sulfur.Arena
             }
 
             return lit;
+        }
+
+        /// <summary>
+        /// Scale the whole look so the lit plate covers the authored panel.
+        /// </summary>
+        /// <remarks>
+        /// Measured off the donor at load rather than written down, so it stays right if the borrowed portal is
+        /// ever a different size. The roll has already put the plate on its side, so what was its width now
+        /// stands as its height — which is why the two are swapped before comparing.
+        /// </remarks>
+        private void FitToTheDoorway(Transform plate, Transform doorway)
+        {
+            var renderers = plate.GetComponentsInChildren<Renderer>(includeInactive: true);
+            if (renderers.Length == 0)
+            {
+                return;
+            }
+
+            var bounds = renderers[0].bounds;
+            for (var i = 1; i < renderers.Length; i++)
+            {
+                bounds.Encapsulate(renderers[i].bounds);
+            }
+
+            // Rolled a quarter turn about its face, so the donor's width becomes this door's height.
+            var across = bounds.size.y;
+            var up = bounds.size.x;
+            if (across <= 0.001f || up <= 0.001f)
+            {
+                return;
+            }
+
+            var fit = Mathf.Max(DoorwaySize.x / across, DoorwaySize.y / up);
+            doorway.localScale = Vector3.one * fit;
+            _logger?.Log($"[cave-door] the borrowed portal is {across:0.00} by {up:0.00} on its side and the room "
+                + $"authored {DoorwaySize.x:0.00} by {DoorwaySize.y:0.00}, so it stands at {fit:0.00}x.");
         }
 
         private GameObject LoadDonor()
@@ -544,6 +622,32 @@ namespace FalseGods.Integration.Sulfur.Arena
             }
         }
 
+        /// <summary>
+        /// Take a private copy of every material under the door and put it in a state that can be faded.
+        /// </summary>
+        /// <remarks>
+        /// <b>Copies, never the originals.</b> These materials are the game's own and are shared by everything
+        /// that uses them — fading the asset would fade the portal in the church. Reading
+        /// <c>Renderer.materials</c> gives this renderer its own copies, which die with it.
+        /// </remarks>
+        private void CollectSurfacesToFade(Transform look)
+        {
+            foreach (var renderer in look.GetComponentsInChildren<Renderer>(includeInactive: true))
+            {
+                var copies = renderer.materials;
+                for (var i = 0; i < copies.Length; i++)
+                {
+                    var material = copies[i];
+                    if (material == null || !material.HasProperty("_Alpha"))
+                    {
+                        continue;
+                    }
+
+                    _fading.Add(new FadingSurface(material));
+                }
+            }
+        }
+
         /// <summary>Where a piece is actually drawn, which for a vanilla prop is not where its transform is.</summary>
         private static Vector3 DrawnCentre(Transform piece)
         {
@@ -576,6 +680,55 @@ namespace FalseGods.Integration.Sulfur.Arena
             }
 
             _donor = null;
+        }
+
+        /// <summary>
+        /// One material being brought up from nothing, and put back the way it was found.
+        /// </summary>
+        private sealed class FadingSurface
+        {
+            private readonly Material _material;
+            private readonly bool _wasOpaque;
+
+            public FadingSurface(Material material)
+            {
+                _material = material;
+
+                // Surface 0 is opaque. Such a material has an _Alpha nobody reads, so it is made transparent for
+                // the length of the fade using the values measured off the transparent one beside it.
+                _wasOpaque = material.HasProperty("_Surface") && material.GetFloat("_Surface") < 0.5f;
+                if (!_wasOpaque)
+                {
+                    return;
+                }
+
+                material.SetFloat("_Surface", 1f);
+                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                material.SetFloat("_ZWrite", 0f);
+                material.EnableKeyword(TransparentKeyword);
+                material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            }
+
+            public void SetAlpha(float alpha) => _material.SetFloat("_Alpha", alpha);
+
+            /// <summary>Full alpha, and opaque again if it started that way — so what stands there afterwards is
+            /// the material the game authored, sorting and all, not a transparent copy at full alpha.</summary>
+            public void Finish()
+            {
+                _material.SetFloat("_Alpha", 1f);
+                if (!_wasOpaque)
+                {
+                    return;
+                }
+
+                _material.SetFloat("_Surface", 0f);
+                _material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.One);
+                _material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.Zero);
+                _material.SetFloat("_ZWrite", 1f);
+                _material.DisableKeyword(TransparentKeyword);
+                _material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Geometry;
+            }
         }
 
         /// <summary>
