@@ -49,6 +49,17 @@ namespace FalseGods.Integration.Sulfur.Arena
         private static readonly Vector3 DoorwaySize = new Vector3(5.73f, 6.35f, 1f);
 
         /// <summary>
+        /// How much deeper than the authored panel the volume reaches, and which way the extra goes.
+        /// </summary>
+        /// <remarks>
+        /// A door drawn as a flat plate is a metre thick at most, and a player crossing it at speed can be past it
+        /// between two frames. The extra depth all goes <b>into the room</b> rather than spreading either side:
+        /// growing back through the wall would let somebody standing behind it be taken, and growing symmetrically
+        /// does both. So the face stays exactly where it is drawn and only the reach behind it changes.
+        /// </remarks>
+        private const float DoorwayDepthMultiplier = 3f;
+
+        /// <summary>
         /// Where this borrows its look from: the game's own portal, in the safe area.
         /// </summary>
         /// <remarks>
@@ -65,7 +76,20 @@ namespace FalseGods.Integration.Sulfur.Arena
         private const string DoorDonorKey =
             "Assets/_Core/Prefabs/LevelGeneration/Chunks/Hub/ChurchHub.prefab";
 
-        private const string PortalPath = "LODing/9/HedgemazePortal/ON";
+        /// <summary>
+        /// The portal's name inside the donor, found at any depth rather than by a path.
+        /// </summary>
+        /// <remarks>
+        /// A path through that prefab was tried first and did not survive contact with the running game: the
+        /// hierarchy an asset-ripped copy reconstructs is not always the one the build ships, and the grouping
+        /// this sits under is exactly the sort of thing that differs. The name is distinctive enough to search
+        /// for, and searching does not care how the thing above it is arranged.
+        /// </remarks>
+        private const string PortalName = "HedgemazePortal";
+
+        /// <summary>The portal's lit half. Its counterpart holds the same gate unlit, for a chapter the player has
+        /// not reached yet.</summary>
+        private const string PortalLitChild = "ON";
 
         /// <summary>
         /// The pieces of the portal, and where each sits relative to the lit plate.
@@ -249,7 +273,13 @@ namespace FalseGods.Integration.Sulfur.Arena
 
                 var volume = _doorway.AddComponent<BoxCollider>();
                 volume.isTrigger = true;
-                volume.size = DoorwaySize;
+                var depth = DoorwaySize.z * DoorwayDepthMultiplier;
+                volume.size = new Vector3(DoorwaySize.x, DoorwaySize.y, depth);
+
+                // Pushed forward by exactly what was added, so the front face stays on the panel and all the extra
+                // reach is on the room's side of it. +Z is out of the wall - the same way the plate stands proud
+                // and the light is thrown.
+                volume.center = new Vector3(0f, 0f, (depth - DoorwaySize.z) * 0.5f);
 
                 // The layer the game puts its own level-change triggers on, asked of the game rather than named,
                 // because a layer index is not stable across builds.
@@ -288,10 +318,9 @@ namespace FalseGods.Integration.Sulfur.Arena
                 return;
             }
 
-            var portal = donor.transform.Find(PortalPath);
+            var portal = FindPortal(donor.transform);
             if (portal == null)
             {
-                _logger?.LogWarning($"[cave-door] the donor has no '{PortalPath}'; the way through is unlit.");
                 return;
             }
 
@@ -316,6 +345,52 @@ namespace FalseGods.Integration.Sulfur.Arena
 
             _logger?.Log($"[cave-door] {placed} of {DoorPieces.Length} piece(s) of the church's portal now stand "
                 + "in the doorway.");
+        }
+
+        /// <summary>
+        /// Find the portal inside the donor, and say what is actually in there when it cannot be found.
+        /// </summary>
+        /// <remarks>
+        /// The report is the point of the failure branch. "The path was wrong" is not something a log can act on;
+        /// a list of what the donor really contains is, and it costs nothing on a path that has already failed.
+        /// </remarks>
+        private Transform FindPortal(Transform donor)
+        {
+            Transform portal = null;
+            foreach (var candidate in donor.GetComponentsInChildren<Transform>(includeInactive: true))
+            {
+                if (candidate.name == PortalName)
+                {
+                    portal = candidate;
+                    break;
+                }
+            }
+
+            if (portal == null)
+            {
+                var names = new System.Text.StringBuilder();
+                var listed = 0;
+                foreach (Transform child in donor)
+                {
+                    if (listed++ == 12) { names.Append(", ..."); break; }
+                    if (listed > 1) names.Append(", ");
+                    names.Append(child.name);
+                }
+
+                _logger?.LogWarning($"[cave-door] the donor holds no '{PortalName}'; the way through is unlit. It "
+                    + $"holds: {names}");
+                return null;
+            }
+
+            var lit = portal.Find(PortalLitChild);
+            if (lit == null)
+            {
+                _logger?.LogWarning($"[cave-door] the portal has no '{PortalLitChild}' half; the way through is "
+                    + "unlit.");
+                return null;
+            }
+
+            return lit;
         }
 
         private GameObject LoadDonor()
