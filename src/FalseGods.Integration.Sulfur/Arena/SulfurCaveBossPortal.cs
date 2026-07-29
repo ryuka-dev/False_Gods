@@ -444,8 +444,7 @@ namespace FalseGods.Integration.Sulfur.Arena
 
             // ...and sized against the panel the room authored, rather than left at whatever the donor's own
             // opening happened to be. The church's is a landscape arch; this niche is upright and cut back into
-            // rock, and a plate that does not reach its top and bottom leaves the light with no edges. Fitted to
-            // COVER, so any excess is buried in the rock rather than showing as a gap.
+            // rock.
             FitToTheDoorway(plate, doorway);
 
             var placed = 0;
@@ -508,12 +507,17 @@ namespace FalseGods.Integration.Sulfur.Arena
         }
 
         /// <summary>
-        /// Scale the whole look so the lit plate covers the authored panel.
+        /// Scale the whole look so it fits inside the authored panel.
         /// </summary>
         /// <remarks>
-        /// Measured off the donor at load rather than written down, so it stays right if the borrowed portal is
-        /// ever a different size. The roll has already put the plate on its side, so what was its width now
-        /// stands as its height — which is why the two are swapped before comparing.
+        /// <para><b>Contained, not covered.</b> Covering it was tried and is wrong here: the panel is a niche cut
+        /// back into rock, so anything past its edges is not hidden by the rock but spilling out in front of it —
+        /// and what spills first is the cone, which is half again the size of the plate and was built to light an
+        /// open hall. Fitting inside makes the authored panel the outer bound of the whole thing, which is what a
+        /// niche wants; the price is a hand's width of rock either side, and the height still lands exactly.</para>
+        /// <para>Measured off the donor at load rather than written down, so it stays right if the borrowed portal
+        /// is ever a different size. The roll has already put the plate on its side, so what was its width now
+        /// stands as its height — which is why the two are swapped before comparing.</para>
         /// </remarks>
         private void FitToTheDoorway(Transform plate, Transform doorway)
         {
@@ -537,10 +541,11 @@ namespace FalseGods.Integration.Sulfur.Arena
                 return;
             }
 
-            var fit = Mathf.Max(DoorwaySize.x / across, DoorwaySize.y / up);
+            var fit = Mathf.Min(DoorwaySize.x / across, DoorwaySize.y / up);
             doorway.localScale = Vector3.one * fit;
             _logger?.Log($"[cave-door] the borrowed portal is {across:0.00} by {up:0.00} on its side and the room "
-                + $"authored {DoorwaySize.x:0.00} by {DoorwaySize.y:0.00}, so it stands at {fit:0.00}x.");
+                + $"authored {DoorwaySize.x:0.00} by {DoorwaySize.y:0.00}, so it stands at {fit:0.00}x "
+                + $"({across * fit:0.00} by {up * fit:0.00}), inside the panel.");
         }
 
         private GameObject LoadDonor()
