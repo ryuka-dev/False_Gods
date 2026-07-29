@@ -588,9 +588,9 @@ namespace FalseGods.Core.Bosses
             _activityEnteredTime = now;
 
             var stations = _definition.Stations;
-            if (StationIndex >= 0 && StationIndex < stations.Count && stations[StationIndex].SummonCount > 0)
+            if (StationIndex >= 0 && StationIndex < stations.Count && stations[StationIndex].Summons.NamesABand)
             {
-                _summonRequests.Add(new SummonRequest(StationIndex, stations[StationIndex].SummonCount));
+                _summonRequests.Add(new SummonRequest(StationIndex, stations[StationIndex].Summons));
             }
         }
 

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using FalseGods.Application.Combat;
+using FalseGods.Core.Bosses.Combat;
 using FalseGods.RuntimeContracts.Arena;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.Units;
@@ -24,30 +25,105 @@ namespace FalseGods.Integration.Sulfur.Combat
     /// a worse fight, not a broken one.</para>
     /// <para><b>Ownership.</b> Every minion this port spawned is tracked so the encounter can take them with it
     /// when it ends. Units that died in the meantime are forgotten as they are found.</para>
+    /// <para><b>This is also where the roster lives</b> — see <see cref="Roster"/>. The encounter names a band and
+    /// this side answers with creatures, because a creature is a game type and the layers that design the fight
+    /// cannot name one.</para>
     /// </remarks>
     public sealed class SulfurMinionSpawnPort : IMinionSpawnPort
     {
         /// <summary>
-        /// The cave's own rank and file, and deliberately more than one kind of it.
+        /// The roster: every hostile squad the boss can summon, in the game's own creatures.
         /// </summary>
         /// <remarks>
-        /// A band of identical spearmen is one problem repeated: solve the approach once and every summon after it
-        /// is the same fight. A mixed band asks two questions at once — the spearmen close, so the terraces and
-        /// their jump links matter, while the archers and casters punish standing still to deal with them. The
-        /// vanilla cousin does exactly this, picking each henchman at random from a list of its own, which is also
-        /// where the shape of this came from.
-        /// <para>Picked per minion rather than per summon, so a wave is mixed rather than uniform. The host
-        /// chooses and the session layer mirrors what it spawned, so no shared seed is needed for the peers to
-        /// agree — unlike the crates, which every peer builds for itself.</para>
-        /// <para>Destined for authored boss content, like the crate constants.</para>
+        /// <para><b>An explicit list, one entry per minion</b> — the vanilla cave boss's own idiom. Its
+        /// <c>henchmenFirstSpawn</c>/<c>henchmenSecondSpawn</c> are authored <c>List&lt;UnitId&gt;</c>s spawned
+        /// straight through, so the headcount <i>is</i> the list length and a wave is exactly reproducible. A
+        /// weighted pool with a budget is the game's other idiom, and it is the one it uses for procedurally
+        /// generated patrols; a designed fight wants the same fight twice.</para>
+        /// <para><b>The ladder follows the game's own cave tiers</b>, not a scheme of ours: its
+        /// <c>UnitPool_Caves_Tier1</c> is the rank and file (young, spearmen, archers), tier 2 adds the barrel boy,
+        /// tier 3 adds the four wizards. So the three waves are those three tiers in order, and every creature
+        /// here is one the game already considers native to a cave — which is also why none of them can fail to
+        /// load in one.</para>
+        /// <para><b>Escalation is composition, not headcount.</b> All three ordinary waves are seven strong,
+        /// matching the vanilla boss's two seven-strong lists, which differ only in their mix. Measured in the
+        /// game's own currency (<c>UnitSO.SpawnCost</c>, against which one vanilla cave patrol is worth fifteen)
+        /// the three waves come to roughly 21, 31 and 45 — the wave gets harder without the floor getting more
+        /// crowded, which is what keeps a room this size readable.</para>
+        /// <para>Destined for authored boss content, like the crate constants. See <see cref="MinionBands"/>.</para>
         /// </remarks>
-        private static readonly UnitId[] MinionUnits =
-        {
-            UnitIds.GoblinSpearman,
-            UnitIds.GoblinSpearman,   // twice: the melee that uses the room stays the backbone of a wave
-            UnitIds.GoblinArcher,
-            UnitIds.GoblinWizardFire,
-        };
+        private static readonly Dictionary<MinionBandId, UnitId[]> Roster =
+            new Dictionary<MinionBandId, UnitId[]>
+            {
+                // Tier 1: numbers and spears. Nothing here outranges a player, so the first wave is entirely about
+                // whether the party holds its ground while the room is filling up.
+                [MinionBands.Vanguard] = new[]
+                {
+                    UnitIds.GoblinYoung,
+                    UnitIds.GoblinYoung,
+                    UnitIds.GoblinYoung,
+                    UnitIds.GoblinYoung,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinArcher,
+                },
+
+                // Tier 2: the smallest thin out, the spears thicken, and the heavy arrives. The barrel boy is the
+                // one creature in the cave's own roster that does not simply walk at you, and at eight hundred
+                // health it is the first summon a party cannot ignore its way past.
+                [MinionBands.Warband] = new[]
+                {
+                    UnitIds.GoblinYoung,
+                    UnitIds.GoblinYoung,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinArcher,
+                    UnitIds.GoblinBarrelBoy,
+                },
+
+                // Tier 3: all four casters at once, with just enough melee to stop the party standing still to
+                // answer them. Every wizard is a different element, so this wave is four problems rather than one
+                // problem four times.
+                [MinionBands.Coven] = new[]
+                {
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinArcher,
+                    UnitIds.GoblinWizardFire,
+                    UnitIds.GoblinWizardFrost,
+                    UnitIds.GoblinWizardElectricity,
+                    UnitIds.GoblinWizardPoison,
+                },
+
+                // The rage's band: small, heavy, and outlined. Killing it is half of what it takes to calm the
+                // boss, and it is killed while the boss is hitting three times as hard — so it is five creatures
+                // worth thirty-six rather than a seven-strong wave, and two of the five are the heavy, so the job
+                // is short but not free.
+                [MinionBands.Emergency] = new[]
+                {
+                    UnitIds.GoblinBarrelBoy,
+                    UnitIds.GoblinBarrelBoy,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinSpearman,
+                    UnitIds.GoblinWizardPoison,
+                },
+            };
+
+        /// <summary>
+        /// How far apart minions are pushed when a band is larger than the room's authored places, and how much
+        /// further out each further lap sits.
+        /// </summary>
+        /// <remarks>
+        /// The room authors a handful of places and a band may outnumber them, so the places are reused. Vanilla
+        /// lets its henchmen collide — it picks a spawner per unit at random and never checks — but its arena has
+        /// far more of them, and two goblins born inside each other in a room with four places is visible. A lap
+        /// number times a golden-angle turn spreads them without any randomness, which also keeps a wave's
+        /// arrangement the same on every peer for free.
+        /// </remarks>
+        private const float PlaceReuseSpacing = 1.2f;
+
+        private const float GoldenAngleDegrees = 137.507764f;
 
         private readonly MonoBehaviour _host;
         private readonly ILogger? _logger;
@@ -81,19 +157,31 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public void Summon(IReadOnlyList<ArenaWorldPoint> at)
+        public int SizeOf(MinionBandId band) => Roster.TryGetValue(band, out var members) ? members.Length : 0;
+
+        public void Summon(MinionBandId band, IReadOnlyList<ArenaWorldPoint> places)
         {
-            if (at == null || at.Count == 0)
+            if (!Roster.TryGetValue(band, out var members))
             {
-                _logger?.LogWarning("[minion] nothing summoned: the room authored no places to put minions.");
+                // A band nobody wrote down is a wave that does not arrive, not a fight that stops. It can only
+                // happen by naming a band in the itinerary and forgetting to add it here, so say which.
+                _logger?.LogWarning($"[minion] the roster has no band called '{band}'; nothing summoned.");
+                return;
+            }
+
+            if (places == null || places.Count == 0)
+            {
+                _logger?.LogWarning($"[minion] the {band} band was called up, but the room authored no places to "
+                    + "put minions; nothing summoned.");
                 return;
             }
 
             var summoned = 0;
-            var band = new List<string>(at.Count);
-            for (var i = 0; i < at.Count; i++)
+            var cost = 0;
+            var composition = new List<string>(members.Length);
+            for (var i = 0; i < members.Length; i++)
             {
-                var kind = MinionUnits[UnityEngine.Random.Range(0, MinionUnits.Length)];
+                var kind = members[i];
                 var definition = kind.GetAsset();
                 if (definition == null)
                 {
@@ -103,13 +191,37 @@ namespace FalseGods.Integration.Sulfur.Combat
                     continue;
                 }
 
-                SpawnOne(definition, new Vector3(at[i].X, at[i].Y, at[i].Z));
-                band.Add(definition.displayName ?? kind.value.ToString());
+                SpawnOne(definition, PlaceFor(places, i));
+                composition.Add(definition.displayName ?? kind.value.ToString());
+                cost += definition.SpawnCost;
                 summoned++;
             }
 
-            _logger?.Log($"[minion] {summoned} of {at.Count} minion(s) requested ({string.Join(", ", band)}); "
+            _logger?.Log($"[minion] the {band} band arrives: {summoned} of {members.Length} at {places.Count} "
+                + $"authored place(s), worth {cost} (a vanilla cave patrol is 15) — {string.Join(", ", composition)}; "
                 + $"{_spawned.Count} already alive.");
+        }
+
+        /// <summary>
+        /// Where the <paramref name="index"/>th member of a band stands: the authored places in order, and once
+        /// they run out, the same places again pushed a lap further out. See <see cref="PlaceReuseSpacing"/>.
+        /// </summary>
+        private static Vector3 PlaceFor(IReadOnlyList<ArenaWorldPoint> places, int index)
+        {
+            var place = places[index % places.Count];
+            var at = new Vector3(place.X, place.Y, place.Z);
+
+            var lap = index / places.Count;
+            if (lap == 0)
+            {
+                return at;
+            }
+
+            // Height is left alone: the authored place is on the floor the room built, and pushing a minion up or
+            // down from it would drop it through a terrace or stand it in the air.
+            var turn = index * GoldenAngleDegrees * Mathf.Deg2Rad;
+            var reach = PlaceReuseSpacing * lap;
+            return new Vector3(at.x + Mathf.Cos(turn) * reach, at.y, at.z + Mathf.Sin(turn) * reach);
         }
 
         public void DespawnAll()

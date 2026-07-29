@@ -69,10 +69,6 @@ namespace FalseGods.Plugin
         private const float GateTimeoutSeconds = 30f;
 
         /// <summary>
-        /// How many minions a summoning station calls up. First-pass number, tuned in game.
-        private const int MinionsPerSummon = 4;
-
-        /// <summary>
         /// The first boss's supply line: how fast the room's production points yield destructibles, and how much
         /// the room will hold at each end. First-pass numbers, tuned in game like the boss's own — and destined
         /// for authored boss content rather than staying constants here.
@@ -148,10 +144,6 @@ namespace FalseGods.Plugin
         /// </remarks>
         private const float FutilitySeconds = 30f;
 
-        /// <summary>How many go in the band a starved boss summons. Enough to be a job of its own, since killing
-        /// them is half of what it takes to calm it.</summary>
-        private const int EmergencyBandSize = 4;
-
         /// <summary>How much harder a hit lands while the boss is enraged, and how much of its full health it
         /// will lose in one rage before the rage burns out. First-pass numbers, tuned in game: the window has to
         /// be worth provoking and short enough that holding the supply cut is not simply the way to win.</summary>
@@ -203,22 +195,26 @@ namespace FalseGods.Plugin
 
         /// <summary>
         /// The first boss's itinerary: it holds its home anchor, drops to the second one to summon, returns, does
-        /// it once more, and comes home to die. Read against the arena's authored anchors by index — anchor 0 is the
-        /// first child of the room's anchor group, anchor 1 the second.
+        /// it once more, and comes home for the last wave and to die. Read against the arena's authored anchors by
+        /// index — anchor 0 is the first child of the room's anchor group, anchor 1 the second.
         /// </summary>
         /// <remarks>
-        /// Boss design, so it lives with the boss and not in the room, and an authored order rather than the
+        /// <para>Boss design, so it lives with the boss and not in the room, and an authored order rather than the
         /// vanilla cave boss's random pool — a fight whose shape is the point should be the same fight twice.
         /// Still code rather than content: there is no boss-content pipeline yet, and one boss does not justify
-        /// inventing one (Docs/DefinitionOfDone.md §3). The thresholds are first-pass numbers, tuned in game.
+        /// inventing one (Docs/DefinitionOfDone.md §3). The thresholds are first-pass numbers, tuned in game.</para>
+        /// <para><b>Three waves, each a different band</b> (see <see cref="MinionBands"/>), climbing the cave's own
+        /// difficulty tiers as the boss loses health. The last one is summoned from the boss's home anchor rather
+        /// than the far one: by then the players have learned the trip, and the closing wave should arrive where
+        /// the fight ends rather than announce itself from across the room.</para>
         /// </remarks>
         private static readonly IReadOnlyList<BossStation> Itinerary = new[]
         {
             new BossStation(anchorIndex: 0, enterAtHealthFraction: 1.00f),
-            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.80f, summonCount: MinionsPerSummon),
+            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.80f, summons: MinionBands.Vanguard),
             new BossStation(anchorIndex: 0, enterAtHealthFraction: 0.60f),
-            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.40f, summonCount: MinionsPerSummon),
-            new BossStation(anchorIndex: 0, enterAtHealthFraction: 0.20f),
+            new BossStation(anchorIndex: 1, enterAtHealthFraction: 0.40f, summons: MinionBands.Warband),
+            new BossStation(anchorIndex: 0, enterAtHealthFraction: 0.20f, summons: MinionBands.Coven),
         };
 
         private readonly ILogger _logger;
@@ -1194,11 +1190,12 @@ namespace FalseGods.Plugin
             switch (change)
             {
                 case StarvationChange.Enraged:
+                    var band = _emergencyMinions.SizeOf(MinionBands.Emergency);
                     _logger?.Log(_starvation.Reason == StarvationReason.NothingLanding
                         ? $"[rage] nothing it threw has hurt anybody for {_starvation.SinceHit:0.#}s: the boss "
-                            + $"comes at you itself. Summoning {EmergencyBandSize}."
+                            + $"comes at you itself. Summoning {band}."
                         : $"[rage] nothing delivered for {_starvation.SinceDelivery:0.#}s: the boss comes at "
-                            + $"you. Summoning {EmergencyBandSize}; it settles when they are dead AND the route runs.");
+                            + $"you. Summoning {band}; it settles when they are dead AND the route runs.");
                     // The boss holds the rage; the supply watch only decided it. Everything that has to show the
                     // same boss — this machine's own look, and every client's — reads it from there.
                     _boss.SetEnraged(true);
@@ -1228,14 +1225,28 @@ namespace FalseGods.Plugin
                 return;
             }
 
-            var at = new ArenaWorldPoint[EmergencyBandSize];
-            for (var i = 0; i < at.Length; i++)
+            _emergencyMinions.Summon(MinionBands.Emergency, RotatedByOne(places));
+        }
+
+        /// <summary>
+        /// The room's places starting one along, so the emergency band does not arrive on top of the ordinary
+        /// wave's first arrivals. Rotating the list rather than indexing past it keeps every authored place in
+        /// play — the band that has to be found should still use the whole room.
+        /// </summary>
+        private static IReadOnlyList<ArenaWorldPoint> RotatedByOne(IReadOnlyList<ArenaWorldPoint> places)
+        {
+            if (places.Count < 2)
             {
-                // Offset from the ordinary waves' first place, so a band does not arrive on top of one.
-                at[i] = places[(i + 1) % places.Count];
+                return places;
             }
 
-            _emergencyMinions.Summon(at);
+            var rotated = new ArenaWorldPoint[places.Count];
+            for (var i = 0; i < rotated.Length; i++)
+            {
+                rotated[i] = places[(i + 1) % places.Count];
+            }
+
+            return rotated;
         }
 
         /// <summary>
@@ -1483,20 +1494,15 @@ namespace FalseGods.Plugin
             var places = _arenaContent?.MinionSpawns;
             if (places is null || places.Count == 0)
             {
-                _logger?.LogWarning($"[minion] station {request.StationIndex} summons {request.Count}, but the "
-                    + "room authored no minion spawn points; nothing summoned.");
+                _logger?.LogWarning($"[minion] station {request.StationIndex} calls up the {request.Band} band, but "
+                    + "the room authored no minion spawn points; nothing summoned.");
                 return;
             }
 
-            var at = new ArenaWorldPoint[request.Count];
-            for (var i = 0; i < request.Count; i++)
-            {
-                at[i] = places[i % places.Count];
-            }
-
-            _logger?.Log($"[minion] station {request.StationIndex} summons {request.Count} at "
-                + $"{places.Count} authored place(s).");
-            _minionSpawns.Summon(at);
+            // Every authored place, in the order the room lists them. How many of them a band uses, and what it
+            // does when it outnumbers them, is the roster's business — this side does not know the headcount.
+            _logger?.Log($"[minion] station {request.StationIndex} calls up the {request.Band} band.");
+            _minionSpawns.Summon(request.Band, places);
         }
 
         /// <summary>Turn the room's authored anchor world positions into the simulation's ground-plus-height form:

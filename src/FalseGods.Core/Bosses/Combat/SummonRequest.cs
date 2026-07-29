@@ -1,7 +1,7 @@
 namespace FalseGods.Core.Bosses.Combat
 {
     /// <summary>
-    /// The boss asks the world for <see cref="Count"/> minions, having arrived at the station that summons them.
+    /// The boss calls up the <see cref="Band"/>, having arrived at the station that summons it.
     /// </summary>
     /// <remarks>
     /// Drained separately from the boss's presentation/wire events (<see cref="BossSimulation.DrainSummonRequests"/>,
@@ -13,6 +13,8 @@ namespace FalseGods.Core.Bosses.Combat
     /// <para>Only single-player and the host produce these (SULFUR Together invariant 1: the host owns enemies).
     /// <see cref="StationIndex"/> says which step of the itinerary asked, so a station that summons twice because
     /// the boss visited it twice is distinguishable from one that summoned once.</para>
+    /// <para><b>The band is named, not enumerated.</b> The boss decides that a wave arrives; what a wave is made
+    /// of is the roster's answer, given in the game's own creatures, which this layer cannot name.</para>
     /// </remarks>
-    public sealed record SummonRequest(int StationIndex, int Count);
+    public sealed record SummonRequest(int StationIndex, MinionBandId Band);
 }

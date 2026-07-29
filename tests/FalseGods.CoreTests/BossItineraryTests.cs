@@ -333,7 +333,7 @@ namespace FalseGods.CoreTests
             Assert.Equal(BossActivity.Appearing, boss.Activity);
             var summon = Assert.Single(boss.DrainSummonRequests());
             Assert.Equal(1, summon.StationIndex);
-            Assert.Equal(3, summon.Count);
+            Assert.Equal(TestBand, summon.Band);
         }
 
         [Fact]
@@ -374,12 +374,43 @@ namespace FalseGods.CoreTests
         }
 
         [Fact]
-        public void A_station_cannot_summon_a_negative_number()
+        public void A_band_must_be_named()
         {
-            Assert.Throws<ArgumentOutOfRangeException>(() => new BossStation(0, 1f, summonCount: -1));
+            Assert.Throws<ArgumentException>(() => new MinionBandId(string.Empty));
+            Assert.Throws<ArgumentException>(() => new MinionBandId(null!));
         }
 
-        private static BossDefinition Summoning() => new BossDefinition(
+        [Fact]
+        public void A_station_given_no_band_names_none()
+        {
+            // The default value is what a station the boss merely stands at carries, and it is the same question
+            // the simulation asks before deciding whether a summon happened at all.
+            Assert.False(default(MinionBandId).NamesABand);
+            Assert.False(new BossStation(0, 1f).Summons.NamesABand);
+            Assert.True(new BossStation(0, 1f, summons: TestBand).Summons.NamesABand);
+        }
+
+        [Fact]
+        public void Successive_stations_can_summon_different_bands()
+        {
+            // The point of naming a band rather than counting minions: the second wave is allowed to be a
+            // different wave. Two stations that both summoned "three" could never say so.
+            var second = new MinionBandId("the-other-band");
+            var harness = new BossTestHarness();
+            var boss = Spawned(harness, Summoning(second));
+
+            boss.ApplyDamage(21);                                   // station 1
+            RunRelocation(harness);
+            Assert.Equal(TestBand, Assert.Single(boss.DrainSummonRequests()).Band);
+
+            boss.ApplyDamage(20);                                   // 79 -> 59: station 2
+            RunRelocation(harness);
+            Assert.Equal(second, Assert.Single(boss.DrainSummonRequests()).Band);
+        }
+
+        private static readonly MinionBandId TestBand = new MinionBandId("test-band");
+
+        private static BossDefinition Summoning(MinionBandId? alsoAtStationTwo = null) => new BossDefinition(
             maxHealth: 100,
             phaseTwoHealthFraction: 0.5f,
             moveSpeed: 0f,
@@ -394,8 +425,8 @@ namespace FalseGods.CoreTests
             stations: new[]
             {
                 new BossStation(0, 1.00f),
-                new BossStation(1, 0.80f, summonCount: 3),
-                new BossStation(0, 0.60f),
+                new BossStation(1, 0.80f, summons: TestBand),
+                new BossStation(0, 0.60f, summons: alsoAtStationTwo ?? default),
             });
 
         // ---------------------------------------------------------------- definition validation
