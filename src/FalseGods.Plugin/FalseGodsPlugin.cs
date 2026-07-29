@@ -148,6 +148,11 @@ namespace FalseGods.Plugin
         private IBossVoicePort _voice = null!;
         private IArenaAtmospherePort _atmosphere = null!;
 
+        /// <summary>Watches ordinary cave levels for the game's own boss, and opens the way into ours where it
+        /// dies. Lives with the plugin rather than with an encounter: it works in levels that have no encounter in
+        /// them, and its whole job is getting a player to one.</summary>
+        private SulfurCaveBossPortal _caveDoor = null!;
+
         // Which arena-building generation run this peer's automatic raise belongs to. One arena, one automatic
         // raise: dropping the boss by hand must not be undone by the next frame, and the next visit to the arena
         // is a new run and so gets a new one.
@@ -250,6 +255,10 @@ namespace FalseGods.Plugin
             _voice = new SulfurBossVoice(transform, _log);
             _atmosphere = new SulfurArenaAtmosphere(this, _log);
 
+            // The way in. It watches ordinary cave levels for the game's own boss and opens a door in that room
+            // once it is dead — the same request the dev key makes, from somewhere a player can actually reach.
+            _caveDoor = new SulfurCaveBossPortal(GoToArenaLevel, _log);
+
             // When a hijacked level left our arena standing, a raise fights in that one instead of loading a
             // second copy of the same content on top of itself.
             // Minions are the game's own units, spawned through the game's own entry point; the plugin is the
@@ -302,6 +311,12 @@ namespace FalseGods.Plugin
             // The session's agreement on which level is the boss arena has to exist before anyone asks to go
             // there, so it is maintained every frame rather than only while an encounter is up.
             WarmContentWhileTheScreenIsBlack();
+
+            // Cheap: a field read once this level's boss has been found, and one scene query at most per level
+            // before that. Kept outside every role branch — an ordinary cave is not an encounter, and the door
+            // has to open there whether or not anyone is hosting.
+            _caveDoor.Watch();
+
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
             MaintainSpawnOwnership(FalseGodsIntegrations.Current);
             MaintainCrateFlow(FalseGodsIntegrations.Current);
@@ -816,6 +831,7 @@ namespace FalseGods.Plugin
             _crateFlow?.Dispose();
             _crateFlow = null;
             _crateFlowIntegration = null;
+            _caveDoor?.Forget();
             _atmosphere?.Dispose();
         }
 
