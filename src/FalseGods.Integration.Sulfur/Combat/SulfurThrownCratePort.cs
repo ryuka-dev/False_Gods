@@ -110,12 +110,12 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// How often a produced destructible is an explosive barrel rather than ordinary cargo.
         /// </summary>
         /// <remarks>
-        /// Low on purpose: the barrels are the thing that makes a barrage worth watching rather than the thing a
-        /// barrage is made of. At the rates the village supplies, one in twelve is roughly a barrel every few
-        /// seconds at full production — enough that a player learns to look for them, far from enough that the
-        /// fight becomes about them.
+        /// Rare on purpose: the barrels are the thing that makes a barrage worth watching rather than the thing a
+        /// barrage is made of. At the rates the village supplies, one in two hundred is a barrel every half-minute
+        /// or so at full production — an event rather than a hazard, which is what makes seeing one on a goblin's
+        /// back worth reacting to.
         /// </remarks>
-        private const float ExplosiveChance = 1f / 12f;
+        private const float ExplosiveChance = 0.005f;
 
         /// <summary>
         /// Salt for the explosive roll. Kept clear of the volley's salts because this is rolled per <b>crate
@@ -134,6 +134,22 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// be run away from. Without it a barrel is just a crate that does more damage.
         /// </remarks>
         private const float LandedFuseSeconds = 1.5f;
+
+        /// <summary>How much of the throw's speed a landed barrel keeps. A fifth is enough to roll and settle;
+        /// more and it skates away from where the boss aimed it.</summary>
+        private const float LandingSpeedKept = 0.2f;
+
+        /// <summary>
+        /// What one of these costs a player it goes off next to.
+        /// </summary>
+        /// <remarks>
+        /// <b>Ours, and much smaller than the game's.</b> The explosion a vanilla barrel makes is worth 500 over
+        /// eight metres, which kills a player outright — fine for a barrel a player chose to shoot, and not fine
+        /// for one arriving in a barrage they did not choose. Everything else about the blast is the game's: the
+        /// same explosion, the same radius, the same falloff, the same force, and it hits everybody in it exactly
+        /// as the game's own does.
+        /// </remarks>
+        private const float BarrelDamage = 50f;
 
         // The layer the vanilla destructibles sit on, so the game's weapon fire finds our body the same way.
         private const string BreakableLayerName = "Breakable";
@@ -400,44 +416,43 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             template.Template = body;
-            template.Explodes = spec.Explosion != ExplosionTypes.None
-                && GiveItAnExplosion(body, spec.Explosion);
+            template.Explodes = spec.Explosion != ExplosionTypes.None;
             template.Look = LookOf(body, template.Explodes);
             return template;
         }
 
         /// <summary>
-        /// Make this kind die in an explosion, by writing the game's own "what I go off as" onto the template.
+        /// Make one of these barrels go off wherever and however it dies.
         /// </summary>
         /// <remarks>
-        /// <para><b>One field, and then every way of dying is covered.</b> A unit queues this explosion from its
-        /// own death, so a barrel shot out of the air, shot where it stands, or caught in another blast all end
-        /// the same way without any of those paths being taught about barrels. It is written onto the
-        /// <i>template</i>, so every clone is born with it.</para>
-        /// <para>Private, because the game only ever sets it in the editor. Failing to find it costs the bang and
-        /// nothing else — the barrel still breaks like cargo — so it is reported and carried on.</para>
+        /// <para><b>Hung on the unit's own death, which covers every way there is.</b> Shot out of the air, shot
+        /// where it stands, caught in another blast, or burned down by its own fuse — all of them end in
+        /// <c>Die()</c>, so none of those paths has to be taught about barrels. Picking one up does not: a
+        /// collected barrel is destroyed outright, and destroying is not dying.</para>
+        /// <para><b>Queued by us rather than by the unit's own "explode on death" field, because that field
+        /// carries the game's damage with it</b> — 500 over eight metres, which kills a player outright. That is
+        /// right for a barrel somebody chose to shoot and wrong for one arriving in a barrage. Everything else is
+        /// the game's: same explosion, same radius, same falloff, same force, and it hits everyone in it exactly
+        /// as the game's own barrels do.</para>
         /// </remarks>
-        private bool GiveItAnExplosion(GameObject template, ExplosionTypes explosion)
+        private void MakeItGoOff(Unit unit)
         {
-            var breakable = template.GetComponent<Breakable>();
-            if (breakable == null)
-            {
-                return false;
-            }
+            unit.onDeath = (Unit.OnDeath)Delegate.Combine(unit.onDeath, new Unit.OnDeath(BlowUp));
+        }
 
-            if (_explosionOnDeath == null)
+        private void BlowUp(Unit unit)
+        {
+            try
             {
-                _explosionOnDeath = PrivateField(typeof(Unit), "explosionOnDeath");
-                if (_explosionOnDeath == null)
-                {
-                    _logger?.LogWarning("[crate] the game's 'explosion on death' is not where it was; explosive "
-                        + "barrels will break like ordinary cargo.");
-                    return false;
-                }
+                var at = unit.mainCollider != null ? unit.mainCollider.bounds.center : unit.transform.position;
+                StaticInstance<ExplosionManager>.Instance.QueueExplosion(
+                    BarrelExplosion, at, Vector3.zero, Vector3.up, BarrelDamage, 1f, unit);
+                Exploded?.Invoke(ToPoint(at));
             }
-
-            _explosionOnDeath.SetValue(breakable, explosion);
-            return true;
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] a barrel would not go off ({exception.Message}).");
+            }
         }
 
         /// <summary>What an assembled kind looks like — its own mesh and material, or nothing when it was built
@@ -595,6 +610,11 @@ namespace FalseGods.Integration.Sulfur.Combat
             // these is made on the same heap — so its match picks the wrong crate and breaks something that was
             // mid-throw. We already replicate these from the command that made them.
             OurDestructibles.Claim(unit.gameObject);
+
+            if (kind.Explodes)
+            {
+                MakeItGoOff(unit);
+            }
 
             breakable = unit as Breakable;
             if (breakable != null)
@@ -901,7 +921,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                     return;
                 }
 
-                damage = definition.data.damage;
+                damage = BarrelDamage;
                 radius = definition.data.damageRadius;
             }
             catch (Exception exception)
@@ -1529,6 +1549,25 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             crate.Unit.Rigidbody.isKinematic = false;
             crate.Unit.Rigidbody.useGravity = true;
+
+            // Carrying a little of the throw through, so it tumbles on rather than stopping dead where the arc
+            // ended and dropping straight down. Only a little: the arc's real speed is a boss's throw across a
+            // room, and handing all of it to the physics engine skitters the barrel out of the fight.
+            crate.Unit.Rigidbody.linearVelocity = ArcVelocityAtLanding(crate) * LandingSpeedKept;
+        }
+
+        /// <summary>How fast the arc was travelling as it finished — the last stretch of it, over the time that
+        /// stretch took.</summary>
+        private static Vector3 ArcVelocityAtLanding(ManagedCrate crate)
+        {
+            const float slice = 0.05f;
+            var seconds = crate.FlightSeconds * slice;
+            if (seconds <= 0f)
+            {
+                return Vector3.zero;
+            }
+
+            return (ArcPoint(crate, 1f) - ArcPoint(crate, 1f - slice)) / seconds;
         }
 
         /// <summary>
@@ -1572,9 +1611,9 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </remarks>
         private void Detonate(ManagedCrate crate)
         {
-            var at = crate.Unit != null ? crate.Unit.transform.position : crate.Target;
+            // Killing it is all there is to it: the barrel's own death is what goes off, wherever it happens to
+            // be lying by now.
             BreakNoLoot(crate);
-            Exploded?.Invoke(ToPoint(at));
         }
 
         /// <summary>
