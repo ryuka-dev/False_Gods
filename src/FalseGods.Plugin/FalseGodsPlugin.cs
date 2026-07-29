@@ -151,6 +151,11 @@ namespace FalseGods.Plugin
         /// them, and its whole job is getting a player to one.</summary>
         private SulfurCaveBossPortal _caveDoor = null!;
 
+        /// <summary>A row in the game's own developer menu that goes straight to the arena — the shortcut for
+        /// looking at something in there for the twentieth time, behind the developer mode players do not have.
+        /// </summary>
+        private SulfurDevMenuEntry _devMenuRow = null!;
+
         // Which arena-building generation run this peer's automatic raise belongs to. One arena, one automatic
         // raise: dropping the boss by hand must not be undone by the next frame, and the next visit to the arena
         // is a new run and so gets a new one.
@@ -244,6 +249,10 @@ namespace FalseGods.Plugin
             // once it is dead — the same request the dev key makes, from somewhere a player can actually reach.
             _caveDoor = new SulfurCaveBossPortal(GoToArenaLevel, _log);
 
+            // The same request the door makes, from the game's own developer menu. It only exists while that menu
+            // does, which is only in developer mode - so it is not a control to take away before release.
+            _devMenuRow = new SulfurDevMenuEntry(GoToArenaLevel, _log);
+
             // When a hijacked level left our arena standing, a raise fights in that one instead of loading a
             // second copy of the same content on top of itself.
             // Minions are the game's own units, spawned through the game's own entry point; the plugin is the
@@ -301,6 +310,7 @@ namespace FalseGods.Plugin
             // before that. Kept outside every role branch — an ordinary cave is not an encounter, and the door
             // has to open there whether or not anyone is hosting.
             _caveDoor.Watch();
+            _devMenuRow.Maintain();
 
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
             MaintainSpawnOwnership(FalseGodsIntegrations.Current);
