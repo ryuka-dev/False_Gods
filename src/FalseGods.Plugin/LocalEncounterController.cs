@@ -140,6 +140,13 @@ namespace FalseGods.Plugin
         /// them is half of what it takes to calm it.</summary>
         private const int EmergencyBandSize = 4;
 
+        /// <summary>How much harder a hit lands while the boss is enraged, and how much of its full health it
+        /// will lose in one rage before the rage burns out. First-pass numbers, tuned in game: the window has to
+        /// be worth provoking and short enough that holding the supply cut is not simply the way to win.</summary>
+        private const int RageDamageMultiplier = 3;
+
+        private const float RageCostsHealthFraction = 0.20f;
+
         /// <summary>
         /// How long the boss spends announcing itself before the fight runs, matched to the roar the presentation
         /// plays so that "the boss has finished roaring" and "the fight has started" are the same moment.
@@ -902,8 +909,12 @@ namespace FalseGods.Plugin
                 // barrage its village carries to it, the waves it summons, and the arms it puts up when starved.
                 // The proof-of-concept telegraph-and-radius pair it used to have was never designed for this room
                 // and has no place in the fight it turned into. The weak-point window went with it — it WAS the
-                // recovery after one of those attacks — so nothing amplifies damage any more.
-                attacksOnItsOwn: false);
+                // recovery after one of those attacks.
+                attacksOnItsOwn: false,
+                // What the boss has instead of a weak point: while it is out of its routine it is open. Starving
+                // it is therefore a trade rather than a punishment — a harder fight, and the chance to end it.
+                rageDamageMultiplier: RageDamageMultiplier,
+                rageEndsAfterHealthFraction: RageCostsHealthFraction);
 
             _boss = new BossSimulation(
                 new BossInstanceId(1),
@@ -1096,8 +1107,9 @@ namespace FalseGods.Plugin
 
                 case StarvationChange.Calmed:
                     _logger?.Log("[rage] delivering again and its band is dead; the boss goes back to throwing.");
+                    // The arms come down off the boss's own announcement, not from here — the boss can also end a
+                    // rage by itself, and there must be one place that answers a rage ending.
                     _boss.SetEnraged(false);
-                    _rageArms.LowerAll();
                     break;
             }
         }
@@ -1189,6 +1201,41 @@ namespace FalseGods.Plugin
                 _presence.ShowHealthBar();
                 _logger?.Log($"[opening] the boss roars; the room opens to {ArenaDepth.FightEnd:0}m after "
                     + $"{ArenaDepth.RevealHoldSeconds:0.#}s, and the fight runs in {OpeningSeconds:0.#}s.");
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Put the arms down whenever a rage ends, however it ended.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>There are two ways out of a rage and only one place that answers it.</b> The room can talk the
+        /// boss down — supply it again and kill the band it summoned — or the boss can simply spend the rage,
+        /// having lost enough health while it was open. Hanging the cleanup off the boss's own announcement covers
+        /// both without either knowing about the other.</para>
+        /// <para><b>The watch is wound back too</b>, because a boss that ended its own rage is very likely still
+        /// being starved: without this the watch would still believe it enraged, never notice it calm down, and
+        /// never let it rage again — the supply pressure would quietly stop being a mechanic. Reset instead lets it
+        /// go hungry again over another full patience window, which is the reprieve the players bought.</para>
+        /// </remarks>
+        private void AnswerARageEnding(IReadOnlyList<IBossDomainEvent> bossEvents)
+        {
+            for (var i = 0; i < bossEvents.Count; i++)
+            {
+                if (!(bossEvents[i] is BossEnraged calmed) || calmed.Enraged)
+                {
+                    continue;
+                }
+
+                _rageArms.LowerAll();
+                if (_starvation.Enraged)
+                {
+                    _logger?.Log("[rage] the boss has spent its temper; it stops for now, and starts going hungry "
+                        + "again from here.");
+                    _starvation.Reset();
+                    _pileLastSeen = 0;
+                }
+
                 return;
             }
         }
@@ -1395,14 +1442,17 @@ namespace FalseGods.Plugin
 
             var healthBefore = _boss.Health;
             var phaseBefore = _boss.Phase;
-            var weakWindow = _boss.IsWeakPointExposed;
+            var enraged = _boss.IsEnraged;
 
             _boss.ApplyDamage(raw);
             Present();
 
+            // What the hit was worth after the boss's own rules, next to what the weapon asked for: with the rage
+            // amplifying, "raw" and what actually came off are different numbers and both matter when tuning.
             _logger?.Log(
-                $"[weapon-damage] raw={raw} (game {amount:0.##}) weakWindow={weakWindow} "
-                + $"health {healthBefore}->{_boss.Health} phase {phaseBefore}->{_boss.Phase}{(_boss.IsDead ? " DEAD" : string.Empty)}");
+                $"[weapon-damage] raw={raw} (game {amount:0.##}) enraged={enraged} "
+                + $"health {healthBefore}->{_boss.Health} (-{healthBefore - _boss.Health}) "
+                + $"phase {phaseBefore}->{_boss.Phase}{(_boss.IsDead ? " DEAD" : string.Empty)}");
         }
 
         /// <summary>
@@ -1423,6 +1473,7 @@ namespace FalseGods.Plugin
             _coordinator.Process(bossEvents);
             ClearTheFloorOnRelocation(bossEvents);
             PlayTheOpening(bossEvents);
+            AnswerARageEnding(bossEvents);
             EndTheFightWithTheBoss(bossEvents);
 
             var damageRequests = _boss.DrainDamageRequests();

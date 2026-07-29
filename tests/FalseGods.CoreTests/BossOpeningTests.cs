@@ -198,6 +198,101 @@ namespace FalseGods.CoreTests
         }
 
         [Fact]
+        public void A_hit_on_an_enraged_boss_lands_harder()
+        {
+            var boss = new BossTestHarness().Build(Raging());
+            boss.Spawn(SimVector2.Zero);
+            boss.ApplyDamage(10);
+            Assert.Equal(990, boss.Health);
+
+            boss.SetEnraged(true);
+            boss.ApplyDamage(10);
+
+            Assert.Equal(990 - 30, boss.Health);
+        }
+
+        [Fact]
+        public void A_rage_ends_itself_once_it_has_cost_the_boss_its_share()
+        {
+            var boss = new BossTestHarness().Build(Raging());
+            boss.Spawn(SimVector2.Zero);
+            boss.SetEnraged(true);
+            boss.DrainEvents();
+
+            // 20% of a thousand is two hundred, and each hit is worth thirty while it is angry.
+            for (var i = 0; i < 6; i++)
+            {
+                boss.ApplyDamage(10);
+                Assert.True(boss.IsEnraged, $"the rage ended after only {(i + 1) * 30} spent");
+            }
+
+            boss.ApplyDamage(10); // 210 spent, past the fifth of its health
+            Assert.False(boss.IsEnraged);
+
+            var calmed = BossTestHarness.Single<BossEnraged>(boss.DrainEvents());
+            Assert.False(calmed.Enraged);
+
+            // And the hit after it is worth its ordinary amount again.
+            var before = boss.Health;
+            boss.ApplyDamage(10);
+            Assert.Equal(before - 10, boss.Health);
+        }
+
+        [Fact]
+        public void Each_rage_is_measured_from_where_it_started()
+        {
+            var boss = new BossTestHarness().Build(Raging());
+            boss.Spawn(SimVector2.Zero);
+
+            boss.SetEnraged(true);
+            for (var i = 0; i < 7; i++)
+            {
+                boss.ApplyDamage(10);
+            }
+
+            Assert.False(boss.IsEnraged);
+            boss.DrainEvents();
+
+            // A second rage gets the whole allowance again rather than inheriting the first one's spending.
+            boss.SetEnraged(true);
+            boss.ApplyDamage(10);
+            Assert.True(boss.IsEnraged);
+        }
+
+        [Fact]
+        public void A_rage_that_costs_nothing_never_ends_itself()
+        {
+            var boss = new BossTestHarness().Build();
+            boss.Spawn(SimVector2.Zero);
+            boss.SetEnraged(true);
+
+            for (var i = 0; i < 20; i++)
+            {
+                boss.ApplyDamage(1);
+            }
+
+            Assert.True(boss.IsEnraged);
+        }
+
+        /// <summary>A boss with a thousand health that takes triple while enraged and spends a fifth of itself
+        /// per rage — round numbers so the arithmetic in these tests is readable.</summary>
+        private static BossDefinition Raging() => new BossDefinition(
+            maxHealth: 1000,
+            phaseTwoHealthFraction: 0.5f,
+            moveSpeed: 2f,
+            idleSeconds: 1f,
+            telegraphSeconds: 1f,
+            commitSeconds: 0.5f,
+            recoverSeconds: 1f,
+            weakPointDamageMultiplier: 3,
+            attackDamage: 10,
+            aimedHitRadius: 2f,
+            areaHitRadius: 5f,
+            attacksOnItsOwn: false,
+            rageDamageMultiplier: 3,
+            rageEndsAfterHealthFraction: 0.20f);
+
+        [Fact]
         public void A_boss_that_dies_enraged_is_not_left_enraged()
         {
             var boss = new BossTestHarness().Build();

@@ -43,6 +43,7 @@ namespace FalseGods.Core.Bosses
 
         private bool _spawned;
         private float _beganTime;
+        private int _healthWhenEnraged; // what it had when it lost its temper; see SpendTheRage
         private int _pendingStation = -1; // a station reached but not yet moved to; see AdvanceStations
         private float _activityEnteredTime;
         private float _lastAdvanceTime;
@@ -375,8 +376,16 @@ namespace FalseGods.Core.Bosses
                 return;
             }
 
+            // Two independent reasons a hit can land harder — an exposed weak point, and a boss out of its
+            // routine. A boss that has both is amplified by both; this one has only the second.
             var weakPointHit = IsWeakPointExposed;
-            var amount = weakPointHit ? rawAmount * _definition.WeakPointDamageMultiplier : rawAmount;
+            var multiplier = weakPointHit ? _definition.WeakPointDamageMultiplier : 1;
+            if (IsEnraged)
+            {
+                multiplier *= _definition.RageDamageMultiplier;
+            }
+
+            var amount = rawAmount * multiplier;
             Health = Math.Max(0, Health - amount);
             _events.Add(new BossDamaged(Id, amount, Health, weakPointHit));
 
@@ -394,6 +403,7 @@ namespace FalseGods.Core.Bosses
                 return;
             }
 
+            SpendTheRage();
             AdvanceStations();
 
             if (Phase == BossPhase.One && Health <= _definition.PhaseTwoHealthThreshold)
@@ -423,8 +433,39 @@ namespace FalseGods.Core.Bosses
             }
 
             IsEnraged = enraged;
+            if (enraged)
+            {
+                _healthWhenEnraged = Health;
+            }
+
             _events.Add(new BossEnraged(Id, enraged));
             return true;
+        }
+
+        /// <summary>
+        /// End a rage the boss has paid enough for.
+        /// </summary>
+        /// <remarks>
+        /// A rage is dangerous and, deliberately, also a window: left to run while the players hold the supply cut,
+        /// the boss would be killed through its own amplification and starving it would be strictly better than
+        /// fighting it. So the rage burns out once it has cost the boss its share of the fight, whatever the route
+        /// is doing. Announced like any other change, so both the room and every peer see it end the same way it
+        /// began.
+        /// </remarks>
+        private void SpendTheRage()
+        {
+            if (!IsEnraged || _definition.RageEndsAfterHealthFraction <= 0f)
+            {
+                return;
+            }
+
+            var spent = _healthWhenEnraged - Health;
+            if (spent < _definition.MaxHealth * _definition.RageEndsAfterHealthFraction)
+            {
+                return;
+            }
+
+            SetEnraged(false);
         }
 
         /// <summary>

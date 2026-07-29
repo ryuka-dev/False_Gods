@@ -39,7 +39,9 @@ namespace FalseGods.Core.Bosses
             float hiddenSeconds = DefaultHiddenSeconds,
             float appearSeconds = DefaultAppearSeconds,
             float openingSeconds = 0f,
-            bool attacksOnItsOwn = true)
+            bool attacksOnItsOwn = true,
+            int rageDamageMultiplier = 1,
+            float rageEndsAfterHealthFraction = 0f)
         {
             if (maxHealth <= 0)
             {
@@ -85,12 +87,32 @@ namespace FalseGods.Core.Bosses
             RequirePositive(appearSeconds, nameof(appearSeconds));
             RequireNonNegative(openingSeconds, nameof(openingSeconds));
 
+            if (rageDamageMultiplier < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(rageDamageMultiplier),
+                    rageDamageMultiplier,
+                    "A rage cannot make the boss take less damage than usual; use 1 for no amplification.");
+            }
+
+            if (rageEndsAfterHealthFraction < 0f || rageEndsAfterHealthFraction >= 1f
+                || float.IsNaN(rageEndsAfterHealthFraction))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(rageEndsAfterHealthFraction),
+                    rageEndsAfterHealthFraction,
+                    "A rage that ends only after the boss's whole health bar is not an end; use a fraction below "
+                    + "1, or 0 for a rage that is never cut short.");
+            }
+
             Stations = ValidateItinerary(stations, moveSpeed);
             VanishSeconds = vanishSeconds;
             HiddenSeconds = hiddenSeconds;
             AppearSeconds = appearSeconds;
             OpeningSeconds = openingSeconds;
             AttacksOnItsOwn = attacksOnItsOwn;
+            RageDamageMultiplier = rageDamageMultiplier;
+            RageEndsAfterHealthFraction = rageEndsAfterHealthFraction;
 
             MaxHealth = maxHealth;
             PhaseTwoHealthFraction = phaseTwoHealthFraction;
@@ -196,6 +218,30 @@ namespace FalseGods.Core.Bosses
         /// read by one that does not.</para>
         /// </remarks>
         public bool AttacksOnItsOwn { get; }
+
+        /// <summary>
+        /// How much harder a hit lands while the boss is enraged. 1 leaves rage a threat and nothing else.
+        /// </summary>
+        /// <remarks>
+        /// <b>The other half of what starving it costs.</b> Cutting the supply buys a more dangerous fight, and
+        /// this is what it buys the players in return: while the boss is out of its routine it is also open. That
+        /// makes provoking it a real choice rather than a punishment, and it gives a boss with no weak point of
+        /// its own a window worth waiting for.
+        /// </remarks>
+        public int RageDamageMultiplier { get; }
+
+        /// <summary>
+        /// How much of its full health the boss will lose in one rage before the rage ends itself, as a fraction.
+        /// Zero for a rage that ends only on its own terms.
+        /// </summary>
+        /// <remarks>
+        /// <para>A rage that is also an open window has to be bounded, or the answer to it is simply to hold the
+        /// supply cut and kill the boss through the amplification — which would make starving it strictly better
+        /// than fighting it. Spending enough health ends it whatever the route is doing.</para>
+        /// <para>Measured against <b>full</b> health rather than the health it had when it lost its temper, so
+        /// every rage costs the same slice of the fight wherever it happens.</para>
+        /// </remarks>
+        public float RageEndsAfterHealthFraction { get; }
 
         /// <summary>
         /// An itinerary must start at full health and descend strictly: each station is entered at a lower health
