@@ -1474,7 +1474,10 @@ namespace FalseGods.Plugin
                 // Paid here rather than sent: loot is a local pickup the session layer does not mirror, so every
                 // peer answers the death by paying its own player. A client does the same off the replicated
                 // event, exactly as it plays its own music. See IBossRewardPort.
-                _reward.DropReward(BossStandsAt());
+                //
+                // On the way out rather than on the body — a reward found while leaving, not one to walk back for.
+                // A room that authored nowhere falls back to the corpse, which is worse but never lost.
+                _reward.DropReward(_arenaContent?.RewardDrop ?? BossStandsAt());
 
                 _carriers.Disband();
                 _rageArms.LowerAll();

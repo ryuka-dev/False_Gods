@@ -210,9 +210,10 @@ namespace FalseGods.Plugin
                     _atmosphere.StopBattleMusic();
                     _presence.HideHealthBar();
 
-                    // This peer's own roll, at the body. Not sent and not asked for: the host is paying its own
-                    // player in the same frame, off the same fact.
-                    _reward.DropReward(new ArenaWorldPoint(
+                    // This peer's own roll, on the way out. Not sent and not asked for: the host is paying its own
+                    // player in the same frame, off the same fact, and both read the place out of the room they
+                    // each realized — so the two payouts land together without either being told where.
+                    _reward.DropReward(_loadedArena?.RewardDrop ?? new ArenaWorldPoint(
                         snapshot.Position.X, snapshot.PositionHeight, snapshot.Position.Z));
                 }
             }

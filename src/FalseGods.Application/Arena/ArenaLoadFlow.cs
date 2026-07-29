@@ -66,6 +66,20 @@ namespace FalseGods.Application.Arena
         /// </remarks>
         public const string ExitBlastPath = "GameplayRoot/ExitBlast";
 
+        /// <summary>
+        /// Where a dead boss's payout lands: on the floor of the way out, short of the drop.
+        /// </summary>
+        /// <remarks>
+        /// <para>Not at the body. Loot piled where a boss fell is loot the players have to walk back for, and this
+        /// room's last beat is walking out of it — so the reward sits on the route rather than against it, and is
+        /// the thing they find on the way.</para>
+        /// <para><b>Measured against the exit's own floor, not estimated.</b> Its solid ground runs from the
+        /// doorway to a little past the middle and then funnels into the shaft; pickups are physics objects and
+        /// roll, so a place chosen by eye near the edge is a reward that falls in. A room that authored none pays
+        /// out where the boss died, which is worse but never lost.</para>
+        /// </remarks>
+        public const string RewardDropPath = "GameplayRoot/RewardDrop";
+
         /// <summary>Every child is where carriers set destructibles down for the boss, <b>index-aligned with
         /// <see cref="AnchorGroupPath"/></b>: the boss standing at anchor <i>n</i> is supplied by pile <i>n</i>. A
         /// room that authors fewer piles than anchors reuses the last one, and a room that authors none has no
@@ -347,6 +361,8 @@ namespace FalseGods.Application.Arena
     /// <param name="StartTriggerRadius">How far that sphere reaches, in metres. Zero when there is no trigger.</param>
     /// <param name="ExitBlast">Where the barrel that opens the way out comes down, or null when the room authored
     /// no such place — in which case the exit stays closed, which is the safe way to be wrong.</param>
+    /// <param name="RewardDrop">Where a dead boss's payout lands, or null when the room authored no such place —
+    /// in which case it lands on the body instead.</param>
     public sealed record LoadedArena(
         ArenaWorldPoint Origin,
         ArenaWorldPoint PlayerSpawn,
@@ -359,7 +375,8 @@ namespace FalseGods.Application.Arena
         IReadOnlyList<ArenaWorldPoint> CratePiles,
         ArenaWorldPoint? StartTrigger,
         float StartTriggerRadius,
-        ArenaWorldPoint? ExitBlast);
+        ArenaWorldPoint? ExitBlast,
+        ArenaWorldPoint? RewardDrop);
 
     /// <summary>The outcome of <see cref="ArenaLoadFlow.Realize"/>: the peer's own validated
     /// <see cref="ArenaManifest"/> (the <c>ArenaReady</c> payload) and the realized arena, or the fail-closed
@@ -499,6 +516,7 @@ namespace FalseGods.Application.Arena
                 {
                     playerPath, bossPath, BossRoomContent.BodyPath,
                     BossRoomContent.StartTriggerPath, BossRoomContent.ExitBlastPath,
+                    BossRoomContent.RewardDropPath,
                 },
                 new[]
                 {
@@ -580,7 +598,8 @@ namespace FalseGods.Application.Arena
                 CollectGroup(realized.Markers, BossRoomContent.CratePileGroupPath),
                 ReadStartTrigger(realized.Markers, out var triggerRadius),
                 triggerRadius,
-                FindMarker(realized.Markers, BossRoomContent.ExitBlastPath)?.WorldPosition);
+                FindMarker(realized.Markers, BossRoomContent.ExitBlastPath)?.WorldPosition,
+                FindMarker(realized.Markers, BossRoomContent.RewardDropPath)?.WorldPosition);
             Stage = ArenaLoadStage.Realized;
             return new ArenaRealizeResult(true, null, Manifest, Arena);
         }
