@@ -379,13 +379,16 @@ namespace FalseGods.Core.Bosses
             // Two independent reasons a hit can land harder — an exposed weak point, and a boss out of its
             // routine. A boss that has both is amplified by both; this one has only the second.
             var weakPointHit = IsWeakPointExposed;
-            var multiplier = weakPointHit ? _definition.WeakPointDamageMultiplier : 1;
+            var amount = rawAmount * (weakPointHit ? _definition.WeakPointDamageMultiplier : 1);
             if (IsEnraged)
             {
-                multiplier *= _definition.RageDamageMultiplier;
+                // Rounded away from zero rather than truncated, so a rage never leaves a hit worth less than it
+                // would have been without one, and the smallest hits still gain something. Health is whole
+                // numbers; the amplification does not have to be.
+                amount = (int)Math.Round(amount * (double)_definition.RageDamageMultiplier,
+                    MidpointRounding.AwayFromZero);
             }
 
-            var amount = rawAmount * multiplier;
             Health = Math.Max(0, Health - amount);
             _events.Add(new BossDamaged(Id, amount, Health, weakPointHit));
 

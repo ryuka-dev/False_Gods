@@ -1,3 +1,4 @@
+using System;
 using FalseGods.Core.Bosses;
 using FalseGods.Core.Bosses.Events;
 using FalseGods.Core.Simulation;
@@ -212,6 +213,34 @@ namespace FalseGods.CoreTests
         }
 
         [Fact]
+        public void A_rage_may_amplify_by_a_fraction_and_still_costs_whole_health()
+        {
+            // The shipped boss takes two and a half times, not three: health is whole numbers, the amplification
+            // need not be. Rounded away from zero, so a rage never leaves a hit worth less than it would have been
+            // without one — 5 x 2.5 is 13, not 12.
+            var boss = new BossTestHarness().Build(Raging(rageDamageMultiplier: 2.5f));
+            boss.Spawn(SimVector2.Zero);
+            boss.SetEnraged(true);
+
+            boss.ApplyDamage(10);
+            Assert.Equal(1000 - 25, boss.Health);
+
+            boss.ApplyDamage(5);
+            Assert.Equal(1000 - 25 - 13, boss.Health);
+
+            // And the smallest hit there is still gains from the rage rather than being rounded back to itself.
+            boss.ApplyDamage(1);
+            Assert.Equal(1000 - 25 - 13 - 3, boss.Health);
+        }
+
+        [Fact]
+        public void A_rage_cannot_make_the_boss_tougher()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => Raging(rageDamageMultiplier: 0.9f));
+            Assert.Throws<ArgumentOutOfRangeException>(() => Raging(rageDamageMultiplier: float.NaN));
+        }
+
+        [Fact]
         public void A_rage_ends_itself_once_it_has_cost_the_boss_its_share()
         {
             var boss = new BossTestHarness().Build(Raging());
@@ -276,7 +305,7 @@ namespace FalseGods.CoreTests
 
         /// <summary>A boss with a thousand health that takes triple while enraged and spends a fifth of itself
         /// per rage — round numbers so the arithmetic in these tests is readable.</summary>
-        private static BossDefinition Raging() => new BossDefinition(
+        private static BossDefinition Raging(float rageDamageMultiplier = 3f) => new BossDefinition(
             maxHealth: 1000,
             phaseTwoHealthFraction: 0.5f,
             moveSpeed: 2f,
@@ -289,7 +318,7 @@ namespace FalseGods.CoreTests
             aimedHitRadius: 2f,
             areaHitRadius: 5f,
             attacksOnItsOwn: false,
-            rageDamageMultiplier: 3,
+            rageDamageMultiplier: rageDamageMultiplier,
             rageEndsAfterHealthFraction: 0.20f);
 
         [Fact]

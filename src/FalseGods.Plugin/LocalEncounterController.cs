@@ -160,10 +160,18 @@ namespace FalseGods.Plugin
         /// </remarks>
         private const float FutilitySeconds = 30f;
 
-        /// <summary>How much harder a hit lands while the boss is enraged, and how much of its full health it
-        /// will lose in one rage before the rage burns out. First-pass numbers, tuned in game: the window has to
-        /// be worth provoking and short enough that holding the supply cut is not simply the way to win.</summary>
-        private const int RageDamageMultiplier = 3;
+        /// <summary>
+        /// How much harder a hit lands while the boss is enraged, and how much of its full health it will lose in
+        /// one rage before the rage burns out. Tuned in game: the window has to be worth provoking and short
+        /// enough that holding the supply cut is not simply the way to win.
+        /// </summary>
+        /// <remarks>
+        /// <b>These two do different jobs, and it is easy to mistake one for the other.</b> The fraction caps what
+        /// a rage is <i>worth</i> — a party takes the same fifth of the boss off however hard each hit lands. The
+        /// multiplier only decides how quickly they can collect it. Lowering it from three makes a rage a longer
+        /// window rather than a smaller prize, so it is the burst that softens, not the reward.
+        /// </remarks>
+        private const float RageDamageMultiplier = 2.5f;
 
         private const float RageCostsHealthFraction = 0.20f;
 

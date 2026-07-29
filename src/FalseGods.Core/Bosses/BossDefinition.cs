@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace FalseGods.Core.Bosses
@@ -40,7 +40,7 @@ namespace FalseGods.Core.Bosses
             float appearSeconds = DefaultAppearSeconds,
             float openingSeconds = 0f,
             bool attacksOnItsOwn = true,
-            int rageDamageMultiplier = 1,
+            float rageDamageMultiplier = 1f,
             float rageEndsAfterHealthFraction = 0f)
         {
             if (maxHealth <= 0)
@@ -87,7 +87,7 @@ namespace FalseGods.Core.Bosses
             RequirePositive(appearSeconds, nameof(appearSeconds));
             RequireNonNegative(openingSeconds, nameof(openingSeconds));
 
-            if (rageDamageMultiplier < 1)
+            if (rageDamageMultiplier < 1f || float.IsNaN(rageDamageMultiplier))
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(rageDamageMultiplier),
@@ -228,7 +228,7 @@ namespace FalseGods.Core.Bosses
         /// makes provoking it a real choice rather than a punishment, and it gives a boss with no weak point of
         /// its own a window worth waiting for.
         /// </remarks>
-        public int RageDamageMultiplier { get; }
+        public float RageDamageMultiplier { get; }
 
         /// <summary>
         /// How much of its full health the boss will lose in one rage before the rage ends itself, as a fraction.
