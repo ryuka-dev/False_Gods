@@ -965,6 +965,9 @@ namespace FalseGods.Plugin
 
             _log.Log($"[crate] {made} made at the first production point while the level was still loading, so the "
                 + "first one of the fight is not the first one ever built.");
+
+            // The village costs the same on its first one, and the fight asks for six of them at once.
+            _boss.WarmTheVillage(at);
         }
 
         private void Raise(IFalseGodsIntegration? integration, CompositionRole role)

@@ -26,11 +26,13 @@ namespace FalseGods.Application.Combat
         /// </summary>
         /// <remarks>
         /// The first carrier of a fight is asked for on the frame the fight starts, which is also the frame the
-        /// room begins producing and the boss stops roaring — three things at once, one of them reaching into the
-        /// player's install for a creature it has not loaded yet. Doing it while the boss is still waiting costs
-        /// nothing: there is nothing else happening then.
+        /// room begins producing and the boss stops roaring. Fetching the creature's definition is only half of
+        /// that cost — the first one actually <i>made</i> pays for the instantiation as well — so one is made here
+        /// and thrown away. Called while the level is still generating, where a spent frame costs nothing.
         /// </remarks>
-        void Warm();
+        /// <param name="at">Where the practice one is made — a place the room already puts things, so a creature
+        /// that lingers a frame lingers somewhere harmless.</param>
+        void Warm(ArenaWorldPoint at);
 
         /// <summary>How many carriers are alive and working the route.</summary>
         int Working { get; }

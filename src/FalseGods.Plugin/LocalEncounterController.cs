@@ -381,6 +381,10 @@ namespace FalseGods.Plugin
         /// the crate mechanic; what it means for the boss is settled here.</summary>
         public void CratesHitSomebody() => _cratesHitSomebody = true;
 
+        /// <summary>Make one villager ahead of time, so the first of the route is not the first ever built. The
+        /// Composition Root asks for this while the level is still generating.</summary>
+        public void WarmTheVillage(ArenaWorldPoint at) => _carriers.Warm(at);
+
         public void ExplosionAt(ArenaWorldPoint at, bool pickedOutOfTheAir) =>
             BossTakesItsShareOfTheBlast(at, pickedOutOfTheAir);
 
@@ -455,7 +459,6 @@ namespace FalseGods.Plugin
                 _logger?.Log("[crate] destructible content loaded ahead of the fight.");
             }
 
-            _carriers.Warm();
 
             // ── The arena may already be here. A hijacked level load realized our arena AS the level, through
             // this same load flow — same content hash, same parity check, same borrowed materials — so the

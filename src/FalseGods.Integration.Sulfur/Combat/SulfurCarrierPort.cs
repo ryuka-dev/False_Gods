@@ -139,18 +139,40 @@ namespace FalseGods.Integration.Sulfur.Combat
             _announceSetDown = announceSetDown;
         }
 
-        public void Warm()
+        public void Warm(ArenaWorldPoint at) => MakeOneAndThrowItAway(at);
+
+        /// <summary>
+        /// Make one villager and destroy it, so the first real one is not the first one ever built.
+        /// </summary>
+        /// <remarks>
+        /// Fetching the definition pulls the creature out of the player's install; making one pays for everything
+        /// that happens after that — the prefab instantiated, its behaviour tree and agent woken, its material
+        /// handed to the card — and that was the frame still landing on the first carrier of the fight. It is
+        /// thrown away rather than kept because a carrier is only a carrier once it is on the route, and the route
+        /// does not exist yet.
+        /// </remarks>
+        private async void MakeOneAndThrowItAway(ArenaWorldPoint at)
         {
             try
             {
-                // Asking the game for the definition is what pulls the creature out of the player's install; the
-                // result is not needed here, only the fact that it has happened.
-                CarrierUnit.GetAsset();
+                var definition = CarrierUnit.GetAsset();
+                if (definition == null)
+                {
+                    return;
+                }
+
+                var unit = await definition.SpawnUnitAsync(_host, new Vector3(at.X, at.Y, at.Z));
+                if (unit != null)
+                {
+                    UnityEngine.Object.Destroy(unit.gameObject);
+                    _logger?.Log("[carrier] one villager was made and dismissed while the level was still "
+                        + "loading, so the first of the route is not the first ever built.");
+                }
             }
             catch (Exception exception)
             {
-                _logger?.LogWarning($"[carrier] the village could not be fetched ahead of time "
-                    + $"({exception.Message}); the first carrier will fetch it instead.");
+                _logger?.LogWarning($"[carrier] the village could not be warmed ahead of time "
+                    + $"({exception.Message}); the first carrier will pay for it instead.");
             }
         }
 
