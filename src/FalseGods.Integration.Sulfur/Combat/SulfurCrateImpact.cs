@@ -1,4 +1,4 @@
-#nullable disable
+﻿#nullable disable
 
 using System;
 using FalseGods.Application.Combat;
@@ -53,6 +53,16 @@ namespace FalseGods.Integration.Sulfur.Combat
             _knockbackLift = knockbackLift;
             _logger = logger;
         }
+
+        /// <summary>
+        /// Told whenever something the boss threw actually hurt a player.
+        /// </summary>
+        /// <remarks>
+        /// The boss has no other way to know its barrage is working. A route that is running and a pile that is
+        /// emptying both say it is <i>throwing</i>; whether any of it is reaching anybody is a different question,
+        /// and the only place the answer exists is here.
+        /// </remarks>
+        public Action Hit { get; set; }
 
         public bool Contact(ArenaWorldPoint at)
         {
@@ -138,6 +148,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // reduces by its own armour/resistance rules.
                 player.playerUnit.ReceiveDamage(
                     _damage, DamageTypes.Physics, new CrateDamager(player.transform), Hitmesh.Data.Default);
+                Hit?.Invoke();
             }
             catch (Exception exception)
             {

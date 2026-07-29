@@ -28,12 +28,19 @@
     public sealed class StarvationWatch
     {
         private float _sinceDelivery;
+        private float _sinceHit;
 
         /// <summary>Whether the boss is currently answering being starved.</summary>
         public bool Enraged { get; private set; }
 
         /// <summary>How long since the last load reached the boss. Diagnostic.</summary>
         public float SinceDelivery => _sinceDelivery;
+
+        /// <summary>How long since anything the boss threw actually hurt somebody. Diagnostic.</summary>
+        public float SinceHit => _sinceHit;
+
+        /// <summary>Which of the two reasons provoked the boss, once it is enraged.</summary>
+        public StarvationReason Reason { get; private set; }
 
         /// <summary>
         /// Advance the watch one frame and report whether the boss's state changed.
@@ -43,33 +50,43 @@
         /// <param name="patienceSeconds">How long the boss will go without a delivery before answering it.</param>
         /// <param name="emergencyBandAlive">How many of the band summoned by the last rage are still standing.
         /// Only that band counts — the ordinary waves are a different fight going on at the same time.</param>
+        /// <param name="hitSomebody">Whether something the boss threw hurt a player this frame.</param>
+        /// <param name="futilitySeconds">How long the boss will go on throwing without hitting anybody before it
+        /// gives up on throwing. Zero switches this reason off.</param>
         public StarvationChange Advance(
-            float deltaSeconds, bool deliveryArrived, float patienceSeconds, int emergencyBandAlive)
+            float deltaSeconds,
+            bool deliveryArrived,
+            float patienceSeconds,
+            int emergencyBandAlive,
+            bool hitSomebody = false,
+            float futilitySeconds = 0f)
         {
-            if (deliveryArrived)
-            {
-                _sinceDelivery = 0f;
-            }
-            else
-            {
-                _sinceDelivery += deltaSeconds > 0f ? deltaSeconds : 0f;
-            }
+            var frame = deltaSeconds > 0f ? deltaSeconds : 0f;
+            _sinceDelivery = deliveryArrived ? 0f : _sinceDelivery + frame;
+            _sinceHit = hitSomebody ? 0f : _sinceHit + frame;
 
             var supplied = _sinceDelivery < patienceSeconds;
 
+            // The other way a barrage stops being a barrage. Being supplied and throwing all of it at players who
+            // simply are not there any more — behind cover, up on a terrace, too far to reach — leaves the boss
+            // doing nothing while looking busy, which the supply reason cannot see because the route is running.
+            var landing = futilitySeconds <= 0f || _sinceHit < futilitySeconds;
+
             if (!Enraged)
             {
-                if (supplied)
+                if (supplied && landing)
                 {
                     return StarvationChange.Nothing;
                 }
 
                 Enraged = true;
+                Reason = supplied ? StarvationReason.NothingLanding : StarvationReason.NothingArriving;
                 return StarvationChange.Enraged;
             }
 
-            // Being supplied again AND the band it summoned gone: both, or the rage is bought off too cheaply.
-            if (supplied && emergencyBandAlive <= 0)
+            // Getting out takes everything that provoked it undone AND the band it summoned dead — either alone
+            // and the rage is bought off too cheaply.
+            if (supplied && landing && emergencyBandAlive <= 0)
             {
                 Enraged = false;
                 return StarvationChange.Calmed;
@@ -83,7 +100,18 @@
         {
             Enraged = false;
             _sinceDelivery = 0f;
+            _sinceHit = 0f;
         }
+    }
+
+    /// <summary>Why the boss stopped waiting.</summary>
+    public enum StarvationReason
+    {
+        /// <summary>Nothing is reaching it — the route has been cut.</summary>
+        NothingArriving = 0,
+
+        /// <summary>Plenty is reaching it and none of it is landing on anybody.</summary>
+        NothingLanding = 1,
     }
 
     /// <summary>What <see cref="StarvationWatch.Advance"/> just decided.</summary>

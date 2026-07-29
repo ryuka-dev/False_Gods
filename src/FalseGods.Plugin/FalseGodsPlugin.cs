@@ -186,10 +186,12 @@ namespace FalseGods.Plugin
                 + "System.");
 
             _log = new BepInExLogger(Logger);
-            var cratePort = new SulfurThrownCratePort(
-                _log,
-                new SulfurCrateImpact(
-                    CrateHitDamage, CrateContactRadius, CrateSplashRadius, CrateKnockbackSpeed, CrateKnockbackLift, _log));
+            // Held because the boss needs to hear about a hit: a route that runs and a pile that empties both say
+            // it is throwing, and only the impact knows whether any of it is reaching anybody.
+            var crateImpact = new SulfurCrateImpact(
+                CrateHitDamage, CrateContactRadius, CrateSplashRadius, CrateKnockbackSpeed, CrateKnockbackLift, _log);
+            crateImpact.Hit = () => _boss?.CratesHitSomebody();
+            var cratePort = new SulfurThrownCratePort(_log, crateImpact);
             _crates = cratePort;
 
             // A destructible that a player destroyed is the one thing about a crate the other peers cannot work

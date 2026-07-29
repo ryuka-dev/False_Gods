@@ -136,6 +136,18 @@ namespace FalseGods.Plugin
         /// </remarks>
         private const float StarvationRoundTrips = 1.5f;
 
+        /// <summary>
+        /// How long the boss will throw without hitting anybody before it stops bothering.
+        /// </summary>
+        /// <remarks>
+        /// The second way a barrage stops being one. Supply running and a pile emptying both say the boss is
+        /// <i>throwing</i>; players who have found cover, climbed out of reach, or simply learned the arc make all
+        /// of that worth nothing, and the supply watch cannot see it because the route is working perfectly. Half
+        /// a minute is long enough that a lull in the fighting is not an insult and short enough that a party
+        /// which has solved the barrage does not get to stand there.
+        /// </remarks>
+        private const float FutilitySeconds = 30f;
+
         /// <summary>How many go in the band a starved boss summons. Enough to be a job of its own, since killing
         /// them is half of what it takes to calm it.</summary>
         private const int EmergencyBandSize = 4;
@@ -261,6 +273,10 @@ namespace FalseGods.Plugin
         private int _produced;
         private int _barrelsMade;
 
+        // Whether anything the boss threw hurt a player since the last time the watch was asked. Collected here
+        // because a hit happens on the crate's own clock, not the encounter's.
+        private bool _cratesHitSomebody;
+
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
         private BossPresentation? _presentation;
@@ -358,6 +374,10 @@ namespace FalseGods.Plugin
         /// </summary>
         /// <param name="pickedOutOfTheAir">Whether a player shot this barrel down while the boss's throw was
         /// still carrying it — the trick this fight rewards.</param>
+        /// <summary>Told that something the boss threw hurt a player. Wired by the Composition Root, which owns
+        /// the crate mechanic; what it means for the boss is settled here.</summary>
+        public void CratesHitSomebody() => _cratesHitSomebody = true;
+
         public void ExplosionAt(ArenaWorldPoint at, bool pickedOutOfTheAir) =>
             BossTakesItsShareOfTheBlast(at, pickedOutOfTheAir);
 
@@ -1154,17 +1174,25 @@ namespace FalseGods.Plugin
             var delivered = onThePile > _pileLastSeen;
             _pileLastSeen = onThePile;
 
+            var hit = _cratesHitSomebody;
+            _cratesHitSomebody = false;
+
             var change = _starvation.Advance(
                 deltaSeconds,
                 deliveryArrived: delivered,
                 patienceSeconds: _measuredRoundTripSeconds * StarvationRoundTrips,
-                emergencyBandAlive: _emergencyMinions.Alive);
+                emergencyBandAlive: _emergencyMinions.Alive,
+                hitSomebody: hit,
+                futilitySeconds: FutilitySeconds);
 
             switch (change)
             {
                 case StarvationChange.Enraged:
-                    _logger?.Log($"[rage] nothing delivered for {_starvation.SinceDelivery:0.#}s: the boss comes at "
-                        + $"you. Summoning {EmergencyBandSize}; it settles when they are dead AND the route runs.");
+                    _logger?.Log(_starvation.Reason == StarvationReason.NothingLanding
+                        ? $"[rage] nothing it threw has hurt anybody for {_starvation.SinceHit:0.#}s: the boss "
+                            + $"comes at you itself. Summoning {EmergencyBandSize}."
+                        : $"[rage] nothing delivered for {_starvation.SinceDelivery:0.#}s: the boss comes at "
+                            + $"you. Summoning {EmergencyBandSize}; it settles when they are dead AND the route runs.");
                     // The boss holds the rage; the supply watch only decided it. Everything that has to show the
                     // same boss — this machine's own look, and every client's — reads it from there.
                     _boss.SetEnraged(true);

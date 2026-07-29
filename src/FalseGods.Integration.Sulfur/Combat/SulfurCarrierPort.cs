@@ -437,14 +437,14 @@ namespace FalseGods.Integration.Sulfur.Combat
             carrier.Fetch = source;
             carrier.FetchPile = CratePileId.Source(carrier.SourceIndex % sources.Count);
 
+            // Cargo lying about is always collected first, however far away it is and from the carrier's very
+            // first errand. It used to be taken only when it happened to be nearer than the production point,
+            // which meant a floor strewn with spilled loads stayed strewn while the village walked past it to
+            // make more — the room filling up with cargo nobody would ever come back for. A production point
+            // will still be there in a minute; what is on the floor is what the fight actually left behind.
             var here = carrier.Unit != null ? carrier.Unit.transform.position : Vector3.zero;
             var from = new ArenaWorldPoint(here.x, here.y, here.z);
-            if (!_crates.TryFindNearestResting(CratePileId.Loose, from, out var spilled))
-            {
-                return;
-            }
-
-            if (Flat(spilled, from) < Flat(source, from))
+            if (_crates.TryFindNearestResting(CratePileId.Loose, from, out var spilled))
             {
                 carrier.Fetch = spilled;
                 carrier.FetchPile = CratePileId.Loose;

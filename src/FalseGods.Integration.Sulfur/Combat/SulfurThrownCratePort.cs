@@ -128,6 +128,14 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </remarks>
         private const float LandingSpeedKeptAlong = 0.5f;
 
+        /// <summary>What one of these weighs, and how it settles — the game's own values for its barrels and
+        /// crates, which is what makes shoving one feel like shoving one.</summary>
+        private const float CargoMass = 800f;
+
+        private const float CargoLinearDamping = 0.1f;
+
+        private const float CargoAngularDamping = 0.05f;
+
         private const float LandingSpeedKeptDown = 0.05f;
 
         /// <summary>How much the landing tumbles, taken across the direction of travel so it rolls the way it was
@@ -1348,6 +1356,14 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var body = template.AddComponent<Rigidbody>();
                 body.useGravity = false;
                 body.isKinematic = true;
+
+                // The game's own numbers for one of these. Left at the engine's default of 1 they weigh nothing:
+                // a player walking into a barrel sent it skating across the room, where in the game leaning on one
+                // is work. It also puts them over the weight an explosion will shove (measured: the game does not
+                // push a body of 180 or more), which is again what the game's own barrels do.
+                body.mass = CargoMass;
+                body.linearDamping = CargoLinearDamping;
+                body.angularDamping = CargoAngularDamping;
 
                 // Breakable is a Unit; the definition goes on the field SetStats actually reads (it reads the
                 // component's own unitSO, not the argument it is passed — a quirk of the game's SetStats).
