@@ -1,4 +1,4 @@
-// Addressables / Unity interop (none of those APIs carry nullable annotations), so this file opts out of the
+﻿// Addressables / Unity interop (none of those APIs carry nullable annotations), so this file opts out of the
 // nullable-reference context like the other game-facing implementations.
 #nullable disable
 
@@ -68,6 +68,13 @@ namespace FalseGods.Integration.Sulfur.Arena
         private GameObject _doorway;
         private AssetReference _donor;
 
+        // Where the door will stand, worked out when the room is found rather than when the boss dies. Measured
+        // once, at the start of the level, because that is when the hierarchy still says what it was authored to
+        // say - see FindTheDoorway.
+        private bool _doorwayKnown;
+        private Vector3 _doorwayAt;
+        private Quaternion _doorwayFacing;
+
         /// <param name="walkThrough">Called when a player walks into the door. What that <i>does</i> is not this
         /// class's business — it says a player asked to go, and whoever owns the session decides the rest.</param>
         public SulfurCaveBossPortal(Action walkThrough, ILogger logger = null)
@@ -92,11 +99,9 @@ namespace FalseGods.Integration.Sulfur.Arena
                 return;
             }
 
-            if (_boss != null || _donor != null)
+            if (_boss != null || _donor != null || _doorwayKnown)
             {
-                Release(); // the level that held them is gone; let go before following another
-                _boss = null;
-                _doorway = null;
+                Forget(); // the level that held them is gone; let go before following another
             }
 
             CousinHelper helper;
@@ -122,7 +127,7 @@ namespace FalseGods.Integration.Sulfur.Arena
             _watched = helper;
             _boss = boss;
             boss.onDeath = (Unit.OnDeath)Delegate.Combine(boss.onDeath, new Unit.OnDeath(BossDied));
-            _logger?.Log("[cave-door] the cave boss is in this level; a way through will open where it falls.");
+            FindTheDoorway(helper, boss);
         }
 
         /// <summary>Drop everything held for a level that is going away. Safe to call twice.</summary>
@@ -135,8 +140,55 @@ namespace FalseGods.Integration.Sulfur.Arena
 
             _boss = null;
             _watched = null;
-            _doorway = null; // owned by the room, which the level destroys with everything else in it
+            _doorwayKnown = false;
+            if (_doorway != null)
+            {
+                // Ours to destroy: it stands free in the level rather than under the room, so that nothing about
+                // where it ends up depends on the boss still being parented where it was authored.
+                UnityEngine.Object.Destroy(_doorway);
+            }
+
+            _doorway = null;
             Release();
+        }
+
+        /// <summary>
+        /// Work out where the door will stand, while the boss is still alive.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Now rather than at the death, because the answer stops being available.</b> The boss is a child
+        /// of its room in the authored prefab, but by the time it dies it has been re-parented out from under it —
+        /// measured, after asking for its room at the death and being told it had none. Asking at the start of the
+        /// level gets the authored hierarchy, and the room does not move afterwards.</para>
+        /// <para><b>The offset is safe against the generator turning the room around</b>: that room is marked
+        /// <c>doNotFlip</c>, so the mirroring the generator does to other chunks never happens to this one and a
+        /// left-hand wall stays the left-hand wall.</para>
+        /// <para>Two ways of asking, because the first is the authored truth and the second is the game's own
+        /// fallback for exactly this — which room is a thing standing here in. Whichever answered is logged, so a
+        /// build where the hierarchy changes again says so instead of quietly putting a door nowhere.</para>
+        /// </remarks>
+        private void FindTheDoorway(CousinHelper helper, Unit boss)
+        {
+            var room = helper.GetComponentInParent<Room>();
+            var how = "its own room in the hierarchy";
+            if (room == null)
+            {
+                room = Room.FindClosestRoom(boss.transform.position, null, 10f);
+                how = "the closest room to where it stands";
+            }
+
+            if (room == null)
+            {
+                _logger?.LogWarning("[cave-door] the cave boss is in this level but its room cannot be found, so "
+                    + "no way through will open. The room's own exit still works.");
+                return;
+            }
+
+            _doorwayAt = room.transform.TransformPoint(DoorwayPosition);
+            _doorwayFacing = room.transform.rotation * Quaternion.Euler(DoorwayRotation);
+            _doorwayKnown = true;
+            _logger?.Log($"[cave-door] the cave boss is in this level ({how}); a way through will open at "
+                + $"{_doorwayAt} when it falls.");
         }
 
         private void BossDied(Unit unit)
@@ -146,20 +198,17 @@ namespace FalseGods.Integration.Sulfur.Arena
                 return;
             }
 
-            var room = _watched != null ? _watched.GetComponentInParent<Room>() : null;
-            if (room == null)
+            if (!_doorwayKnown)
             {
-                _logger?.LogWarning("[cave-door] the cave boss is not inside a room, so there is nowhere to put a "
-                    + "door; none opened.");
+                _logger?.LogWarning("[cave-door] the cave boss is dead, but there was nowhere to put a door; none "
+                    + "opened.");
                 return;
             }
 
             try
             {
                 _doorway = new GameObject("FalseGodsCaveDoor");
-                _doorway.transform.SetParent(room.transform, worldPositionStays: false);
-                _doorway.transform.localPosition = DoorwayPosition;
-                _doorway.transform.localRotation = Quaternion.Euler(DoorwayRotation);
+                _doorway.transform.SetPositionAndRotation(_doorwayAt, _doorwayFacing);
 
                 var volume = _doorway.AddComponent<BoxCollider>();
                 volume.isTrigger = true;
