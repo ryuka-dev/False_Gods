@@ -100,6 +100,35 @@ namespace FalseGods.UnityRuntime.Presentation
         private const float RoarShakeDegrees = 7f;     // peak Z shake
         private const float RoarShakeFrequency = 9f;   // shakes per second
 
+        // Being hit. Vanilla does this with a shader flash on its creature material and a transform clip called
+        // TakeDamage - there is no second drawing to switch to, the whole creature is one picture that gets
+        // deformed (measured: every curve in its clips is a transform curve). So this is the same two things:
+        // a white-out, and a short flinch of the same sprite.
+        //
+        // The white-out has to be pushed PAST white to be seen at all. The body quad tints its texture by
+        // multiplying, and a textured boss already sits at white - so a "flash white" that sets white changes
+        // nothing whatsoever, which is exactly what it did. Multiplying up saturates the bright majority of the
+        // drawing while its dark outlines hold, which reads as the hit flash it was meant to be.
+        private const float HitFlashSeconds = 0.12f;
+        private const float HitFlashBrightness = 2.6f;
+
+        // The flinch: a quick squat and a rock, gone almost as fast as the flash. Small on purpose - it fires on
+        // every bullet of an automatic weapon, so anything with real travel in it turns the boss into jelly.
+        private const float HitFlinchSeconds = 0.16f;
+        private const float HitFlinchSquash = 0.09f;    // fraction of body height lost at the peak
+        private const float HitFlinchDegrees = 4f;      // peak Z rock
+
+        // Dying: the boss goes down where it stood, rocking, and keeps going until it is under the floor. Its
+        // relocation already sinks it and vanilla's own retirement for a body is to lower it through the ground,
+        // so death is the same gesture played slower, further, and only once.
+        private const float DeathSinkSeconds = 2.4f;
+        private const float DeathRockDegrees = 14f;
+        private const float DeathRockFrequency = 1.1f;
+
+        // How far past its own height the corpse goes, so nothing is left poking out of the floor whatever the
+        // room authored for its size.
+        private const float DeathSinkClearance = 1.5f;
+
         private readonly ILogger _logger;
         private readonly float _floorY;
         private readonly Shader _shader;
@@ -127,6 +156,8 @@ namespace FalseGods.UnityRuntime.Presentation
         private PresentationState _state;
         private bool _hasState;
         private float _flashTimer;
+        private float _flinchTimer;
+        private float _deathElapsed;
         private bool _flashWeakPoint;
         private float _phasePulseTimer;
         private float _appearPulseTimer;
@@ -326,7 +357,8 @@ namespace FalseGods.UnityRuntime.Presentation
                     _logger?.Log($"[cue] PhaseTransition -> phaseVisual={e.PhaseVisualId}");
                     break;
                 case BossHit e:
-                    _flashTimer = 0.12f;
+                    _flashTimer = HitFlashSeconds;
+                    _flinchTimer = HitFlinchSeconds;
                     _flashWeakPoint = e.WeakPointHit;
                     break;
                 case BossMoved e:
@@ -350,6 +382,7 @@ namespace FalseGods.UnityRuntime.Presentation
                     break;
                 case BossDefeated _:
                     _dead = true;
+                    _deathElapsed = 0f;
                     // Death can arrive mid-telegraph (the sim just stops; it emits no attack-cancel event), so clear
                     // the live telegraph here or it would blink on over the corpse.
                     _telegraphActive = false;
@@ -408,7 +441,10 @@ namespace FalseGods.UnityRuntime.Presentation
                 // Nothing to shoot while it is underground, the way the vanilla boss switches its main collider
                 // off for the same window. The simulation refuses the damage regardless; this is so a shot passes
                 // through the ground rather than stopping on a boss nobody can see.
-                var reachable = _state.Activity != BossVisualActivity.Hidden;
+                // Off while it is underground — during a relocation, and for good once it has gone down dead.
+                // The simulation refuses the damage regardless; this is so a shot passes through the ground
+                // rather than stopping on a boss nobody can see, and so nobody walks into a buried corpse.
+                var reachable = _state.Activity != BossVisualActivity.Hidden && !IsBuried();
                 if (_collisionBody.activeSelf != reachable)
                 {
                     _collisionBody.SetActive(reachable);
@@ -456,9 +492,18 @@ namespace FalseGods.UnityRuntime.Presentation
                 _roarTimer -= deltaSeconds;
             }
 
+            if (_flinchTimer > 0f)
+            {
+                _flinchTimer -= deltaSeconds;
+            }
+
             if (_dead)
             {
-                _bodyBillboard.localScale = Vector3.Lerp(_bodyBillboard.localScale, new Vector3(1f, 0.15f, 1f), deltaSeconds * 2f);
+                // It goes down where it stood rather than folding up on the spot: the body keeps its shape and
+                // the floor takes it, which is both the game's own way of retiring one and the only ending that
+                // reads at a distance.
+                _deathElapsed += deltaSeconds;
+                _bodyBillboard.localScale = Vector3.one;
             }
             else
             {
@@ -467,7 +512,9 @@ namespace FalseGods.UnityRuntime.Presentation
 
                 // The roar rides on top of whatever the pulses are doing: it rears the body up and pulls it in
                 // at the waist, easing out so the loudest part is the start.
-                var rear = RoarRise() * RoarRearUp;
+                // A hit knocks the body down into itself for an instant. Subtracted from the roar's rear-up so
+                // the two can happen at once - a boss shot mid-roar flinches without the pose fighting itself.
+                var rear = (RoarRise() * RoarRearUp) - (FlinchDrop() * HitFlinchSquash);
                 _bodyBillboard.localScale = new Vector3(
                     pulse * (1f - rear * RoarSquashRatio),
                     pulse * (1f + rear),
@@ -488,6 +535,14 @@ namespace FalseGods.UnityRuntime.Presentation
 
             // The roar's shake goes on the same axis, for the same reason: applied after facing, so it survives
             // whichever facing mode chose the orientation.
+            var flinch = FlinchDrop();
+            if (flinch > 0.001f)
+            {
+                // Rocked back off the same axis the roar shakes on, so a hit lands visibly even when the boss is
+                // doing something else. One direction, not a wobble: it is a knock, not a shiver.
+                _bodyBillboard.rotation *= Quaternion.Euler(0f, 0f, HitFlinchDegrees * flinch);
+            }
+
             var roar = RoarRise();
             if (roar > 0.001f)
             {
@@ -540,6 +595,12 @@ namespace FalseGods.UnityRuntime.Presentation
         /// </summary>
         private void RelocationOffset(out float sink, out float tilt)
         {
+            if (_dead)
+            {
+                DeathOffset(out sink, out tilt);
+                return;
+            }
+
             var elapsed = Math.Max(0f, _time - _activityStart);
             switch (_state.Activity)
             {
@@ -572,6 +633,48 @@ namespace FalseGods.UnityRuntime.Presentation
                     tilt = 0f;
                     return;
             }
+        }
+
+        /// <summary>
+        /// Going down dead: the body rocks and the floor takes it, and it stays taken.
+        /// </summary>
+        /// <remarks>
+        /// The same gesture the relocation sink is, played slower and further and only once. It goes past its own
+        /// height rather than to a fixed depth, so however large the room authored the boss, nothing is left
+        /// standing in the floor at the end of it.
+        /// </remarks>
+        private void DeathOffset(out float sink, out float tilt)
+        {
+            var t = Mathf.Clamp01(_deathElapsed / DeathSinkSeconds);
+            sink = -DeathDepth() * t * t;   // accelerating, as if the ground were pulling
+
+            // Rocking the whole way down, easing off as it goes, so the last thing visible is settling rather
+            // than thrashing.
+            tilt = DeathRockDegrees * (1f - (t * 0.4f))
+                * Mathf.Sin(_deathElapsed * DeathRockFrequency * Mathf.PI * 2f);
+        }
+
+        /// <summary>How far a corpse has to go to be out of sight: its own height at the size the room authored,
+        /// plus enough that a sloped floor cannot leave a shoulder showing.</summary>
+        private float DeathDepth() =>
+            (BodyHeight * (SpriteScale > 0f ? SpriteScale : DefaultSpriteScale)) + DeathSinkClearance;
+
+        /// <summary>Whether the corpse has gone far enough down that nothing of it should be shot or walked into.</summary>
+        private bool IsBuried() => _dead && _deathElapsed >= DeathSinkSeconds * 0.5f;
+
+        /// <summary>
+        /// How far into a flinch the body is, 1 at the moment of the hit and easing back to 0. Squared so the
+        /// recoil snaps and the recovery is soft, which is what a hit reads as rather than a bounce.
+        /// </summary>
+        private float FlinchDrop()
+        {
+            if (_flinchTimer <= 0f)
+            {
+                return 0f;
+            }
+
+            var left = Mathf.Clamp01(_flinchTimer / HitFlinchSeconds);
+            return left * left;
         }
 
         /// <summary>
@@ -704,7 +807,11 @@ namespace FalseGods.UnityRuntime.Presentation
             }
             else if (_flashTimer > 0f && !_flashWeakPoint)
             {
-                color = Color.white;
+                // Past white on purpose - see HitFlashBrightness. Fogging is skipped for the flash: a hit
+                // registering is information, and losing it at range would make the far half of an eighty-metre
+                // room feel like shooting at nothing.
+                SetColor(_bodyMat, Color.white * HitFlashBrightness);
+                return;
             }
             else if (_hasState && _state.Enraged)
             {
