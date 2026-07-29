@@ -670,6 +670,65 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        public bool ThrowExplosive(
+            ArenaWorldPoint from, ArenaWorldPoint to, float flightSeconds, float apexHeight, Action whenItGoesOff)
+        {
+            if (flightSeconds <= 0f)
+            {
+                _logger?.LogWarning("[crate] a throw needs a positive flight time.");
+                return false;
+            }
+
+            if (!Prepare())
+            {
+                return false;
+            }
+
+            if (_explosive == null)
+            {
+                // Nothing to throw that would go off, so nothing is thrown at all rather than an ordinary crate
+                // landing where a blast was expected and whoever asked waiting forever.
+                _logger?.LogWarning("[crate] this build has no exploding destructible; the barrel was not thrown.");
+                return false;
+            }
+
+            try
+            {
+                var start = new Vector3(from.X, from.Y, from.Z);
+                var target = new Vector3(to.X, to.Y, to.Z);
+                var unit = SpawnFrom(_explosive, start, out var breakable);
+                if (unit == null)
+                {
+                    _logger?.LogWarning("[crate] the game returned no unit for the barrel.");
+                    return false;
+                }
+
+                if (unit.Rigidbody != null)
+                {
+                    unit.Rigidbody.useGravity = false;
+                    unit.Rigidbody.isKinematic = true;
+                }
+
+                // This one is not a reward. It is thrown to break something open, and paying loot for it would
+                // read as a barrel worth shooting down - which is exactly the wrong lesson at the end of a fight.
+                SetLootAllowed(breakable, false);
+
+                var crate = new ManagedCrate(unit, breakable, NextCrateId(), true, _explosive.Look)
+                {
+                    WhenItGoesOff = whenItGoesOff,
+                };
+                crate.BeginFlight(start, target, flightSeconds, apexHeight);
+                _crates.Add(crate);
+                _logger?.Log($"[crate] a barrel is on its way to ({to.X:0.0}, {to.Y:0.0}, {to.Z:0.0}).");
+                return true;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] the barrel could not be thrown: {exception}");
+                return false;
+            }
+        }
+
         public bool Drop(ArenaWorldPoint at, CratePileId pile, bool explosive = false)
         {
             if (!Prepare())
@@ -1665,6 +1724,20 @@ namespace FalseGods.Integration.Sulfur.Combat
             // Killing it is all there is to it: the barrel's own death is what goes off, wherever it happens to
             // be lying by now.
             BreakNoLoot(crate);
+
+            // Told after the blast is queued, so anything the caller does in answer happens with the explosion
+            // rather than a beat before it. Its failure is its own: a caller that throws must not take the rest
+            // of the barrage down with it.
+            if (crate.WhenItGoesOff == null)
+            {
+                return;
+            }
+
+            try { crate.WhenItGoesOff(); }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] answering a barrel going off failed ({exception.Message}).");
+            }
         }
 
         /// <summary>
@@ -2163,6 +2236,10 @@ namespace FalseGods.Integration.Sulfur.Combat
             /// Only a barrel the boss <i>threw</i> ever gets one: one standing where it was made is the game's
             /// ordinary barrel and goes off when somebody destroys it.</summary>
             public float Fuse { get; set; }
+
+            /// <summary>Told when this one goes off, for the single throw whose outcome something is waiting on.
+            /// Null for every crate in a barrage — nobody asks what became of those.</summary>
+            public Action WhenItGoesOff { get; set; }
 
             /// <summary>Which destructible this is, counted in the order they were made. Every peer makes the
             /// same ones from the same commands in the same order, so the number means the same crate on all of

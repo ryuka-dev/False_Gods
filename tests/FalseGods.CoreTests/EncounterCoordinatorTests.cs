@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using FalseGods.Core.Arena;
 using FalseGods.Core.Arena.Events;
@@ -61,20 +61,23 @@ namespace FalseGods.CoreTests
         }
 
         [Fact]
-        public void Boss_death_unlocks_the_exit_and_marks_the_encounter_defeated()
+        public void Boss_death_marks_the_encounter_defeated_and_leaves_the_exit_alone()
         {
             var (coordinator, arena) = Build();
             coordinator.Begin();
 
             coordinator.Process(new IBossDomainEvent[] { new BossDied(Boss) });
 
-            Assert.True(arena.IsExitUnlocked);
             Assert.Equal(EncounterPhase.Defeated, coordinator.Phase);
-            Assert.IsType<ArenaExitUnlocked>(Assert.Single(arena.DrainEvents()));
+
+            // Opening the way out is the boss's last barrel, not its death - see the class remarks. A coordinator
+            // that also unlocked here would open the doorway before the barrel had left its hand.
+            Assert.False(arena.IsExitUnlocked);
+            Assert.Empty(arena.DrainEvents());
         }
 
         [Fact]
-        public void Processing_boss_death_twice_unlocks_the_exit_exactly_once()
+        public void Processing_boss_death_twice_settles_on_defeated_and_still_commands_nothing()
         {
             var (coordinator, arena) = Build();
 
@@ -82,8 +85,8 @@ namespace FalseGods.CoreTests
             arena.DrainEvents();
             coordinator.Process(new IBossDomainEvent[] { new BossDied(Boss) });
 
-            Assert.True(arena.IsExitUnlocked);
             Assert.Equal(EncounterPhase.Defeated, coordinator.Phase);
+            Assert.False(arena.IsExitUnlocked);
             Assert.Empty(arena.DrainEvents());
         }
 
@@ -123,8 +126,8 @@ namespace FalseGods.CoreTests
 
             boss.ApplyDamage(1000); // lethal
             coordinator.Process(boss.DrainEvents());
-            Assert.True(arena.IsExitUnlocked);
             Assert.Equal(EncounterPhase.Defeated, coordinator.Phase);
+            Assert.False(arena.IsExitUnlocked); // the barrel opens the way out, not the death
         }
     }
 }

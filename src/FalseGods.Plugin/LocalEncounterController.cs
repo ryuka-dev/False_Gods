@@ -107,6 +107,22 @@ namespace FalseGods.Plugin
         private const float ProductionDropHeight = 3f;
 
         /// <summary>
+        /// The boss's last act: a beat after it dies, it throws one more barrel — at the rock closing the way out.
+        /// </summary>
+        /// <remarks>
+        /// <para>The pause is what makes it read as an act rather than a coincidence: the body goes down, there is
+        /// a moment of nothing, and then the thing that has been throwing barrels all fight throws one more. Long
+        /// enough to be a separate beat, short enough that nobody has started walking away.</para>
+        /// <para>The arc is slower and higher than a volley's. A barrage is read as a threat and wants to arrive;
+        /// this one is the last thing that happens in the room and wants to be watched.</para>
+        /// </remarks>
+        private const float ExitBarrelDelaySeconds = 0.5f;
+
+        private const float ExitBarrelFlightSeconds = 1.6f;
+
+        private const float ExitBarrelApexHeight = 9f;
+
+        /// <summary>
         /// How long the route stays a carrier short after one is killed, as a share of a round trip.
         /// </summary>
         /// <remarks>
@@ -276,6 +292,9 @@ namespace FalseGods.Plugin
         // Whether anything the boss threw hurt a player since the last time the watch was asked. Collected here
         // because a hit happens on the crate's own clock, not the encounter's.
         private bool _cratesHitSomebody;
+
+        // Counts down to the boss's last throw once it is dead, then stops. Negative means there is nothing owed.
+        private float _untilTheExitBarrel = -1f;
 
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
@@ -634,9 +653,72 @@ namespace FalseGods.Plugin
                 FireWhateverWasBrought(deltaSeconds);
             }
 
+            // Outside that gate on purpose: this one is owed by a boss that is already dead.
+            AdvanceTheLastBarrel(deltaSeconds);
+
             _presence.ReportHealth(_boss.HealthFraction);
             Present();
             _presentation.Render(deltaSeconds);
+        }
+
+        /// <summary>
+        /// The boss's last throw, and what it opens.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>The blast is what unlocks the exit, not a stopwatch.</b> The barrel says when it went off, so
+        /// the rock goes away with the explosion however long the arc and the fuse turn out to be. Adding the two
+        /// up would agree today and quietly stop agreeing the first time either is tuned.</para>
+        /// <para><b>Host-authoritative, like everything else the room does.</b> Unlocking is an arena fact, so it
+        /// replicates as one and every peer takes its own rock away off the replicated change — including a peer
+        /// that arrives afterwards and reads it out of the snapshot.</para>
+        /// <para>A room that authored nowhere to throw keeps its exit shut. That is a room that cannot be left,
+        /// which is bad, but it is a great deal better than an exit that opens for no reason anybody can see.</para>
+        /// </remarks>
+        private void AdvanceTheLastBarrel(float deltaSeconds)
+        {
+            if (_untilTheExitBarrel < 0f)
+            {
+                return;
+            }
+
+            _untilTheExitBarrel -= deltaSeconds;
+            if (_untilTheExitBarrel > 0f)
+            {
+                return;
+            }
+
+            _untilTheExitBarrel = -1f; // owed once
+            var target = _arenaContent?.ExitBlast;
+            if (target is null)
+            {
+                _logger?.LogWarning("[exit] the room authored no place for the boss's last barrel to land, so the "
+                    + "way out stays shut.");
+                return;
+            }
+
+            var thrown = _crates.ThrowExplosive(
+                BossStandsAt(), target.Value, ExitBarrelFlightSeconds, ExitBarrelApexHeight, OpenTheWayOut);
+            _logger?.Log(thrown
+                ? "[exit] the boss throws one last barrel at the rock over the doorway."
+                : "[exit] the boss's last barrel could not be thrown; opening the way out directly instead.");
+
+            // A throw that never happened must not leave the players sealed in. The barrel is how the exit opens
+            // and it is also only ever the reason it looks good doing so.
+            if (!thrown)
+            {
+                OpenTheWayOut();
+            }
+        }
+
+        private void OpenTheWayOut()
+        {
+            if (_arena is null || _arena.IsExitUnlocked)
+            {
+                return;
+            }
+
+            _arena.UnlockExit();
+            _logger?.Log("[exit] the rock is blown out of the doorway; the way out is open.");
         }
 
         /// <summary>
@@ -1391,6 +1473,9 @@ namespace FalseGods.Plugin
                 _starvation.Reset();
                 _pileLastSeen = 0;
                 _supply = null; // nothing more is produced; what is already standing stays where it is
+
+                // Owed, not thrown: the boss's last barrel is a beat after this, and the beat is the point.
+                _untilTheExitBarrel = ExitBarrelDelaySeconds;
                 _logger?.Log("[fight] the boss is dead: the supply line has stopped and its villagers have gone "
                     + "back to their own lives.");
                 return;

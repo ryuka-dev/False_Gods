@@ -41,6 +41,21 @@ namespace FalseGods.Application.Combat
         bool Throw(ArenaWorldPoint from, ArenaWorldPoint to, float flightSeconds, float apexHeight);
 
         /// <summary>
+        /// Throw one <b>barrel</b> the same way, and call <paramref name="whenItGoesOff"/> at the moment it does.
+        /// Returns false when it could not be created, in which case the callback never comes.
+        /// </summary>
+        /// <remarks>
+        /// <para>For the one throw whose <i>outcome</i> something is waiting on, rather than one of a barrage.
+        /// An ordinary throw rolls its own kind and nobody asks what became of it; this one is a barrel because
+        /// the caller needs a blast, and it says so rather than hoping the roll comes up right.</para>
+        /// <para>The callback is how "it went off" reaches the caller as an <b>event rather than a duration</b>.
+        /// Adding up a flight time and a fuse would give the same answer today and quietly stop agreeing the
+        /// moment either changes.</para>
+        /// </remarks>
+        bool ThrowExplosive(
+            ArenaWorldPoint from, ArenaWorldPoint to, float flightSeconds, float apexHeight, Action whenItGoesOff);
+
+        /// <summary>
         /// Drop one crate at <paramref name="at"/> under real gravity and let the game's own physics own it: it
         /// falls, comes to rest, and stacks with others already on the ground. This is the resting half of a
         /// destructible's life — produced, piled, carried, set back down — as opposed to <see cref="Throw"/>'s

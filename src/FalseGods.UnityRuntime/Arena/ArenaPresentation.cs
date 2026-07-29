@@ -23,7 +23,15 @@ namespace FalseGods.UnityRuntime.Arena
     /// </remarks>
     public sealed class ArenaPresentation : IEncounterPresentation
     {
-        private const string ExitWallPath = "CollisionRoot/WallNorth";
+        /// <summary>
+        /// The pile of rock closing the way out — an authored holder, so what is over the doorway is however many
+        /// rocks it took to fill it and taking them away is one call.
+        /// </summary>
+        /// <remarks>
+        /// Taken away when the exit unlocks, which every peer does for itself off the replicated fact — so a peer
+        /// that arrived after the boss died finds the doorway already clear rather than having to be told.
+        /// </remarks>
+        private const string ExitBlockerPath = "VisualRoot/VanillaProps/ExitRoom/ExitBlocker";
         private const string LightingRootName = "LightingRoot";
         private static readonly Color EngagedLightColor = new Color(1f, 0.45f, 0.35f);
 
@@ -73,15 +81,15 @@ namespace FalseGods.UnityRuntime.Arena
 
         private void OpenExit(GameObject root)
         {
-            var wall = root.transform.Find(ExitWallPath);
-            if (wall != null)
+            var blocker = root.transform.Find(ExitBlockerPath);
+            if (blocker != null)
             {
-                wall.gameObject.SetActive(false);
-                _logger?.Log("[arena-cue] ExitOpened — north wall opened");
+                blocker.gameObject.SetActive(false);
+                _logger?.Log("[arena-cue] ExitOpened — the rock over the doorway is gone");
             }
             else
             {
-                _logger?.LogWarning($"[arena-cue] ExitOpened but '{ExitWallPath}' was not found");
+                _logger?.LogWarning($"[arena-cue] ExitOpened but '{ExitBlockerPath}' was not found");
             }
         }
     }

@@ -15,12 +15,19 @@ namespace FalseGods.Core.Encounters
     /// It owns the encounter scope — the <see cref="Simulation.EncounterId"/> and the <see cref="EncounterPhase"/> —
     /// and evaluates the encounter's rules, translating boss domain events into arena commands. For the PoC test
     /// encounter the rules are: the boss reaching phase two activates a configured mechanism group, and the boss's
-    /// death unlocks the exit and marks the encounter defeated (Docs/MinimalProofOfConceptPlan.md B7/B9):
+    /// death marks the encounter defeated (Docs/MinimalProofOfConceptPlan.md B7/B9):
     ///
     /// <code>
     /// BossPhaseChanged(Two) → ActivateMechanismGroup(phaseTwoGroup)
-    /// BossDied              → UnlockExit(); EncounterPhase = Defeated
+    /// BossDied              → EncounterPhase = Defeated
     /// </code>
+    ///
+    /// <para>
+    /// <b>Death no longer unlocks the exit here.</b> It did, while opening the way out was instantaneous. Opening
+    /// it is now something the boss <i>does</i> — a last barrel thrown at the rock closing the doorway — so the
+    /// moment the exit opens is the moment that barrel goes off, which is known where the throwing is and not
+    /// here. Leaving the old rule alongside it would have opened the way out before the barrel left its hand.
+    /// </para>
     ///
     /// <para>
     /// It consumes the boss's <b>already-drained</b> events (like the presenter and replication), because on a host
@@ -81,7 +88,6 @@ namespace FalseGods.Core.Encounters
                         _arena.ActivateMechanismGroup(_phaseTwoGroup);
                         break;
                     case BossDied _:
-                        _arena.UnlockExit();
                         Phase = EncounterPhase.Defeated;
                         break;
                 }

@@ -56,6 +56,16 @@ namespace FalseGods.Application.Arena
         /// </remarks>
         public const string StartTriggerPath = "GameplayRoot/StartTrigger";
 
+        /// <summary>
+        /// Where the boss's last barrel lands: the foot of the rock closing the way out.
+        /// </summary>
+        /// <remarks>
+        /// Authored rather than derived from the blocking rock, because the two answer different questions - the
+        /// rock is as big as it needs to be to fill the doorway, and this is where a barrel should come down to
+        /// take it away. A room with no such marker keeps its exit shut, which is the safe way to be wrong.
+        /// </remarks>
+        public const string ExitBlastPath = "GameplayRoot/ExitBlast";
+
         /// <summary>Every child is where carriers set destructibles down for the boss, <b>index-aligned with
         /// <see cref="AnchorGroupPath"/></b>: the boss standing at anchor <i>n</i> is supplied by pile <i>n</i>. A
         /// room that authors fewer piles than anchors reuses the last one, and a room that authors none has no
@@ -335,6 +345,8 @@ namespace FalseGods.Application.Arena
     /// <param name="StartTrigger">The centre of the sphere a player has to reach to start the fight, or null when
     /// the room authored none — in which case raising the boss is starting the fight.</param>
     /// <param name="StartTriggerRadius">How far that sphere reaches, in metres. Zero when there is no trigger.</param>
+    /// <param name="ExitBlast">Where the barrel that opens the way out comes down, or null when the room authored
+    /// no such place — in which case the exit stays closed, which is the safe way to be wrong.</param>
     public sealed record LoadedArena(
         ArenaWorldPoint Origin,
         ArenaWorldPoint PlayerSpawn,
@@ -346,7 +358,8 @@ namespace FalseGods.Application.Arena
         IReadOnlyList<ArenaWorldPoint> CrateSources,
         IReadOnlyList<ArenaWorldPoint> CratePiles,
         ArenaWorldPoint? StartTrigger,
-        float StartTriggerRadius);
+        float StartTriggerRadius,
+        ArenaWorldPoint? ExitBlast);
 
     /// <summary>The outcome of <see cref="ArenaLoadFlow.Realize"/>: the peer's own validated
     /// <see cref="ArenaManifest"/> (the <c>ArenaReady</c> payload) and the realized arena, or the fail-closed
@@ -482,7 +495,11 @@ namespace FalseGods.Application.Arena
             var realized = _realization.Realize(
                 origin,
                 parityPaths,
-                new[] { playerPath, bossPath, BossRoomContent.BodyPath, BossRoomContent.StartTriggerPath },
+                new[]
+                {
+                    playerPath, bossPath, BossRoomContent.BodyPath,
+                    BossRoomContent.StartTriggerPath, BossRoomContent.ExitBlastPath,
+                },
                 new[]
                 {
                     BossRoomContent.AnchorGroupPath,
@@ -562,7 +579,8 @@ namespace FalseGods.Application.Arena
                 CollectGroup(realized.Markers, BossRoomContent.CrateSourceGroupPath),
                 CollectGroup(realized.Markers, BossRoomContent.CratePileGroupPath),
                 ReadStartTrigger(realized.Markers, out var triggerRadius),
-                triggerRadius);
+                triggerRadius,
+                FindMarker(realized.Markers, BossRoomContent.ExitBlastPath)?.WorldPosition);
             Stage = ArenaLoadStage.Realized;
             return new ArenaRealizeResult(true, null, Manifest, Arena);
         }
