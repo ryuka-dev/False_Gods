@@ -899,14 +899,21 @@ namespace FalseGods.Integration.Sulfur.Combat
         public Action<ArenaWorldPoint, bool> Exploded { get; set; }
 
         /// <summary>
-        /// Whether this barrel was picked out of the air by somebody, rather than going off for any of the reasons
-        /// the fight itself provides.
+        /// Whether this barrel was shot out of the air while the boss had hold of it, rather than going off for
+        /// any of the reasons the fight itself provides.
         /// </summary>
         /// <remarks>
-        /// <b>Two conditions, and both are needed.</b> It has to still be flying — a barrel resting on a pile is a
-        /// stationary target and shooting one is not the same trick — and its death has to be one nobody here
-        /// asked for. Everything this port does to a crate on purpose (landing it, bursting it on a wall or a
-        /// player) is done inside a flag, so what is left is the game's own damage path, which is a weapon.
+        /// <para><b>Two conditions, and both are needed.</b> The boss has to have it in the air — a barrel resting
+        /// on a pile is a stationary target and shooting one is not the same trick — and its death has to be one
+        /// nobody here asked for. Everything this port does to a crate on purpose (landing it, bursting it on a
+        /// wall or a player) is done inside a flag, so what is left is the game's own damage path, which is a
+        /// weapon.</para>
+        /// <para><b>Both halves of the throw count, and the first one is the one that pays.</b> A volley hangs
+        /// over the boss before it is released, and a barrel picked out of <i>that</i> is going off on top of the
+        /// boss — which is where the ordinary blast falloff leaves anything worth having. Once it has been
+        /// released it is travelling away, and by the time anybody can hit it the boss is at the edge of the
+        /// blast: still the trick, still rewarded, worth what the distance leaves. Rewarding only the released
+        /// half meant the one shot that could actually reach the boss was the one that did not count.</para>
         /// </remarks>
         private bool ShotOutOfTheAir(Unit unit)
         {
@@ -919,7 +926,8 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 if (ReferenceEquals(_crates[i].Unit, unit))
                 {
-                    return _crates[i].Phase == Phase.Flying;
+                    var phase = _crates[i].Phase;
+                    return phase == Phase.Flying || phase == Phase.Lifting;
                 }
             }
 

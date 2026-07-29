@@ -167,10 +167,13 @@ namespace FalseGods.Plugin
         /// What catching one of the boss's barrels in mid-flight is worth against the boss itself.
         /// </summary>
         /// <remarks>
-        /// A skill reward, and deliberately a narrow one: it applies only to the boss's share, so shooting a
-        /// barrel over a crowd of goblins is no more effective than it ever was, and a player cannot make the room
-        /// safer this way — only the fight shorter. The barrel has to be in the air, which means it has to be one
-        /// the boss threw, which means the reward is for reading a barrage rather than for finding a barrel.
+        /// A skill reward, and deliberately a narrow one: it applies only to the boss, so shooting a barrel over a
+        /// crowd of goblins is no more effective than it ever was, and a player cannot make the room safer this way
+        /// — only the fight shorter. The barrel has to be in the air, which means it has to be one the boss threw,
+        /// which means the reward is for reading a barrage rather than for finding a barrel.
+        /// <para><b>Paid in full wherever it goes off</b>, unlike an ordinary blast — see the note at the site.
+        /// Against fifty thousand health this is one fiftieth of the boss per barrel caught, which is a ceiling a
+        /// party has to earn twenty-odd times over in one fight.</para>
         /// </remarks>
         private const float AirburstOnTheBoss = 20f;
 
@@ -1397,6 +1400,23 @@ namespace FalseGods.Plugin
             var dy = stands.Y - at.Y;
             var dz = stands.Z - at.Z;
             var distance = (float)Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+
+            // The trick the fight rewards, and it does NOT fall off with distance.
+            //
+            // Measured: a barrel is thrown AT a player, so by the time anybody can shoot one down it is seven or
+            // eight metres from the boss — the very edge of the blast, where the ordinary falloff has eaten all
+            // but a twentieth of it. Twenty times almost nothing was still almost nothing, which is why this read
+            // as doing no damage at all. The reward is not the boss standing in a blast; it is the boss's own
+            // ammunition going off before it arrives, and where that happens is not the point.
+            if (pickedOutOfTheAir)
+            {
+                var caught = _blastDamage * AirburstOnTheBoss;
+                _logger?.Log($"[crate] a barrel was caught in the air {distance:0.#}m out; the boss takes "
+                    + $"{caught:0.#} for it ({AirburstOnTheBoss:0}x, no falloff).");
+                OnWeaponDamage(caught);
+                return;
+            }
+
             if (distance >= _blastRadius)
             {
                 return;
@@ -1408,16 +1428,7 @@ namespace FalseGods.Plugin
                 return;
             }
 
-            // The trick the fight rewards: catching one of the boss's own barrels in the air, over its head. It is
-            // worth ten times as much and ONLY to the boss — everything else in the blast, the players included,
-            // takes what a barrel is always worth, so this buys skill and not a safer room.
-            if (pickedOutOfTheAir)
-            {
-                share *= AirburstOnTheBoss;
-            }
-
-            _logger?.Log($"[crate] a barrel went off {distance:0.#}m from the boss; its share is {share:0.#}"
-                + (pickedOutOfTheAir ? $" (shot out of the air — {AirburstOnTheBoss:0}x over)." : "."));
+            _logger?.Log($"[crate] a barrel went off {distance:0.#}m from the boss; its share is {share:0.#}.");
             OnWeaponDamage(share);
         }
 
