@@ -265,19 +265,19 @@ namespace FalseGods.Application.Arena
             // materials are the same cave set this arena already borrows, so the seam does not read as a seam.
             //
             // What goes: the Connector, which only means something to the generation graph that we are not
-            // running; the hidden chest and the bales it stands on, which sit fifteen metres up a shaft nobody can
-            // climb; and - for now - the level-change trigger itself, because the vanilla one completes the level
-            // and this room's exit belongs somewhere else. Wiring that is the next step, and until it is there the
-            // pit is a place to look at rather than a way out.
+            // running, and the hidden chest with the bales it stands on, fifteen metres up a shaft nobody can
+            // climb. The pit's own trigger stays - it is the way out - but it is pointed at the safe area rather
+            // than at the next level of the chapter, which is where the donor's own room sent people.
             new VanillaPropClone(
                 ParentPath,
                 "Prop_ExitRoom",
                 CaveEndRoomKey,
                 WholeRoom,
-                StripChildNames: new[] { "HiddenChest", "HayBase", "HayBase (1)", "EndTrigger" },
+                StripChildNames: new[] { "HiddenChest", "HayBase", "HayBase (1)" },
                 StripComponentNames: new[] { "Connector" },
                 LayerName: KeepTheDonorsLayer,
-                VolumeChildNames: NoNames),
+                VolumeChildNames: NoNames,
+                PointExitAtSafeArea: true),
         };
 
         /// <summary>The vanilla cave exit room - the donor for the way out of this arena.</summary>

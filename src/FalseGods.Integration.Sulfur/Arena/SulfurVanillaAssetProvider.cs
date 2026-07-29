@@ -4,7 +4,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using FalseGods.Application.Arena;
+using PerfectRandom.Sulfur.Core.LevelGeneration;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
@@ -260,6 +262,8 @@ namespace FalseGods.Integration.Sulfur.Arena
                     StripComponents(clone, request.StripComponentNames);
                     if (relayer)
                         SetLayerRecursively(clone.transform, layer, request.VolumeChildNames);
+                    if (request.PointExitAtSafeArea)
+                        PointExitAtSafeArea(clone);
 
                     // The marker owns placement; the clone keeps the source's own scale as its base, so a marker
                     // left at scale 1 reproduces the prop at its vanilla proportions.
@@ -374,6 +378,62 @@ namespace FalseGods.Integration.Sulfur.Arena
 
         /// <summary>Remove whole child objects from a staged clone by name, at any depth. Used for the parts of a
         /// vanilla prop that belong to the donor room's own encounter rather than to the scenery.</summary>
+        /// <summary>
+        /// Send a borrowed room's level-change trigger to the safe area instead of on through the chapter.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>The game's own trigger is kept and re-aimed, rather than replaced.</b> What it does around the
+        /// transition is worth having and easy to get wrong by hand: it fires only for the local player's own
+        /// object, only once, hides its own renderers, and moves itself onto whatever layer this build calls the
+        /// trigger layer. Re-aiming it also means the transition still runs through the game's own
+        /// <c>GoToLevel</c>, which is what makes this work in a session at all — a client walking into the pit is
+        /// intercepted there and the host leads, and none of that is ours to reimplement.</para>
+        /// <para><b>Its destination is a private serialized field, so this is reflection</b> — the same trade the
+        /// boss bar's label makes (Docs/BossEncounterRunbook.md §2.9). Failing to find it is reported and left
+        /// alone: an exit that still goes to the next level is a wrong door, and a room whose realization threw
+        /// while staging a clone is no room at all.</para>
+        /// <para>Done while the clone is staged inactive, so the trigger's own <c>Start</c> has not run and there
+        /// is no window in which it is live with the donor's destination.</para>
+        /// </remarks>
+        private void PointExitAtSafeArea(GameObject clone)
+        {
+            const string environmentField = "specificEnvironment";
+            const string spawnField = "specificSpawnIdentifier";
+
+            // Where the vanilla cave boss's own room puts players when they ride up out of it, so leaving this
+            // arena arrives where leaving that fight arrives.
+            const string safeAreaSpawn = "Elevator";
+
+            var found = 0;
+            foreach (var trigger in clone.GetComponentsInChildren<NextLevelTrigger>(includeInactive: true))
+            {
+                if (trigger == null)
+                {
+                    continue;
+                }
+
+                var type = trigger.GetType();
+                var environment = type.GetField(environmentField, Instance);
+                var spawn = type.GetField(spawnField, Instance);
+                if (environment == null || spawn == null)
+                {
+                    _logger?.LogWarning($"[vanilla-prop] the borrowed exit has no '{environmentField}'/'{spawnField}' "
+                        + "to re-aim in this build; it still leads wherever its own room led.");
+                    return;
+                }
+
+                environment.SetValue(trigger, WorldEnvironmentIds.ChurchHub);
+                spawn.SetValue(trigger, safeAreaSpawn);
+                found++;
+            }
+
+            _logger?.Log(found > 0
+                ? $"[vanilla-prop] {found} borrowed exit(s) now lead to the safe area, arriving at '{safeAreaSpawn}'."
+                : "[vanilla-prop] the borrowed room carried no level-change trigger, so there is no way out of it.");
+        }
+
+        private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+
         private static void StripChildren(GameObject clone, IReadOnlyList<string> names)
         {
             if (names == null || names.Count == 0)

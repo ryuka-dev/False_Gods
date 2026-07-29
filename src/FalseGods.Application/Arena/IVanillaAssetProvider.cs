@@ -95,6 +95,12 @@ namespace FalseGods.Application.Arena
     /// own room needed them, which need not be over the middle of the prop or even inside it; the height the
     /// donor chose is kept, since that is the prop's own surface.</item>
     /// </list></param>
+    /// <param name="PointExitAtSafeArea">Whether the clone's level-change trigger should send players to the
+    /// game's safe area instead of wherever the donor's own room sent them.
+    /// <para>A borrowed room brings its own destination with it, and the donor's is "the next level of this
+    /// chapter" — right for the corridor it was authored in and wrong for a boss arena, which is somewhere players
+    /// leave rather than pass through. Said here as an intention, because which environment counts as the safe
+    /// area is the game's vocabulary and only the adapter may name it.</para></param>
     public sealed record VanillaPropClone(
         string ParentPath,
         string MarkerNamePrefix,
@@ -103,7 +109,8 @@ namespace FalseGods.Application.Arena
         IReadOnlyList<string> StripChildNames,
         IReadOnlyList<string> StripComponentNames,
         string LayerName,
-        IReadOnlyList<string> VolumeChildNames);
+        IReadOnlyList<string> VolumeChildNames,
+        bool PointExitAtSafeArea = false);
 
     /// <summary>The outcome of cloning one prop recipe: how many clones were placed, or the fail-closed reason.</summary>
     public sealed record VanillaPropResult(bool Success, string? Error, int Cloned)
