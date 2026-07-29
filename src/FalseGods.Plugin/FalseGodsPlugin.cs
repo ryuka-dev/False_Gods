@@ -156,6 +156,12 @@ namespace FalseGods.Plugin
         // Whether the destructible content has been assembled for the arena currently standing. Not keyed to the
         // raise's run counter: this happens while that run is still generating, so the run has not finished yet.
         private bool _warmedThisArena;
+
+        // One of each ordinary kind — the kinds cycle, so asking twice asks for both. Dropped from the same height
+        // the room's own production uses, so they fall and settle exactly as produced stock does.
+        private const int WarmCrateCount = 2;
+
+        private const float WarmDropHeight = 3f;
         private ClientBossController? _client;
         private IFalseGodsIntegration? _clientIntegration; // the integration _client was composed on
 
@@ -920,6 +926,45 @@ namespace FalseGods.Plugin
 
             _warmedThisArena = true;
             _crates.Prepare();
+            MakeTheFirstOnesNow();
+        }
+
+        /// <summary>
+        /// Put one of each ordinary kind on the room's first production point, while the screen is still black.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Loading the content is not the whole cost.</b> Preparing reads the models and materials out of
+        /// the player's install; the first time one is actually <i>made</i> — the template cloned, the unit's own
+        /// Start run, a body and a collider registered, the material handed to the card — costs its own frame, and
+        /// that frame was still landing on the first crate of the fight. So the first ones are made here instead.
+        /// </para>
+        /// <para>They are left standing where the room's own production puts them, because that is what they are:
+        /// stock the village already had. Carriers collect them like any other, and nothing has to know they were
+        /// made early.</para>
+        /// <para>Every peer does this for itself at the same point in its own load, so the crate ordinals — which
+        /// are what the peers agree on — stay in step without a word being sent.</para>
+        /// </remarks>
+        private void MakeTheFirstOnesNow()
+        {
+            var sources = _levelArena.Realized?.Arena?.CrateSources;
+            if (sources == null || sources.Count == 0)
+            {
+                return;
+            }
+
+            var at = sources[0];
+            var above = new ArenaWorldPoint(at.X, at.Y + WarmDropHeight, at.Z);
+            var made = 0;
+            for (var i = 0; i < WarmCrateCount; i++)
+            {
+                if (_crates.Drop(above, CratePileId.Source(0)))
+                {
+                    made++;
+                }
+            }
+
+            _log.Log($"[crate] {made} made at the first production point while the level was still loading, so the "
+                + "first one of the fight is not the first one ever built.");
         }
 
         private void Raise(IFalseGodsIntegration? integration, CompositionRole role)
