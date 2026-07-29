@@ -111,11 +111,26 @@ namespace FalseGods.Integration.Sulfur.Arena
         };
 
         /// <summary>
-        /// How the borrowed portal is turned to stand in this doorway. Zero because the donor already faces along
-        /// Z, as this doorway does. <b>If the light ends up shining into the wall, this is the number to change
-        /// and nothing else.</b>
+        /// How far the borrowed portal is rolled about its own face to stand in this doorway.
         /// </summary>
-        private const float PortalTurnDegrees = 0f;
+        /// <remarks>
+        /// The church's portal is a landscape opening — seven across and five high — because that is the shape of
+        /// the arch it fills. This doorway is the other way up, 5.73 by 6.35, so the plate is put on its side:
+        /// five across and seven high, which fills it instead of leaving a band of rock above and below.
+        /// <para>Rolled about the face rather than replaced, so the cone and the emitters come round with it and
+        /// the composition still holds together.</para>
+        /// </remarks>
+        private const float PortalRollDegrees = 90f;
+
+        /// <summary>
+        /// How long the way through takes to open, once the boss is down.
+        /// </summary>
+        /// <remarks>
+        /// It arriving at full size on the frame the boss dies reads as a mistake — a thing that was always there
+        /// and had been hidden. Growing out of nothing over a second makes it the answer to the kill, which is
+        /// what it is. Eased at both ends rather than linear, so it does not start and stop dead.
+        /// </remarks>
+        private const float OpeningSeconds = 1f;
 
         /// <summary>How far the plate stands proud of the wall it is set into, so the two do not fight over the
         /// same pixels.</summary>
@@ -136,6 +151,10 @@ namespace FalseGods.Integration.Sulfur.Arena
         private Vector3 _doorwayAt;
         private Quaternion _doorwayFacing;
 
+        // What grows: the look, on its own holder, so opening it does not touch the volume a player walks into.
+        private Transform _look;
+        private float _sinceOpened = -1f;
+
         /// <param name="walkThrough">Called when a player walks into the door. What that <i>does</i> is not this
         /// class's business — it says a player asked to go, and whoever owns the session decides the rest.</param>
         public SulfurCaveBossPortal(Action walkThrough, ILogger logger = null)
@@ -151,6 +170,8 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// </summary>
         public void Watch()
         {
+            AdvanceTheOpening();
+
             // A destroyed object compares equal to null through Unity's operator, so this is also how leaving the
             // level is noticed: the helper goes with its room, this stops being true, and the next cave with that
             // boss in it is found from scratch. The corpse lingers after the fight, which is why a door already
@@ -191,6 +212,37 @@ namespace FalseGods.Integration.Sulfur.Arena
             FindTheDoorway(helper, boss);
         }
 
+        /// <summary>
+        /// Grow the way through out of nothing over its first second.
+        /// </summary>
+        /// <remarks>
+        /// Driven from the same per-frame call that watches for the boss, rather than by a behaviour of its own on
+        /// the door: there is already something ticking here, and one clock is easier to reason about than two.
+        /// Only the look is scaled — the volume a player walks into keeps its size throughout, so a door that is
+        /// still opening is still a door.
+        /// </remarks>
+        private void AdvanceTheOpening()
+        {
+            if (_sinceOpened < 0f || _look == null)
+            {
+                return;
+            }
+
+            _sinceOpened += Time.deltaTime;
+            var through = Mathf.Clamp01(_sinceOpened / OpeningSeconds);
+            var eased = through * through * (3f - 2f * through);
+
+            // Never exactly zero: a zero scale is a matrix nothing can be drawn through, and some of this is
+            // emitters that would rather be told they are small than told they do not exist.
+            _look.localScale = Vector3.one * Mathf.Max(eased, 0.001f);
+            if (through >= 1f)
+            {
+                _look.localScale = Vector3.one;
+                _sinceOpened = -1f;
+                _logger?.Log("[cave-door] the way through has finished opening.");
+            }
+        }
+
         /// <summary>Drop everything held for a level that is going away. Safe to call twice.</summary>
         public void Forget()
         {
@@ -202,6 +254,8 @@ namespace FalseGods.Integration.Sulfur.Arena
             _boss = null;
             _watched = null;
             _doorwayKnown = false;
+            _look = null;
+            _sinceOpened = -1f;
             if (_doorway != null)
             {
                 // Ours to destroy: it stands free in the level rather than under the room, so that nothing about
@@ -247,9 +301,21 @@ namespace FalseGods.Integration.Sulfur.Arena
 
             _doorwayAt = room.transform.TransformPoint(DoorwayPosition);
             _doorwayFacing = room.transform.rotation * Quaternion.Euler(DoorwayRotation);
+
+            // WHICH WAY IT FACES IS WORKED OUT, NOT WRITTEN DOWN. The authored panel only says which plane the
+            // door lies in; either side of that plane is a rotation the marker cannot distinguish, and picking
+            // wrong puts the light and the whole opening inside the rock. The boss is standing in the middle of
+            // its own room, so the side it is on is the side the players are on.
+            var towardTheRoom = boss.transform.position - _doorwayAt;
+            var turnedAway = Vector3.Dot(_doorwayFacing * Vector3.forward, towardTheRoom) < 0f;
+            if (turnedAway)
+            {
+                _doorwayFacing *= Quaternion.Euler(0f, 180f, 0f);
+            }
+
             _doorwayKnown = true;
             _logger?.Log($"[cave-door] the cave boss is in this level ({how}); a way through will open at "
-                + $"{_doorwayAt} when it falls.");
+                + $"{_doorwayAt} when it falls, facing {(turnedAway ? "the room (turned about)" : "the room")}.");
         }
 
         private void BossDied(Unit unit)
@@ -289,7 +355,13 @@ namespace FalseGods.Integration.Sulfur.Arena
                     _doorway.layer = manager.TriggerLayer;
                 }
 
-                AddTheDoor(_doorway.transform);
+                // The look goes on its own holder so it can be grown without the trigger growing with it.
+                var look = new GameObject("Look");
+                look.transform.SetParent(_doorway.transform, worldPositionStays: false);
+                _look = look.transform;
+                _look.localScale = Vector3.one * 0.001f;
+                AddTheDoor(_look);
+                _sinceOpened = 0f;
                 _doorway.AddComponent<CaveDoorTrigger>().WalkedThrough = _walkThrough;
 
                 _logger?.Log($"[cave-door] the cave boss is dead; a way through has opened in its room at "
@@ -453,12 +525,16 @@ namespace FalseGods.Integration.Sulfur.Arena
                 var drawn = piece.ByDrawnCentre ? DrawnCentre(source) : source.position;
                 var toItsOwnOrigin = source.position - drawn;
 
-                var turn = Quaternion.Euler(0f, PortalTurnDegrees, 0f);
+                // Rolled about the doorway's own face, so the piece turns without the face turning with it.
+                var turn = Quaternion.Euler(0f, 0f, PortalRollDegrees);
                 clone.transform.SetParent(doorway, worldPositionStays: false);
                 clone.transform.localRotation = turn * source.localRotation;
                 clone.transform.localScale = source.localScale;
+
+                // Proud along whatever the doorway ends up facing, rather than along a fixed axis: which way that
+                // is, is settled from the room's own shape - see FindTheDoorway.
                 clone.transform.localPosition =
-                    turn * (piece.Offset + toItsOwnOrigin) + new Vector3(0f, 0f, ProudOfTheWall);
+                    turn * (piece.Offset + toItsOwnOrigin) + Vector3.forward * ProudOfTheWall;
                 clone.SetActive(true);
                 return true;
             }
