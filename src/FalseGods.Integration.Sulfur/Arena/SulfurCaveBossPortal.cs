@@ -154,6 +154,12 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// through a hole rather than a door standing in it.</summary>
         private const float StandsIntoTheRoom = 0.2f;
 
+        /// <summary>How far it sits below the panel, so the lit face meets the niche's floor rather than hanging
+        /// over it. Straight down in the world rather than down the door's own axis — the two are the same while
+        /// the panel is only turned about the vertical, and the world is what "lower" means if it ever is not.
+        /// </summary>
+        private const float SetsDownFromThePanel = 0.2f;
+
         private readonly ILogger _logger;
         private readonly Action _walkThrough;
 
@@ -345,8 +351,9 @@ namespace FalseGods.Integration.Sulfur.Arena
                 _doorwayFacing *= Quaternion.Euler(0f, 180f, 0f);
             }
 
-            // Forward of the panel now that which way is forward has been settled.
+            // Forward of the panel now that which way is forward has been settled, and a little below it.
             _doorwayAt += _doorwayFacing * Vector3.forward * StandsIntoTheRoom;
+            _doorwayAt += Vector3.down * SetsDownFromThePanel;
 
             _doorwayKnown = true;
             _logger?.Log($"[cave-door] the cave boss is in this level ({how}); a way through will open at "
