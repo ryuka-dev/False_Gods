@@ -435,10 +435,20 @@ namespace FalseGods.Plugin
         public WorldPosition CurrentOrigin => _originWire;
 
         /// <summary>
-        /// Attach (or, with <c>null</c>, detach) the host replication driver mid-encounter — the session can start
-        /// or end while a fight is running. The simulations and presentation are unaffected either way.
+        /// Attach (or, with <c>null</c>, detach) everything this encounter does <i>because</i> it is hosted — the
+        /// session can start or end while a fight is running.
         /// </summary>
-        public void SetReplication(EncounterHostReplication? replication)
+        /// <remarks>
+        /// <para><b>Both halves move together, and that is the point.</b> Hosting is two facilities: state and
+        /// events go out, and clients' hit intents come in. They were attached in two places — the outgoing half
+        /// followed the live role, the incoming half was only ever built while raising — so a fight that began
+        /// before the session was hosting got one and not the other. Measured, on two peers: the client bound its
+        /// weapons and reported every shot, the host had nobody listening, and the boss could only be hurt by
+        /// whoever was hosting. One switch cannot drift like that.</para>
+        /// <para>The simulations and the presentation are unaffected either way — nothing about the fight itself
+        /// depends on whether anyone is watching.</para>
+        /// </remarks>
+        public void SetHosting(EncounterHostReplication? replication, IFalseGodsIntegration? integration)
         {
             if (!ReferenceEquals(_replication, replication))
             {
@@ -447,6 +457,36 @@ namespace FalseGods.Plugin
                     ? "Host replication attached: encounter state and events now broadcast to the session."
                     : "Host replication detached: encounter continues locally only.");
             }
+
+            var hosted = replication != null && integration != null;
+            if (!hosted)
+            {
+                if (_hitIntake != null)
+                {
+                    _hitIntake.Dispose();
+                    _hitIntake = null;
+                    _logger?.Log("Client hits are no longer accepted: this encounter is not hosted.");
+                }
+
+                return;
+            }
+
+            if (_hitIntake != null)
+            {
+                return;
+            }
+
+            // Accept client hit intents for this encounter: validated (member + live encounter), clamped, and
+            // routed through the same authoritative damage path a local weapon hit uses (§5.6). The result
+            // replicates back as an ordinary BossDamaged event — the client never decides damage.
+            _hitIntake = new HostHitIntake(
+                integration!.Channel,
+                integration.Roster,
+                _encounter,
+                _maxClientHitDamage,
+                OnWeaponDamage,
+                message => _logger?.Log(message));
+            _logger?.Log($"Client hits accepted for {_encounter}; the simulation still decides what they cost.");
         }
 
         /// <summary>
@@ -1144,25 +1184,18 @@ namespace FalseGods.Plugin
 
             if (_hostIntegration != null && _hostSender != null)
             {
-                SetReplication(new EncounterHostReplication(
-                    _hostSender,
-                    _hostIntegration.Session,
-                    _hostIntegration.Roster,
-                    _encounter,
-                    new DefinitionId(1),
-                    manifest,
-                    _originWire));
-
-                // Accept client hit intents for this encounter: validated (member + live encounter), clamped, and
-                // routed through the same authoritative damage path a local weapon hit uses (§5.6). The result
-                // replicates back as an ordinary BossDamaged event — the client never decides damage.
-                _hitIntake = new HostHitIntake(
-                    _hostIntegration.Channel,
-                    _hostIntegration.Roster,
-                    _encounter,
-                    _maxClientHitDamage,
-                    OnWeaponDamage,
-                    message => _logger?.Log(message));
+                // The same one switch the plugin uses when the role changes mid-fight, so a raise that is already
+                // hosted and a fight that becomes hosted end up in exactly the same state.
+                SetHosting(
+                    new EncounterHostReplication(
+                        _hostSender,
+                        _hostIntegration.Session,
+                        _hostIntegration.Roster,
+                        _encounter,
+                        new DefinitionId(1),
+                        manifest,
+                        _originWire),
+                    _hostIntegration);
             }
 
             // Real weapon damage: the game's projectile/melee systems strike the Hitbox-layer capsule, find the

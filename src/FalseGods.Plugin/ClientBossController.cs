@@ -114,7 +114,7 @@ namespace FalseGods.Plugin
             _levelWillBringTheArena = levelWillBringTheArena ?? throw new ArgumentNullException(nameof(levelWillBringTheArena));
             _contentDirectory = Path.GetDirectoryName(typeof(ClientBossController).Assembly.Location) ?? ".";
             _receiver = new ReplicationReceiver(integration.Channel, integration.Session);
-            _hitReporter = new ClientHitReporter(integration.Channel, integration.Session);
+            _hitReporter = new ClientHitReporter(integration.Channel, integration.Session, logger);
             _damagePort = new SulfurDamagePort(logger);
             _localPlayer = new SulfurLocalPlayer();
             _battlefield = new SulfurBattlefieldCleanup(logger);

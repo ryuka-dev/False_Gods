@@ -847,11 +847,14 @@ namespace FalseGods.Plugin
             var wantReplication = role == CompositionRole.Host && _boss.IsUp;
             if (wantReplication && !_boss.HasReplication && _boss.CurrentManifest != null)
             {
-                _boss.SetReplication(BuildHostReplication(integration!, _boss.CurrentManifest, _boss.CurrentOrigin));
+                // The integration goes with it: hosting is state going out AND clients' hits coming in, and a
+                // fight that picked up the role late used to get only the first of those.
+                _boss.SetHosting(
+                    BuildHostReplication(integration!, _boss.CurrentManifest, _boss.CurrentOrigin), integration);
             }
             else if (!wantReplication && _boss.HasReplication)
             {
-                _boss.SetReplication(null);
+                _boss.SetHosting(null, null);
             }
 
             _boss.Tick(UnityEngine.Time.deltaTime); // also drives a waiting host gate; a no-op when idle
