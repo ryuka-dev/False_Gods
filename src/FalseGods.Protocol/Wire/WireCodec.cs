@@ -253,13 +253,15 @@ namespace FalseGods.Protocol.Wire
             WriteWorldPosition(w, message.At);
             WriteInt(w, message.PileKind);
             WriteInt(w, message.PileIndex);
+            w.WriteBool(message.Explosive);
             return w.ToArray();
         }
 
         public static CrateDropped DeserializeCrateDropped(byte[] payload)
         {
             var r = new WireReader(payload);
-            var message = new CrateDropped(ReadWorldPosition(r), r.ReadInt32(), r.ReadInt32());
+            var message = new CrateDropped(
+                ReadWorldPosition(r), r.ReadInt32(), r.ReadInt32(), r.ReadBool());
             RequireEnd(r);
             return message;
         }

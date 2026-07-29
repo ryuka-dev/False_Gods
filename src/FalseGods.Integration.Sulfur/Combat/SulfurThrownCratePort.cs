@@ -107,24 +107,6 @@ namespace FalseGods.Integration.Sulfur.Combat
         private const ExplosionTypes BarrelExplosion = ExplosionTypes.Dynamite;
 
         /// <summary>
-        /// How often a produced destructible is an explosive barrel rather than ordinary cargo.
-        /// </summary>
-        /// <remarks>
-        /// Rare on purpose: the barrels are the thing that makes a barrage worth watching rather than the thing a
-        /// barrage is made of. At the rates the village supplies, one in two hundred is a barrel every half-minute
-        /// or so at full production — an event rather than a hazard, which is what makes seeing one on a goblin's
-        /// back worth reacting to.
-        /// </remarks>
-        private const float ExplosiveChance = 0.005f;
-
-        /// <summary>
-        /// Salt for the explosive roll. Kept clear of the volley's salts because this is rolled per <b>crate
-        /// ordinal</b>, not per volley — see <see cref="PickKind"/> for why that is what makes it agree across
-        /// peers without anything being sent.
-        /// </summary>
-        private const int ExplosiveSeed = 5150;
-
-        /// <summary>
         /// How long a thrown barrel lies on the ground before it goes off.
         /// </summary>
         /// <remarks>
@@ -518,25 +500,17 @@ namespace FalseGods.Integration.Sulfur.Combat
         }
 
         /// <summary>
-        /// What the next destructible is: ordinary cargo most of the time, and now and then a barrel that goes off.
+        /// The next piece of ordinary cargo, cycled so a pile is an even mix of the kinds.
         /// </summary>
         /// <remarks>
-        /// <para><b>Nothing is sent for this, and nothing needs to be.</b> Every peer builds the same destructibles
-        /// from the same broadcast commands in the same order, so the ordinal is already a shared number — the same
-        /// fact the crate's own id is built on. Rolling the barrel from that ordinal makes every peer roll the same
-        /// answer, which is the same reason a volley sends a seed rather than positions.</para>
-        /// <para>The ordinary kinds still cycle, so a pile is an even mix of them; the barrel is drawn out of the
-        /// cycle rather than taking a turn in it, or its rate would be whatever the number of kinds happened to be.
-        /// </para>
+        /// <b>Barrels are not drawn from here.</b> Whether a produced destructible is one that goes off is decided
+        /// by whoever owns the world and passed in, because the rate climbs as the fight turns — two peers each
+        /// rolling their own would agree everywhere except at the moments the rate changes, and disagreeing about
+        /// which crate is a bomb is not a cosmetic disagreement.
         /// </remarks>
         private DestructibleTemplate PickKind()
         {
             var ordinal = _nextKind++;
-            if (_explosive != null && SeededRandom.Unit01(ExplosiveSeed, ordinal) < ExplosiveChance)
-            {
-                return _explosive;
-            }
-
             if (_ordinary.Count == 0)
             {
                 return _templates[ordinal % _templates.Count];
@@ -675,7 +649,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public bool Drop(ArenaWorldPoint at, CratePileId pile)
+        public bool Drop(ArenaWorldPoint at, CratePileId pile, bool explosive = false)
         {
             if (!Prepare())
             {
@@ -688,7 +662,7 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 // Same real spawn as a throw — a live destructible, weapon-fire and loot and all — but from here on
                 // the game's physics owns it, not our arc.
-                var kind = PickKind();
+                var kind = explosive && _explosive != null ? _explosive : PickKind();
                 var unit = SpawnFrom(kind, where, out var breakable);
                 if (unit == null)
                 {

@@ -100,11 +100,11 @@ namespace FalseGods.Plugin
         /// step at six, with both the headcount and the load climbing on the way.</para>
         /// </remarks>
         private static readonly SupplyEscalation Escalation = new SupplyEscalation(
-            new SupplyStep(0.80f, carriers: 6, loadPerCarrier: 7),   // 42 -> ~3.1/s
-            new SupplyStep(0.60f, carriers: 6, loadPerCarrier: 8),   // 48 -> ~3.6/s
-            new SupplyStep(0.40f, carriers: 7, loadPerCarrier: 9),   // 63 -> ~4.7/s
-            new SupplyStep(0.20f, carriers: 7, loadPerCarrier: 10),  // 70 -> ~5.2/s
-            new SupplyStep(0.00f, carriers: 8, loadPerCarrier: 10)); // 80 -> ~6.0/s
+            new SupplyStep(0.80f, carriers: 6, loadPerCarrier: 7, explosiveChance: 0.01f),   // 42 -> ~3.1/s
+            new SupplyStep(0.60f, carriers: 6, loadPerCarrier: 8, explosiveChance: 0.02f),   // 48 -> ~3.6/s
+            new SupplyStep(0.40f, carriers: 7, loadPerCarrier: 9, explosiveChance: 0.03f),   // 63 -> ~4.7/s
+            new SupplyStep(0.20f, carriers: 7, loadPerCarrier: 10, explosiveChance: 0.04f),  // 70 -> ~5.2/s
+            new SupplyStep(0.00f, carriers: 8, loadPerCarrier: 10, explosiveChance: 0.05f)); // 80 -> ~6.0/s
 
         /// <summary>How high above a production point a destructible appears, so it falls into view and settles
         /// rather than being born inside whatever is already stacked there.</summary>
@@ -146,6 +146,10 @@ namespace FalseGods.Plugin
         private const int RageDamageMultiplier = 3;
 
         private const float RageCostsHealthFraction = 0.20f;
+
+        /// <summary>Salt for the per-crate barrel roll, so it is independent of every other seeded draw in the
+        /// fight.</summary>
+        private const int ExplosiveRollSeed = 20873;
 
         /// <summary>
         /// How long the boss spends announcing itself before the fight runs, matched to the roar the presentation
@@ -225,7 +229,7 @@ namespace FalseGods.Plugin
         private int _pileLastSeen;
         private readonly IThrownCratePort _crates;
         private readonly ICarrierPort _carriers;
-        private readonly Action<ArenaWorldPoint, CratePileId>? _announceProduced;
+        private readonly Action<ArenaWorldPoint, CratePileId, bool>? _announceProduced;
         private readonly Action<CratePileId, int>? _throwVolley;
 
         // Live only while a fight is: the supply line is the encounter's, and a room with no production points
@@ -240,6 +244,11 @@ namespace FalseGods.Plugin
         // What a barrel is worth and how far it reaches, taken from the game's own explosion once a fight starts.
         private float _blastDamage;
         private float _blastRadius;
+
+        // How much the room has made, and how much of it goes off. The count is what the barrel roll is drawn
+        // against; both are reported, because "is the rate right?" is otherwise unanswerable from a log.
+        private int _produced;
+        private int _barrelsMade;
 
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
@@ -305,7 +314,7 @@ namespace FalseGods.Plugin
             IPlayerMotionPort players,
             IThrownCratePort crates,
             ICarrierPort carriers,
-            Action<ArenaWorldPoint, CratePileId>? announceProduced = null,
+            Action<ArenaWorldPoint, CratePileId, bool>? announceProduced = null,
             Action<CratePileId, int>? throwVolley = null,
             float maxClientHitDamage = DefaultMaxClientHitDamage)
         {
@@ -648,6 +657,11 @@ namespace FalseGods.Plugin
 
             _supply.Advance(deltaSeconds, _restingAtSource);
 
+            // How dangerous the stock is climbs with the same thresholds the headcount does — a village that is
+            // merely working faster is a bigger barrage; one that has started sending up the explosives as well is
+            // a different fight.
+            var step = Escalation.At(_boss?.HealthFraction ?? 1f);
+
             var due = _supply.DrainProductionRequests();
             for (var i = 0; i < due.Count; i++)
             {
@@ -660,13 +674,26 @@ namespace FalseGods.Plugin
                 var pile = CratePileId.Source(source);
                 var at = sources[source];
                 var above = new ArenaWorldPoint(at.X, at.Y + ProductionDropHeight, at.Z);
-                if (!_crates.Drop(above, pile))
+
+                // Whether this one goes off is decided here, once, and travels with the command: the rate climbs
+                // as the fight turns, so a client rolling its own would disagree exactly at the moments it changes.
+                var explosive = SeededRandom.Unit01(ExplosiveRollSeed, _produced++) < step.ExplosiveChance;
+                if (!_crates.Drop(above, pile, explosive))
                 {
                     continue;
                 }
 
-                _announceProduced?.Invoke(above, pile);
-                _logger?.Log($"[supply] source {source} produced one; {_crates.RestingOn(pile)} resting there.");
+                _announceProduced?.Invoke(above, pile, explosive);
+                if (explosive)
+                {
+                    _barrelsMade++;
+                    _logger?.Log($"[supply] source {source} produced a BARREL ({_barrelsMade} of {_produced} "
+                        + $"produced so far, at {step.ExplosiveChance:P1} this step).");
+                }
+                else
+                {
+                    _logger?.Log($"[supply] source {source} produced one; {_crates.RestingOn(pile)} resting there.");
+                }
             }
         }
 
@@ -1035,6 +1062,8 @@ namespace FalseGods.Plugin
             _measuredRoundTripSeconds = EstimateRoundTripSeconds(
                 arena.CrateSources, arena.CratePiles, _walkSpeedInUse);
             _lastReportedThroughput = -1; // the opening step reports itself on the first tick
+            _produced = 0;
+            _barrelsMade = 0;
 
             ReportAuthoredBossContent(arena);
         }

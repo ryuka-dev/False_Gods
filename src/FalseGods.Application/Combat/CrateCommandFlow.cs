@@ -59,7 +59,7 @@ namespace FalseGods.Application.Combat
         }
 
         /// <summary>The host dropped a crate onto a pile; do the same here.</summary>
-        public Action<ArenaWorldPoint, CratePileId>? OnDropped { get; set; }
+        public Action<ArenaWorldPoint, CratePileId, bool>? OnDropped { get; set; }
 
         /// <summary>The host threw a crate; throw the same one here.</summary>
         public Action<ArenaWorldPoint, ArenaWorldPoint, float, float>? OnThrown { get; set; }
@@ -85,11 +85,12 @@ namespace FalseGods.Application.Combat
 
         /// <summary>Host: tell every client what was just dropped, and onto which pile. A client calling this sends
         /// nothing.</summary>
-        public void BroadcastDropped(ArenaWorldPoint at, CratePileId pile)
+        public void BroadcastDropped(ArenaWorldPoint at, CratePileId pile, bool explosive)
         {
             if (IsHosting)
             {
-                Broadcast(EncounterCodec.Encode(new CrateDropped(ToWire(at), (int)pile.Kind, pile.Index)));
+                Broadcast(EncounterCodec.Encode(
+                    new CrateDropped(ToWire(at), (int)pile.Kind, pile.Index, explosive)));
             }
         }
 
@@ -236,7 +237,7 @@ namespace FalseGods.Application.Combat
             {
                 case CrateDropped dropped when IsFinite(dropped.At)
                     && CratePileId.TryFrom(dropped.PileKind, dropped.PileIndex, out var droppedPile):
-                    OnDropped?.Invoke(FromWire(dropped.At), droppedPile);
+                    OnDropped?.Invoke(FromWire(dropped.At), droppedPile, dropped.Explosive);
                     break;
 
                 case CrateThrown thrown when IsFinite(thrown.From) && IsFinite(thrown.To)

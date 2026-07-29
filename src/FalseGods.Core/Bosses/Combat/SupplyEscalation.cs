@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace FalseGods.Core.Bosses.Combat
 {
@@ -19,8 +19,15 @@ namespace FalseGods.Core.Bosses.Combat
     /// </remarks>
     public readonly struct SupplyStep
     {
-        public SupplyStep(float aboveHealthFraction, int carriers, int loadPerCarrier)
+        public SupplyStep(
+            float aboveHealthFraction, int carriers, int loadPerCarrier, float explosiveChance = 0f)
         {
+            if (explosiveChance < 0f || explosiveChance > 1f || float.IsNaN(explosiveChance))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(explosiveChance), explosiveChance, "A chance lies in [0, 1].");
+            }
+
             if (aboveHealthFraction < 0f || aboveHealthFraction > 1f)
             {
                 throw new ArgumentOutOfRangeException(
@@ -42,6 +49,7 @@ namespace FalseGods.Core.Bosses.Combat
             AboveHealthFraction = aboveHealthFraction;
             Carriers = carriers;
             LoadPerCarrier = loadPerCarrier;
+            ExplosiveChance = explosiveChance;
         }
 
         /// <summary>This step applies while the boss's health is above this fraction. The steps are read in
@@ -53,6 +61,16 @@ namespace FalseGods.Core.Bosses.Combat
 
         /// <summary>How many destructibles each carrier hauls in one trip.</summary>
         public int LoadPerCarrier { get; }
+
+        /// <summary>
+        /// How much of what the room produces at this step is something that goes off.
+        /// </summary>
+        /// <remarks>
+        /// The other thing a step escalates, alongside how much is carried. A village that is merely working
+        /// faster is a bigger barrage; a village that has started sending up the dangerous stock as well is a
+        /// different fight, and it climbs with the same health thresholds so both arrive together.
+        /// </remarks>
+        public float ExplosiveChance { get; }
 
         /// <summary>Carriers times load — the quantity that decides the barrage. Diagnostic and design aid: two
         /// steps with the same product supply the same rate however they split it.</summary>
@@ -100,6 +118,7 @@ namespace FalseGods.Core.Bosses.Combat
             {
                 return new SupplyStep(0f, 0, 0);
             }
+
 
             for (var i = 0; i < _steps.Length; i++)
             {

@@ -23,7 +23,10 @@ namespace FalseGods.Protocol.Wire
     /// a client could not tell a crate produced at a source from one delivered to the boss, and the two peers
     /// would fire different crates from the same volley command.
     /// </remarks>
-    public sealed record CrateDropped(WorldPosition At, int PileKind, int PileIndex);
+    /// <param name="Explosive">Whether this one is a barrel that goes off. Sent rather than rolled on each peer:
+    /// how often the room produces one climbs as the fight turns, so two peers rolling their own would disagree
+    /// exactly at the moments the rate changes — and disagreeing about which crate is a bomb is not cosmetic.</param>
+    public sealed record CrateDropped(WorldPosition At, int PileKind, int PileIndex, bool Explosive);
 
     /// <summary>
     /// Host → all peers, reliable-ordered: a carrier standing at <see cref="At"/> picked <see cref="Count"/>

@@ -268,7 +268,7 @@ namespace FalseGods.Plugin
                     (at, pile, count, radius) => _crateFlow?.BroadcastTaken(at, pile, count, radius),
                     (from, at, pile, count, seed, explosives) =>
                         _crateFlow?.BroadcastSetDown(from, at, pile, count, seed, explosives)),
-                (at, pile) => _crateFlow?.BroadcastDropped(at, pile),
+                (at, pile, explosive) => _crateFlow?.BroadcastDropped(at, pile, explosive),
                 LaunchCrateVolley,
                 _maxClientHitDamage.Value) { LevelArena = _levelArena };
 
@@ -362,9 +362,9 @@ namespace FalseGods.Plugin
                 // whole point of sending a seed instead of positions is that it must not.
                 _crateFlow = new CrateCommandFlow(integration.Channel, integration.Session)
                 {
-                    OnDropped = (at, pile) =>
+                    OnDropped = (at, pile, explosive) =>
                     {
-                        _crates.Drop(at, pile);
+                        _crates.Drop(at, pile, explosive);
                         _log.Log($"[crate] host dropped one on {pile} at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
                             + $"{_crates.RestingOn(pile)} resting on that pile here.");
                     },

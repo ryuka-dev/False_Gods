@@ -48,7 +48,9 @@ namespace FalseGods.Application.Combat
         /// <paramref name="pile"/> is what the crate becomes: produced at a source, delivered to the boss, or
         /// merely lying there. Returns false when the crate could not be created.
         /// </summary>
-        bool Drop(ArenaWorldPoint at, CratePileId pile);
+        /// <param name="explosive">Whether this one is a barrel that goes off. Decided by whoever owns the
+        /// world and passed in, never rolled here: how often the room makes one changes as the fight turns.</param>
+        bool Drop(ArenaWorldPoint at, CratePileId pile, bool explosive = false);
 
         /// <summary>
         /// Lift up to <see cref="CrateVolleyShape.Count"/> crates off <paramref name="pile"/> — floating them up
