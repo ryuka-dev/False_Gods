@@ -208,6 +208,30 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         private FieldInfo _explosionOnDeath;
         private bool _prepared;
+
+        // Whether the "nothing could be assembled" complaint has been made since the last time something was.
+        private bool _warnedAboutNoKinds;
+
+        /// <summary>
+        /// Whether the cached templates are still real objects rather than things a level took with it.
+        /// </summary>
+        /// <remarks>
+        /// Asked of Unity rather than remembered, because that is the only end that knows. A destroyed object
+        /// compares equal to null through the overloaded operator while the reference is still held, which is
+        /// exactly the state a stale cache is in.
+        /// </remarks>
+        private bool TemplatesStillStanding()
+        {
+            for (var i = 0; i < _templates.Count; i++)
+            {
+                if (_templates[i] == null || _templates[i].Template == null)
+                {
+                    return false;
+                }
+            }
+
+            return _templates.Count > 0;
+        }
         private int _nextKind;
 
         // Counts the destructibles this peer has made, so each gets the number its twin has on every other peer.
@@ -297,9 +321,23 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         public bool Prepare()
         {
-            if (_prepared)
+            if (_prepared && TemplatesStillStanding())
             {
                 return true;
+            }
+
+            if (_prepared)
+            {
+                // The level took them. Being prepared is not a thing that happened once - it is a thing that is
+                // still true, and it stops being true when the scene these were built in unloads. Without this
+                // the cached answer stays yes and every throw clones a destroyed object, which is an exception
+                // per crate at teardown rather than a clean refusal. Dropped rather than released: whatever the
+                // handles referred to has gone with the level.
+                _templates.Clear();
+                _ordinary.Clear();
+                _explosive = null;
+                _prepared = false;
+                _logger?.Log("[crate] the level took the destructible templates with it; rebuilding them.");
             }
 
             try
@@ -329,9 +367,19 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 if (_templates.Count == 0)
                 {
-                    _logger?.LogWarning("[crate] no destructible kind could be assembled; throwing is unavailable.");
+                    // Said once until something is assembled again: this is reached on every attempt while a
+                    // level is unloading, and a line per crate is noise rather than news.
+                    if (!_warnedAboutNoKinds)
+                    {
+                        _warnedAboutNoKinds = true;
+                        _logger?.LogWarning("[crate] no destructible kind could be assembled; throwing is "
+                            + "unavailable.");
+                    }
+
                     return false;
                 }
+
+                _warnedAboutNoKinds = false;
 
                 // Split once: what the village hauls, and the one that goes off. A kind whose explosion could not
                 // be wired counts as ordinary cargo rather than as a barrel that quietly does not explode.
