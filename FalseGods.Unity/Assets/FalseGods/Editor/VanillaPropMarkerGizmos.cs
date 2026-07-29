@@ -1,4 +1,4 @@
-using UnityEditor;
+﻿using UnityEditor;
 using UnityEngine;
 
 namespace FalseGods.EditorTools
@@ -53,7 +53,10 @@ namespace FalseGods.EditorTools
                 return;
             }
 
-            foreach (Transform marker in parent)
+            // Markers are grouped under holder objects — one per kind of scenery — so this looks at every depth
+            // rather than at the immediate children. Only the mud pool's markers sit directly under the parent,
+            // which is why looking one level down found nothing but those.
+            foreach (var marker in parent.GetComponentsInChildren<Transform>(true))
             {
                 if (!marker.name.StartsWith(MarkerNamePrefix, System.StringComparison.Ordinal))
                 {
