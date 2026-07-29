@@ -172,7 +172,7 @@ namespace FalseGods.Plugin
         /// safer this way — only the fight shorter. The barrel has to be in the air, which means it has to be one
         /// the boss threw, which means the reward is for reading a barrage rather than for finding a barrel.
         /// </remarks>
-        private const float AirburstOnTheBoss = 10f;
+        private const float AirburstOnTheBoss = 20f;
 
         /// <summary>
         /// How long the boss spends announcing itself before the fight runs, matched to the roar the presentation
@@ -1417,7 +1417,7 @@ namespace FalseGods.Plugin
             }
 
             _logger?.Log($"[crate] a barrel went off {distance:0.#}m from the boss; its share is {share:0.#}"
-                + (pickedOutOfTheAir ? " (shot out of the air — ten times over)." : "."));
+                + (pickedOutOfTheAir ? $" (shot out of the air — {AirburstOnTheBoss:0}x over)." : "."));
             OnWeaponDamage(share);
         }
 

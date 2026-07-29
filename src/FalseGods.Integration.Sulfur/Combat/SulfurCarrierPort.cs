@@ -108,6 +108,10 @@ namespace FalseGods.Integration.Sulfur.Combat
         private readonly List<SulfurThrownCratePort.CrateLook> _justPickedUp =
             new List<SulfurThrownCratePort.CrateLook>();
 
+        // Where the others are already headed, rebuilt whenever one is given an errand so nobody is sent after a
+        // heap somebody else will have carried off by the time they arrive.
+        private readonly List<ArenaWorldPoint> _claimedHeaps = new List<ArenaWorldPoint>();
+
         // The route's own clock and the gaps it owes: one entry per carrier killed, holding its place empty until
         // that time. Wound by the caller's frame, so it measures the fight's time rather than the wall's.
         private float _routeClock;
@@ -444,11 +448,40 @@ namespace FalseGods.Integration.Sulfur.Combat
             // will still be there in a minute; what is on the floor is what the fight actually left behind.
             var here = carrier.Unit != null ? carrier.Unit.transform.position : Vector3.zero;
             var from = new ArenaWorldPoint(here.x, here.y, here.z);
-            if (_crates.TryFindNearestResting(CratePileId.Loose, from, out var spilled))
+            if (_crates.TryFindNearestResting(
+                CratePileId.Loose, from, out var spilled, HeapsBeingCollected(carrier), PickUpReach))
             {
                 carrier.Fetch = spilled;
                 carrier.FetchPile = CratePileId.Loose;
             }
+        }
+
+        /// <summary>
+        /// The spilled heaps other carriers are already walking to.
+        /// </summary>
+        /// <remarks>
+        /// <b>Because three of them all went to the same one.</b> Each aimed at the nearest heap, which was the
+        /// same heap, and the first to arrive collected all of it — leaving the other two to walk the rest of the
+        /// way, find bare floor, and only then think again. A carrier already on its way to a heap is as good as
+        /// having collected it, so the next one to be sent looks past it. The gap is the collector's own reach,
+        /// which is what makes one heap one errand.
+        /// </remarks>
+        private IReadOnlyList<ArenaWorldPoint> HeapsBeingCollected(Carrier except)
+        {
+            _claimedHeaps.Clear();
+            for (var i = 0; i < _carriers.Count; i++)
+            {
+                var other = _carriers[i];
+                if (!ReferenceEquals(other, except)
+                    && other.Aimed
+                    && other.Leg == Leg.ToSource
+                    && other.FetchPile.Kind == CratePileKind.Loose)
+                {
+                    _claimedHeaps.Add(other.Fetch);
+                }
+            }
+
+            return _claimedHeaps;
         }
 
         /// <summary>

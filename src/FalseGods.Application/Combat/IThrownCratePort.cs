@@ -115,7 +115,15 @@ namespace FalseGods.Application.Combat
         /// a production point and picking up a load already lying closer, it takes the closer one. That is what
         /// keeps a long fight from silting up with abandoned cargo without anything having to vanish.
         /// </remarks>
-        bool TryFindNearestResting(CratePileId pile, ArenaWorldPoint near, out ArenaWorldPoint at);
+        /// <param name="spokenFor">Places somebody else is already on their way to. Anything within
+        /// <paramref name="keepApart"/> of one of these is skipped, so two collectors sent out at the same moment
+        /// do not both walk to the same heap and only one of them find anything.</param>
+        bool TryFindNearestResting(
+            CratePileId pile,
+            ArenaWorldPoint near,
+            out ArenaWorldPoint at,
+            IReadOnlyList<ArenaWorldPoint> spokenFor = null,
+            float keepApart = 0f);
 
         /// <summary>
         /// A destructible died in a way the other peers cannot work out for themselves: a player broke it, or it

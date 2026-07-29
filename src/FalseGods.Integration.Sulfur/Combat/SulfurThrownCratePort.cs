@@ -1794,7 +1794,12 @@ namespace FalseGods.Integration.Sulfur.Combat
             return taken;
         }
 
-        public bool TryFindNearestResting(CratePileId pile, ArenaWorldPoint near, out ArenaWorldPoint at)
+        public bool TryFindNearestResting(
+            CratePileId pile,
+            ArenaWorldPoint near,
+            out ArenaWorldPoint at,
+            IReadOnlyList<ArenaWorldPoint> spokenFor = null,
+            float keepApart = 0f)
         {
             at = default(ArenaWorldPoint);
             var from = new Vector3(near.X, 0f, near.Z);
@@ -1816,12 +1821,40 @@ namespace FalseGods.Integration.Sulfur.Combat
                     continue;
                 }
 
+                if (AlreadySpokenFor(here, spokenFor, keepApart))
+                {
+                    continue;
+                }
+
                 nearest = distance;
                 at = ToPoint(here);
                 found = true;
             }
 
             return found;
+        }
+
+        /// <summary>Whether this crate is part of a heap somebody is already walking to.</summary>
+        private static bool AlreadySpokenFor(
+            Vector3 here, IReadOnlyList<ArenaWorldPoint> spokenFor, float keepApart)
+        {
+            if (spokenFor == null || keepApart <= 0f)
+            {
+                return false;
+            }
+
+            var reach = keepApart * keepApart;
+            for (var i = 0; i < spokenFor.Count; i++)
+            {
+                var dx = here.x - spokenFor[i].X;
+                var dz = here.z - spokenFor[i].Z;
+                if ((dx * dx) + (dz * dz) <= reach)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
