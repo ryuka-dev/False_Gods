@@ -41,7 +41,7 @@ namespace FalseGods.Plugin
     /// <item><b>Host</b>: the same controller with an <see cref="EncounterHostReplication"/> attached — the host
     /// adds replication, it does not swap boss implementations.</item>
     /// <item><b>Client</b>: a <see cref="ClientBossController"/> — presentation only, driven by the host's
-    /// stream; the raise/damage keys are inert.</item>
+    /// stream, and it decides nothing.</item>
     /// </list>
     /// When the adapter's registration token is disposed, the change event fires and the next frame falls back to
     /// the single-player composition (PoC B0).
@@ -49,9 +49,11 @@ namespace FalseGods.Plugin
     ///
     /// <para>
     /// <see cref="PluginGuid"/> is stable because the ST adapter declares a <c>[BepInDependency]</c> on it. The
-    /// raise key is a development affordance, not shipping gameplay; damage is the real weapon path (the game's
-    /// projectile/melee systems hitting the boss's collision body). The arena identity, hash, and origin all come
-    /// from the real load flow — a raise without valid arena content fails closed.
+    /// boss is raised by its arena being built and started by a player walking into the room — no key raises it,
+    /// and damage is the real weapon path (the game's projectile/melee systems hitting the boss's collision body).
+    /// The arena identity, hash, and origin all come from the real load flow — a raise without valid arena content
+    /// fails closed. <b>One development key is left</b>: the one that takes the session to the arena at all, which
+    /// has no replacement yet because nothing in ordinary play leads there.
     /// </para>
     /// </remarks>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
@@ -63,20 +65,8 @@ namespace FalseGods.Plugin
 
         private const int TestBossDefinition = 1;
 
-        // Bring-up throw shape: far enough ahead to read as incoming, high enough and slow enough to be shot.
-        private const float ThrowDistance = 14f;
-        private const float ThrowHeight = 1.5f;
-        private const float ThrowSeconds = 1.6f;
-        private const float ThrowApex = 3f;
-
-        // How high above a delivery pile a hand-placed crate appears, so it visibly falls onto whatever is already
-        // stacked there rather than being born inside it.
-        private const float DropHeight = 4f;
-
         // Volley shape: lift a handful of crates off the pile, hold them a beat to telegraph, then scatter them
-        // around where the player will be. Bring-up numbers - readable rise, a spread that surrounds without being
-        // unfair.
-        private const int VolleyCount = 6;
+        // around where the players will be. Readable rise, a spread that surrounds without being unfair.
         private const float VolleySpreadMin = 1.4f;
         private const float VolleySpreadMax = 4.2f;
         private const float VolleyLiftHeight = 5f;
@@ -125,12 +115,8 @@ namespace FalseGods.Plugin
         private const float CrateKnockbackLift = 4f;
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
-        private ConfigEntry<Key> _raiseKey = null!;
         private ConfigEntry<float> _maxClientHitDamage = null!;
         private ConfigEntry<Key> _hijackKey = null!;
-        private ConfigEntry<Key> _throwCrateKey = null!;
-        private ConfigEntry<Key> _dropCrateKey = null!;
-        private ConfigEntry<Key> _volleyCrateKey = null!;
 
         // A fresh seed per volley so successive dev volleys scatter differently; the host would pick this and send
         // it once when this is wired to the boss, so every peer lays the same volley out.
@@ -174,12 +160,6 @@ namespace FalseGods.Plugin
 
         private void Awake()
         {
-            _raiseKey = Config.Bind("Boss", "RaiseKey", Key.B,
-                "Raise the test boss in front of you, or tear it down if it is already up. "
-                + "Stand in a loaded level first. On a multiplayer client the key is inert - the host drives the boss. "
-                + "Damage the boss with your real weapons (bullets and melee); hits during the weak-point window "
-                + "are amplified. The game uses the new Input System.");
-
             // The boss's size and facing used to be config here. They are not player choices: the size is
             // authored in the arena (GameplayRoot/BossBody's scale) and read at load, and this boss faces the
             // local player the way the vanilla cave boss does, which is the presentation's default. Both are
@@ -204,29 +184,6 @@ namespace FalseGods.Plugin
                 + "declares the level a boss arena for everyone and leads the transition, and a client's press is "
                 + "a request to the host. Without a session it just goes there. The game uses the new Input "
                 + "System.");
-
-            // TEMPORARY bring-up affordance for the thrown-destructible mechanic: throw one crate at the player,
-            // with no boss involved, so the flight, the shoot-it-down, and the landing can be judged on their own.
-            _throwCrateKey = Config.Bind("Boss", "ThrowCrateKey", Key.N,
-                "[DEV/TEMPORARY - removed before release] Throw one of the game's crates at you, arcing, from a "
-                + "few metres away. Shoot it down and it drops loot like any barrel; let it land and it breaks "
-                + "with nothing.");
-
-            // TEMPORARY bring-up affordance for the resting half of the destructible supply chain: drop a crate
-            // in front of you under real gravity so it falls and piles. Tap it repeatedly to build a stack. This
-            // is the foundation the later "boss lifts crates off a pile and fires them" step draws from.
-            _dropCrateKey = Config.Bind("Boss", "DropCrateKey", Key.M,
-                "[DEV/TEMPORARY - removed before release] Put one of the game's crates on the delivery pile beside "
-                + "the boss, as a carrier will; it falls, rests, and stacks with others. Tap repeatedly to stock "
-                + "the boss. Resting crates stay shootable, and only these are the boss's ammunition.");
-
-            // TEMPORARY bring-up affordance: fire a shotgun volley from the pile - lift several resting crates,
-            // hold them a beat, then scatter them around you on an arc. Drop a pile with the drop key first.
-            _volleyCrateKey = Config.Bind("Boss", "VolleyCrateKey", Key.V,
-                "[DEV/TEMPORARY - removed before release] Lift a handful of crates off the boss's delivery pile, "
-                + "hold them a moment, then fire them as a spread scattered around you. Shoot them out of the air "
-                + "for loot; the ones that land drop nothing. Only delivered crates can be fired - crates still "
-                + "standing at a production point are not the boss's until somebody carries them over.");
 
             _log = new BepInExLogger(Logger);
             var cratePort = new SulfurThrownCratePort(
@@ -314,8 +271,8 @@ namespace FalseGods.Plugin
             // one place; the handler only reports the transition.
             FalseGodsIntegrations.Changed += OnIntegrationChanged;
 
-            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Raise/drop the boss: {_raiseKey.Value}; "
-                + "damage it with real weapons. "
+            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. The boss stands up with its arena and is "
+                + $"started by walking into the room; take the session there with {_hijackKey.Value}. "
                 + $"Multiplayer integration: {(FalseGodsIntegrations.Current != null ? "registered" : "none (single-player)")}.");
         }
 
@@ -341,24 +298,6 @@ namespace FalseGods.Plugin
             // the instant — and so a barrage threatens the whole room, not whoever happens to be hosting.
             TrackPlayerMotion(Time.deltaTime);
 
-            // The destructibles are host-authoritative like everything else that changes the world: the host does
-            // the thing and tells everyone, and a client's key does nothing rather than producing a second set of
-            // crates only it can see.
-            if (KeyPressed(_throwCrateKey.Value) && CrateKeysActHere())
-            {
-                ThrowOneCrateAtThePlayer();
-            }
-
-            if (KeyPressed(_dropCrateKey.Value) && CrateKeysActHere())
-            {
-                DeliverOneCrateToTheBoss();
-            }
-
-            if (KeyPressed(_volleyCrateKey.Value) && CrateKeysActHere())
-            {
-                LaunchCrateVolleyAtThePlayer();
-            }
-
             // Crates fly on their own clock, not the encounter's: they outlive a boss and exist without one.
             _crates.Advance(Time.deltaTime);
 
@@ -380,28 +319,6 @@ namespace FalseGods.Plugin
 
             TearDownClientComposition();
             RunLocalComposition(integration, role);
-        }
-
-        /// <summary>
-        /// Whether this peer's destructible keys do anything. A client's do not: the host owns what happens to
-        /// the world, and a client that made its own crates would be dodging a different volley from everyone
-        /// else's. Without a session there is only this peer, so they work.
-        /// </summary>
-        private bool CrateKeysActHere()
-        {
-            var integration = FalseGodsIntegrations.Current;
-            if (integration is null || !integration.Session.IsActive)
-            {
-                return true;
-            }
-
-            if (integration.Session.Role == RuntimeContracts.Multiplayer.SessionRole.Host)
-            {
-                return true;
-            }
-
-            Logger.LogMessage("Multiplayer client: the host throws the crates; this key is inert here.");
-            return false;
         }
 
         /// <summary>
@@ -672,87 +589,6 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>
-        /// Bring-up throw: one crate, from a few metres in front of the player, landing at their feet. Enough to
-        /// judge the arc, the shoot-it-down, and the landing before any of it is wired to a boss.
-        /// </summary>
-        private void ThrowOneCrateAtThePlayer()
-        {
-            var camera = Camera.main;
-            if (camera == null)
-            {
-                _log.LogWarning("[crate] no main camera; stand in a level first.");
-                return;
-            }
-
-            var eye = camera.transform.position;
-            var foot = new ArenaWorldPoint(eye.x, eye.y - LocalEncounterController.EyeToFootDrop, eye.z);
-
-            // Thrown from ahead of the player at roughly chest height, so the arc is visible rather than dropped
-            // on their head.
-            var forward = camera.transform.forward;
-            var from = new ArenaWorldPoint(
-                eye.x + forward.x * ThrowDistance,
-                foot.Y + ThrowHeight,
-                eye.z + forward.z * ThrowDistance);
-
-            if (_crates.Throw(from, foot, ThrowSeconds, ThrowApex))
-            {
-                _crateFlow?.BroadcastThrown(from, foot, ThrowSeconds, ThrowApex);
-                _log.Log($"[crate] crate thrown from ({from.X:0.0}, {from.Y:0.0}, {from.Z:0.0}); "
-                    + $"{_crates.InFlight} in the air. Shoot it for loot, or let it land for none.");
-            }
-        }
-
-        /// <summary>
-        /// Bring-up delivery: put one crate on the pile beside wherever the boss is standing, as a carrier will
-        /// once there are carriers. Tapping the key repeatedly stocks the boss — the ammunition a volley draws
-        /// from, and the only crates it can draw from.
-        /// </summary>
-        private void DeliverOneCrateToTheBoss()
-        {
-            if (!_boss.TryGetSupplyPile(out var pile, out var at))
-            {
-                _log.Log("[crate] nothing to deliver to: raise the boss in a room that authored delivery piles.");
-                return;
-            }
-
-            // Dropped above the pile so it falls onto whatever is already stacked there, exactly as a produced
-            // crate falls onto its source.
-            var above = new ArenaWorldPoint(at.X, at.Y + DropHeight, at.Z);
-            if (_crates.Drop(above, pile))
-            {
-                _crateFlow?.BroadcastDropped(above, pile);
-                _log.Log($"[crate] delivered one to {pile} at ({at.X:0.0}, {at.Y:0.0}, {at.Z:0.0}); "
-                    + $"{_crates.RestingOn(pile)} on that pile. Tap again to stock the boss.");
-            }
-        }
-
-        /// <summary>
-        /// Bring-up volley: lift several resting crates off the pile and fire them as a spread at where the player
-        /// will be when they land. The telegraph hangs a random beat so the lead cannot be dodged on a fixed
-        /// rhythm. Nothing happens without a pile — that is the mechanic, not a bug — so it says so when empty.
-        /// </summary>
-        private void LaunchCrateVolleyAtThePlayer()
-        {
-            var camera = Camera.main;
-            if (camera == null)
-            {
-                _log.LogWarning("[crate] no main camera; stand in a level first.");
-                return;
-            }
-
-            // A volley is fired off the boss's own pile and nothing else — crates still standing at the production
-            // points are not its ammunition until somebody brings them.
-            if (!_boss.TryGetSupplyPile(out var pile, out _))
-            {
-                _log.Log("[crate] no boss pile to fire from: raise the boss in a room that authored delivery piles.");
-                return;
-            }
-
-            LaunchCrateVolley(pile, VolleyCount);
-        }
-
-        /// <summary>
         /// Throw <paramref name="count"/> crates off <paramref name="pile"/> at the players: aim where they are and
         /// where they are going, scatter the crates around those points, and tell every client the few numbers it
         /// takes to build the same volley.
@@ -985,21 +821,6 @@ namespace FalseGods.Plugin
         {
             RaiseWithTheArena(integration, role);
 
-            if (KeyPressed(_raiseKey.Value))
-            {
-                if (_boss.IsActiveEncounter)
-                {
-                    _boss.Drop();
-                }
-                else
-                {
-                    // A host raise hands the controller the integration: the controller realizes locally, then
-                    // gates the whole roster over the channel and starts (with replication attached) only when
-                    // the gate resolves. A single-player raise gates the one local peer and starts immediately.
-                    Raise(integration, role);
-                }
-            }
-
             // The session can start or end mid-encounter; keep the attached driver consistent with the live role.
             var wantReplication = role == CompositionRole.Host && _boss.IsUp;
             if (wantReplication && !_boss.HasReplication && _boss.CurrentManifest != null)
@@ -1089,11 +910,6 @@ namespace FalseGods.Plugin
                     LevelArena = _levelArena,
                 };
                 _clientIntegration = integration;
-            }
-
-            if (KeyPressed(_raiseKey.Value))
-            {
-                Logger.LogMessage("Multiplayer client: the host drives the boss; the raise key is inert here.");
             }
 
             _client.Tick(UnityEngine.Time.deltaTime);

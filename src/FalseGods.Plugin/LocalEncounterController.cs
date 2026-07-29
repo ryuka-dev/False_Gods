@@ -813,7 +813,7 @@ namespace FalseGods.Plugin
         /// anchor are the same place in the room and share its pile. A room that authored fewer piles than anchors
         /// reuses its last one, so adding an anchor never silently leaves the boss without ammunition.
         /// </remarks>
-        public bool TryGetSupplyPile(out CratePileId pile, out ArenaWorldPoint at)
+        private bool TryGetSupplyPile(out CratePileId pile, out ArenaWorldPoint at)
         {
             pile = CratePileId.Loose;
             at = default;
