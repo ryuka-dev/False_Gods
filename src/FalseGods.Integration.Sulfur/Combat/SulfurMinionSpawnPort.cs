@@ -176,6 +176,11 @@ namespace FalseGods.Integration.Sulfur.Combat
                 return;
             }
 
+            // Counted BEFORE any of this band lands, and through Alive so corpses do not count as a crowd. Both
+            // matter: a spawn whose asset is already loaded completes synchronously, so a count taken after the
+            // loop has some of the arriving band in it and reads as a floor fuller than it is.
+            var standing = Alive;
+
             var summoned = 0;
             var cost = 0;
             var composition = new List<string>(members.Length);
@@ -199,7 +204,7 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             _logger?.Log($"[minion] the {band} band arrives: {summoned} of {members.Length} at {places.Count} "
                 + $"authored place(s), worth {cost} (a vanilla cave patrol is 15) — {string.Join(", ", composition)}; "
-                + $"{_spawned.Count} already alive.");
+                + $"{standing} of this port's were still standing when it was called.");
         }
 
         /// <summary>
