@@ -237,6 +237,10 @@ namespace FalseGods.Plugin
         private float _walkSpeedInUse = AssumedCarrierWalkSpeed;
         private int _lastReportedThroughput = -1;
 
+        // What a barrel is worth and how far it reaches, taken from the game's own explosion once a fight starts.
+        private float _blastDamage;
+        private float _blastRadius;
+
         private BossSimulation? _boss;
         private BossPresenter? _presenter;
         private BossPresentation? _presentation;
@@ -329,6 +333,12 @@ namespace FalseGods.Plugin
         }
 
         /// <summary>
+        /// Told where a barrel went off, so the boss can take its share of one. Wired by the Composition Root,
+        /// which owns the crate port; the encounter is what knows where the boss is and what a hit does to it.
+        /// </summary>
+        public void ExplosionAt(ArenaWorldPoint at) => BossTakesItsShareOfTheBlast(at);
+
+        /// <summary>
         /// The arena a hijacked level load left standing, when there is one. Set by the Composition Root; while it
         /// reports a live arena, a raise fights in <i>that</i> arena instead of loading and placing its own.
         /// </summary>
@@ -384,6 +394,10 @@ namespace FalseGods.Plugin
             // it is wanted: both the boss's voice and its music are game assets that are not there at plugin load.
             _voice.Warm();
             _atmosphere.Warm();
+
+            // The blast is the game's, so its numbers are too; read once per fight, when the game certainly has
+            // its content loaded.
+            (_crates as SulfurThrownCratePort)?.ReadBlast(out _blastDamage, out _blastRadius);
 
             // ── The arena may already be here. A hijacked level load realized our arena AS the level, through
             // this same load flow — same content hash, same parity check, same borrowed materials — so the
@@ -1272,6 +1286,47 @@ namespace FalseGods.Plugin
                     + "back to their own lives.");
                 return;
             }
+        }
+
+        /// <summary>
+        /// The boss's share of a barrel going off near it.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Worked out here because the game cannot do it for us.</b> An explosion finds its victims by
+        /// walking up from the colliders it overlaps to a <c>Unit</c>, and our boss is not a creature the game
+        /// runs — what stands there is our own renderer with our own capsule. So everything else in the room
+        /// (players, the village, the waves) is caught by the game's own blast, and the boss's share is measured
+        /// with the game's own numbers and put through the same authoritative damage path a weapon hit uses.</para>
+        /// <para>Linear falloff from the centre, which is exactly what the game's own explosion does, so a barrel
+        /// that goes off at the boss's feet is worth what it would be worth to anything else standing there.</para>
+        /// <para>Host only, like every other decision: a client's barrels go off for the look of it and its own
+        /// player takes the game's blast, but what it costs the boss is settled once, here.</para>
+        /// </remarks>
+        private void BossTakesItsShareOfTheBlast(ArenaWorldPoint at)
+        {
+            if (_boss is null || _boss.IsDead || _blastRadius <= 0f)
+            {
+                return;
+            }
+
+            var stands = BossStandsAt();
+            var dx = stands.X - at.X;
+            var dy = stands.Y - at.Y;
+            var dz = stands.Z - at.Z;
+            var distance = (float)Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+            if (distance >= _blastRadius)
+            {
+                return;
+            }
+
+            var share = _blastDamage * (1f - (distance / _blastRadius));
+            if (share <= 0f)
+            {
+                return;
+            }
+
+            _logger?.Log($"[crate] a barrel went off {distance:0.#}m from the boss; its share is {share:0.#}.");
+            OnWeaponDamage(share);
         }
 
         /// <summary>Where the boss is standing this frame, in world space.</summary>

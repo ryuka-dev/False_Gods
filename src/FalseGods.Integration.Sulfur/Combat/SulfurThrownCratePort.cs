@@ -78,7 +78,48 @@ namespace FalseGods.Integration.Sulfur.Combat
                 MaterialPathFragment = "Crate",
                 BreakEffectPathFragment = "CrateBreakEffect",
             },
+            new DestructibleSpec
+            {
+                // The one that goes off. Assembled exactly like the others and then given the game's own
+                // explosion to die with, so every way it can die — shot out of the air, shot where it stands,
+                // caught by another blast — ends in the same bang without any of those paths knowing about it.
+                Unit = UnitIds.ExplosiveBarrel,
+                Name = "explosive barrel",
+                MeshPathFragment = "Barrel_Explosion",
+                MaterialPathFragment = "Barrels/M_Barrel",
+                BreakEffectPathFragment = "ExplosiveBarrelBreakEffect",
+                Explosion = ExplosionTypes.ExplosiveBarrel,
+            },
         };
+
+        /// <summary>
+        /// How often a produced destructible is an explosive barrel rather than ordinary cargo.
+        /// </summary>
+        /// <remarks>
+        /// Low on purpose: the barrels are the thing that makes a barrage worth watching rather than the thing a
+        /// barrage is made of. At the rates the village supplies, one in twelve is roughly a barrel every few
+        /// seconds at full production — enough that a player learns to look for them, far from enough that the
+        /// fight becomes about them.
+        /// </remarks>
+        private const float ExplosiveChance = 1f / 12f;
+
+        /// <summary>
+        /// Salt for the explosive roll. Kept clear of the volley's salts because this is rolled per <b>crate
+        /// ordinal</b>, not per volley — see <see cref="PickKind"/> for why that is what makes it agree across
+        /// peers without anything being sent.
+        /// </summary>
+        private const int ExplosiveSeed = 5150;
+
+        /// <summary>
+        /// How long a thrown barrel lies on the ground before it goes off.
+        /// </summary>
+        /// <remarks>
+        /// <b>Ours, not the game's.</b> Vanilla has no fuse: a barrel explodes the instant its health runs out,
+        /// and the delay a player remembers is the seconds they spend shooting it. A barrel arriving as part of a
+        /// barrage needs something else — a moment where it has landed, is plainly about to go off, and can still
+        /// be run away from. Without it a barrel is just a crate that does more damage.
+        /// </remarks>
+        private const float LandedFuseSeconds = 3f;
 
         // The layer the vanilla destructibles sit on, so the game's weapon fire finds our body the same way.
         private const string BreakableLayerName = "Breakable";
@@ -126,6 +167,13 @@ namespace FalseGods.Integration.Sulfur.Combat
         // cloned from one of these. A kind whose content could not be sourced is simply absent, so the rest still
         // work.
         private readonly List<DestructibleTemplate> _templates = new List<DestructibleTemplate>();
+
+        // The same kinds, split by what they do when they die: the cargo the village cycles through, and the one
+        // that goes off (null when it could not be assembled, which simply means no barrels).
+        private readonly List<DestructibleTemplate> _ordinary = new List<DestructibleTemplate>();
+        private DestructibleTemplate _explosive;
+
+        private FieldInfo _explosionOnDeath;
         private bool _prepared;
         private int _nextKind;
 
@@ -241,6 +289,20 @@ namespace FalseGods.Integration.Sulfur.Combat
                     return false;
                 }
 
+                // Split once: what the village hauls, and the one that goes off. A kind whose explosion could not
+                // be wired counts as ordinary cargo rather than as a barrel that quietly does not explode.
+                foreach (var kind in _templates)
+                {
+                    if (kind.Explodes)
+                    {
+                        _explosive = kind;
+                    }
+                    else
+                    {
+                        _ordinary.Add(kind);
+                    }
+                }
+
                 _prepared = true;
                 _logger?.Log($"[crate] destructible content ready: {string.Join(", ", built)}.");
                 return true;
@@ -308,7 +370,55 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
 
             template.Template = body;
+            template.Explodes = spec.Explosion != ExplosionTypes.None
+                && GiveItAnExplosion(body, spec.Explosion);
+            template.Look = LookOf(body);
             return template;
+        }
+
+        /// <summary>
+        /// Make this kind die in an explosion, by writing the game's own "what I go off as" onto the template.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>One field, and then every way of dying is covered.</b> A unit queues this explosion from its
+        /// own death, so a barrel shot out of the air, shot where it stands, or caught in another blast all end
+        /// the same way without any of those paths being taught about barrels. It is written onto the
+        /// <i>template</i>, so every clone is born with it.</para>
+        /// <para>Private, because the game only ever sets it in the editor. Failing to find it costs the bang and
+        /// nothing else — the barrel still breaks like cargo — so it is reported and carried on.</para>
+        /// </remarks>
+        private bool GiveItAnExplosion(GameObject template, ExplosionTypes explosion)
+        {
+            var breakable = template.GetComponent<Breakable>();
+            if (breakable == null)
+            {
+                return false;
+            }
+
+            if (_explosionOnDeath == null)
+            {
+                _explosionOnDeath = PrivateField(typeof(Unit), "explosionOnDeath");
+                if (_explosionOnDeath == null)
+                {
+                    _logger?.LogWarning("[crate] the game's 'explosion on death' is not where it was; explosive "
+                        + "barrels will break like ordinary cargo.");
+                    return false;
+                }
+            }
+
+            _explosionOnDeath.SetValue(breakable, explosion);
+            return true;
+        }
+
+        /// <summary>What an assembled kind looks like — its own mesh and material, or nothing when it was built
+        /// on something that carries neither.</summary>
+        private static CrateLook LookOf(GameObject template)
+        {
+            var filter = template.GetComponentInChildren<MeshFilter>(true);
+            var renderer = template.GetComponentInChildren<MeshRenderer>(true);
+            return filter == null || renderer == null
+                ? default(CrateLook)
+                : new CrateLook(filter.sharedMesh, renderer.sharedMaterial);
         }
 
         /// <summary>The built-in unit cube's mesh, borrowed from a throwaway primitive. The shared mesh is a
@@ -322,8 +432,33 @@ namespace FalseGods.Integration.Sulfur.Combat
             return mesh;
         }
 
-        /// <summary>The next kind to spawn, cycled so a pile or a volley mixes the kinds evenly.</summary>
-        private DestructibleTemplate PickKind() => _templates[_nextKind++ % _templates.Count];
+        /// <summary>
+        /// What the next destructible is: ordinary cargo most of the time, and now and then a barrel that goes off.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Nothing is sent for this, and nothing needs to be.</b> Every peer builds the same destructibles
+        /// from the same broadcast commands in the same order, so the ordinal is already a shared number — the same
+        /// fact the crate's own id is built on. Rolling the barrel from that ordinal makes every peer roll the same
+        /// answer, which is the same reason a volley sends a seed rather than positions.</para>
+        /// <para>The ordinary kinds still cycle, so a pile is an even mix of them; the barrel is drawn out of the
+        /// cycle rather than taking a turn in it, or its rate would be whatever the number of kinds happened to be.
+        /// </para>
+        /// </remarks>
+        private DestructibleTemplate PickKind()
+        {
+            var ordinal = _nextKind++;
+            if (_explosive != null && SeededRandom.Unit01(ExplosiveSeed, ordinal) < ExplosiveChance)
+            {
+                return _explosive;
+            }
+
+            if (_ordinary.Count == 0)
+            {
+                return _templates[ordinal % _templates.Count];
+            }
+
+            return _ordinary[ordinal % _ordinary.Count];
+        }
 
         /// <summary>
         /// The mesh and material of one destructible kind, for something that needs to <i>look</i> like a crate
@@ -421,7 +556,8 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var start = new Vector3(from.X, from.Y, from.Z);
                 var target = new Vector3(to.X, to.Y, to.Z);
 
-                var unit = SpawnFrom(PickKind(), start, out var breakable);
+                var kind = PickKind();
+                var unit = SpawnFrom(kind, start, out var breakable);
                 if (unit == null)
                 {
                     _logger?.LogWarning("[crate] the game returned no unit for the destructible.");
@@ -437,7 +573,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // Thrown at somebody, so it can pay — on the same odds as a crate out of a volley.
                 SetLootAllowed(breakable, SeededRandom.Unit01(_nextThrowSeed++, LootSalt) < LootChance);
 
-                var crate = new ManagedCrate(unit, breakable, NextCrateId());
+                var crate = new ManagedCrate(unit, breakable, NextCrateId(), kind.Explodes, kind.Look);
                 crate.BeginFlight(start, target, flightSeconds, apexHeight);
                 _crates.Add(crate);
                 return true;
@@ -462,7 +598,8 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 // Same real spawn as a throw — a live destructible, weapon-fire and loot and all — but from here on
                 // the game's physics owns it, not our arc.
-                var unit = SpawnFrom(PickKind(), where, out var breakable);
+                var kind = PickKind();
+                var unit = SpawnFrom(kind, where, out var breakable);
                 if (unit == null)
                 {
                     _logger?.LogWarning("[crate] the game returned no unit for the resting destructible.");
@@ -481,7 +618,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // to the pile it was dropped onto, which is what decides whether the boss may ever fire it.
                 // Standing on a pile it is worth nothing to shoot; only what the boss sends can pay.
                 SetLootAllowed(breakable, false);
-                _crates.Add(new ManagedCrate(unit, breakable, NextCrateId()) { Pile = pile });
+                _crates.Add(new ManagedCrate(unit, breakable, NextCrateId(), kind.Explodes, kind.Look) { Pile = pile });
                 if (pile.Kind == CratePileKind.Loose)
                 {
                     CapLooseCrates();
@@ -527,7 +664,8 @@ namespace FalseGods.Integration.Sulfur.Combat
             try
             {
                 var start = new Vector3(from.X, from.Y, from.Z);
-                var unit = SpawnFrom(PickKind(), start, out var breakable);
+                var kind = PickKind();
+                var unit = SpawnFrom(kind, start, out var breakable);
                 if (unit == null)
                 {
                     _logger?.LogWarning("[crate] the game returned no unit for the tossed destructible.");
@@ -544,7 +682,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // On its way to a pile, so worth nothing to shoot — the same rule as one already standing there.
                 SetLootAllowed(breakable, false);
 
-                var crate = new ManagedCrate(unit, breakable, NextCrateId());
+                var crate = new ManagedCrate(unit, breakable, NextCrateId(), kind.Explodes, kind.Look);
                 crate.BeginToss(start, new Vector3(to.X, to.Y, to.Z), flightSeconds, apexHeight, pile);
                 _crates.Add(crate);
                 return true;
@@ -649,6 +787,44 @@ namespace FalseGods.Integration.Sulfur.Combat
         public Action<int, CrateDeath> Died { get; set; }
 
         /// <summary>
+        /// A barrel went off, and where. For the one thing the game's own blast cannot reach: our boss is not a
+        /// creature the game runs, so no overlap check will ever find it and its share of an explosion has to be
+        /// worked out by whoever owns it.
+        /// </summary>
+        /// <remarks>Raised on every peer, because every peer sets its own barrels off from the same commands and
+        /// the same seed. Nothing here decides anything — what it costs the boss is settled where the boss is.
+        /// </remarks>
+        public Action<ArenaWorldPoint> Exploded { get; set; }
+
+        /// <summary>
+        /// What one of these barrels is worth, and how far it reaches — read from the game's own explosion
+        /// definition rather than guessed, so the share our boss takes is the share everything else takes.
+        /// </summary>
+        /// <remarks>Zero radius when the definition cannot be read, which reads as "the blast reaches nobody we
+        /// have to hand-damage" — the game's own victims are unaffected either way.</remarks>
+        public void ReadBlast(out float damage, out float radius)
+        {
+            damage = 0f;
+            radius = 0f;
+            try
+            {
+                var definition = ExplosionTypes.ExplosiveBarrel.GetAsset();
+                if (definition == null)
+                {
+                    return;
+                }
+
+                damage = definition.data.damage;
+                radius = definition.data.damageRadius;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[crate] the game's barrel blast could not be measured ({exception.Message}); "
+                    + "the boss will not take a share of one.");
+            }
+        }
+
+        /// <summary>
         /// Carry out a destruction decided elsewhere: destroy the crate numbered <paramref name="crateId"/> the
         /// way <paramref name="death"/> says. A number this peer does not have is nothing to do — piles settle
         /// under physics rather than under the commands alone, so two peers can disagree about which crate a
@@ -721,6 +897,8 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         public void Advance(float deltaSeconds)
         {
+            BurnFuses(deltaSeconds);
+
             for (var index = _crates.Count - 1; index >= 0; index--)
             {
                 var crate = _crates[index];
@@ -1220,7 +1398,66 @@ namespace FalseGods.Integration.Sulfur.Combat
         {
             crate.Unit.transform.position = crate.Target;
             _impact?.Splash(ToPoint(crate.Target));
+
+            // A barrel that arrives does not break — it lies where it fell with a lit fuse, which is the one
+            // moment in a barrage a player can do something about. Everything else about it stays the game's: it
+            // is still shootable while it sits there, and shooting it simply brings the bang forward.
+            if (crate.Explodes)
+            {
+                crate.Fuse = LandedFuseSeconds;
+                crate.RestWhereItLanded();
+                _logger?.Log($"[crate] a barrel landed at ({crate.Target.x:0.0}, {crate.Target.y:0.0}, "
+                    + $"{crate.Target.z:0.0}); {LandedFuseSeconds:0.#}s to get clear.");
+                return;
+            }
+
             BreakNoLoot(crate);
+        }
+
+        /// <summary>
+        /// Burn down the fuse of every barrel lying on the ground, and set off the ones that reach zero.
+        /// </summary>
+        /// <remarks>
+        /// Driven by the caller's frame like everything else here, so a paused game holds the fuse rather than
+        /// letting it run in the background. Detonating is just killing it: the explosion is the unit's own, from
+        /// the field its template was born with.
+        /// </remarks>
+        private void BurnFuses(float deltaSeconds)
+        {
+            for (var index = _crates.Count - 1; index >= 0; index--)
+            {
+                var crate = _crates[index];
+                if (crate.Fuse <= 0f || crate.Unit == null)
+                {
+                    continue;
+                }
+
+                crate.Fuse -= deltaSeconds;
+                if (crate.Fuse > 0f)
+                {
+                    continue;
+                }
+
+                crate.Fuse = 0f;
+                _crates.RemoveAt(index);
+                Detonate(crate);
+            }
+        }
+
+        /// <summary>
+        /// Set a barrel off where it lies, and tell whoever is listening where the blast was.
+        /// </summary>
+        /// <remarks>
+        /// <b>The blast itself is the game's</b> — killing the unit queues the game's own explosion, which finds
+        /// its victims the way every other explosion in the game does. What is announced is only for the things
+        /// the game's search cannot see: our boss is not a creature the game runs, so nothing in an overlap check
+        /// will ever find it, and its share has to be worked out by whoever owns it.
+        /// </remarks>
+        private void Detonate(ManagedCrate crate)
+        {
+            var at = crate.Unit != null ? crate.Unit.transform.position : crate.Target;
+            BreakNoLoot(crate);
+            Exploded?.Invoke(ToPoint(at));
         }
 
         /// <summary>
@@ -1284,7 +1521,20 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
-        public int TakeFrom(CratePileId pile, int count, ArenaWorldPoint near, float radius)
+        public int TakeFrom(CratePileId pile, int count, ArenaWorldPoint near, float radius) =>
+            TakeFrom(pile, count, near, radius, null);
+
+        /// <summary>
+        /// The same collection, additionally reporting what was picked up into <paramref name="looks"/>.
+        /// </summary>
+        /// <remarks>
+        /// So a carrier can show its real load. What is on a goblin's back is a stack of whatever it actually took
+        /// off the pile — barrels, boxes, and the occasional thing that should not be dropped — and a stack that
+        /// showed one kind for all of them was hiding the one piece of information a player most wants from the
+        /// route. The kinds stay entirely inside this adapter: the carrier asks for a look, never for a "kind".
+        /// </remarks>
+        internal int TakeFrom(
+            CratePileId pile, int count, ArenaWorldPoint near, float radius, List<CrateLook> looks)
         {
             if (count <= 0)
             {
@@ -1327,6 +1577,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                     }
                 }
 
+                looks?.Add(crate.Look);
                 _crates.RemoveAt(index);
                 taken++;
             }
@@ -1506,6 +1757,30 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         /// <summary>How to build one kind of destructible: which vanilla unit it is, and where its mesh, material,
         /// and break effect come from. A cube kind needs no model at all.</summary>
+        /// <summary>
+        /// What one destructible looks like: the game's own mesh and material for its kind.
+        /// </summary>
+        /// <remarks>
+        /// Shared rather than resolved a second time — this port already located and holds them, and loading them
+        /// again elsewhere would mean a second set of handles to release and a second chance to render magenta. A
+        /// kind built on something with neither (a plain cube) carries an empty look, and whoever draws it falls
+        /// back to a box.
+        /// </remarks>
+        internal readonly struct CrateLook
+        {
+            public CrateLook(Mesh mesh, Material material)
+            {
+                Mesh = mesh;
+                Material = material;
+            }
+
+            public Mesh Mesh { get; }
+
+            public Material Material { get; }
+
+            public bool Known => Mesh != null && Material != null;
+        }
+
         private sealed class DestructibleSpec
         {
             public UnitId Unit;
@@ -1514,6 +1789,9 @@ namespace FalseGods.Integration.Sulfur.Combat
             public string MeshPathFragment;
             public string MaterialPathFragment;
             public string BreakEffectPathFragment;
+
+            /// <summary>What this kind explodes as when it dies, or <c>None</c> for one that simply breaks.</summary>
+            public ExplosionTypes Explosion;
         }
 
         /// <summary>One assembled kind: the inactive template every unit of it is cloned from, its definition, and
@@ -1523,6 +1801,13 @@ namespace FalseGods.Integration.Sulfur.Combat
             public UnitSO Definition;
             public GameObject Template;
             public string Name;
+
+            /// <summary>Whether units of this kind go off when they die.</summary>
+            public bool Explodes;
+
+            /// <summary>What one of these looks like, for something that has to <i>look</i> like cargo without
+            /// being any — a load riding on a goblin's back. Read off the assembled template once.</summary>
+            public CrateLook Look;
             public readonly List<AsyncOperationHandle> Handles = new List<AsyncOperationHandle>();
 
             /// <summary>Destroy the template and release its held content. Safe to call on a half-built kind.</summary>
@@ -1568,12 +1853,26 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </summary>
         private sealed class ManagedCrate
         {
-            public ManagedCrate(Unit unit, Breakable breakable, int id)
+            public ManagedCrate(Unit unit, Breakable breakable, int id, bool explodes, CrateLook look)
             {
                 Unit = unit;
                 Breakable = breakable;
                 Id = id;
+                Explodes = explodes;
+                Look = look;
             }
+
+            /// <summary>What this one looks like, so a carrier hauling it can show the thing it is carrying rather
+            /// than a stand-in for it.</summary>
+            public CrateLook Look { get; }
+
+            /// <summary>Whether this one goes off when it dies rather than simply breaking.</summary>
+            public bool Explodes { get; }
+
+            /// <summary>Seconds left on the fuse of a barrel that has landed, or 0 when nothing is burning down.
+            /// Only a barrel the boss <i>threw</i> ever gets one: one standing where it was made is the game's
+            /// ordinary barrel and goes off when somebody destroys it.</summary>
+            public float Fuse { get; set; }
 
             /// <summary>Which destructible this is, counted in the order they were made. Every peer makes the
             /// same ones from the same commands in the same order, so the number means the same crate on all of
@@ -1643,6 +1942,15 @@ namespace FalseGods.Integration.Sulfur.Combat
                 Pile = pile;
                 Elapsed = 0f;
                 Phase = Phase.Tossing;
+            }
+
+            /// <summary>Lie where a throw put it, on nobody's pile: what a barrel does while its fuse burns.
+            /// The boss cannot fire it again — it is not on a pile — and a player can still shoot it.</summary>
+            public void RestWhereItLanded()
+            {
+                Elapsed = 0f;
+                Pile = CratePileId.Loose;
+                Phase = Phase.Resting;
             }
 
             /// <summary>Come to rest where the toss ended — back under the game's own physics, on its pile.</summary>

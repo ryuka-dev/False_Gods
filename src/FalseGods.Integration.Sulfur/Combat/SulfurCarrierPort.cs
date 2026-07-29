@@ -87,11 +87,10 @@ namespace FalseGods.Integration.Sulfur.Combat
         private bool _reportedDeactivationTrap;
         private bool _pending; // a spawn is in flight; don't ask for a second one in the same breath
 
-        // The look a carried load wears, borrowed from the crate port rather than resolved again — see
-        // SulfurThrownCratePort.TryGetLook. Read once the crate content is ready.
-        private Mesh _look;
-        private Material _lookMaterial;
-        private bool _lookResolved;
+        // What each carrier picked up, refilled on every collection and read straight into its drawn stack. One
+        // list, reused, because a pick-up happens on one carrier at a time.
+        private readonly List<SulfurThrownCratePort.CrateLook> _justPickedUp =
+            new List<SulfurThrownCratePort.CrateLook>();
 
         // The route's own clock and the gaps it owes: one entry per carrier killed, holding its place empty until
         // that time. Wound by the caller's frame, so it measures the fight's time rather than the wall's.
@@ -166,8 +165,6 @@ namespace FalseGods.Integration.Sulfur.Combat
             {
                 return; // a room with nowhere to fetch from has no supply line
             }
-
-            ResolveTheLoadsLook();
 
             PutOnTheRoute(wanted, sources);
             TakeOffTheRoute(wanted);
@@ -267,29 +264,6 @@ namespace FalseGods.Integration.Sulfur.Combat
             return dropped;
         }
 
-        /// <summary>
-        /// Take the crate mesh and material off the crate port once it has them, so a carried load looks like the
-        /// thing it will become. Tried once: the content is prepared on the first crate and does not change, and a
-        /// carrier whose load has no look still carries it — the stack simply falls back to a plain box.
-        /// </summary>
-        private void ResolveTheLoadsLook()
-        {
-            if (_lookResolved)
-            {
-                return;
-            }
-
-            var port = _crates as SulfurThrownCratePort;
-            if (port == null || !port.TryGetLook(out var mesh, out var material))
-            {
-                return; // not ready yet, or a port that has no look to lend; try again next frame
-            }
-
-            _look = mesh;
-            _lookMaterial = material;
-            _lookResolved = true;
-        }
-
         // ------------------------------------------------------------------ the route
 
         /// <summary>One leg at a time: fetch from a production point, load, walk it to the boss, set it down.</summary>
@@ -302,7 +276,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             CratePileId deliverPile)
         {
             carrier.OnLeg += deltaSeconds;
-            carrier.DrawLoad(_look, _lookMaterial);
+            carrier.DrawLoad();
 
             switch (carrier.Leg)
             {
@@ -337,10 +311,15 @@ namespace FalseGods.Integration.Sulfur.Combat
                     {
                         var here = carrier.Unit != null ? carrier.Unit.transform.position : carrier.LastPosition;
                         var at = new ArenaWorldPoint(here.x, here.y, here.z);
-                        var took = _crates.TakeFrom(carrier.FetchPile, room, at, PickUpReach);
+                        _justPickedUp.Clear();
+                        var port = _crates as SulfurThrownCratePort;
+                        var took = port != null
+                            ? port.TakeFrom(carrier.FetchPile, room, at, PickUpReach, _justPickedUp)
+                            : _crates.TakeFrom(carrier.FetchPile, room, at, PickUpReach);
                         if (took > 0)
                         {
                             carrier.Load += took;
+                            carrier.Shoulder(_justPickedUp, took);
 
                             // A client has no carriers of its own, so its piles only shrink when told.
                             _announceTaken?.Invoke(at, carrier.FetchPile, took, PickUpReach);
@@ -772,8 +751,9 @@ namespace FalseGods.Integration.Sulfur.Combat
         private sealed class Carrier
         {
             private readonly List<GameObject> _drawn = new List<GameObject>();
-            private Mesh _look;
-            private Material _lookMaterial;
+            /// <summary>What is actually on this carrier's back, in pick-up order.</summary>
+            private readonly List<SulfurThrownCratePort.CrateLook> _carried =
+                new List<SulfurThrownCratePort.CrateLook>();
 
             public Carrier(Unit unit, int sourceIndex)
             {
@@ -820,16 +800,37 @@ namespace FalseGods.Integration.Sulfur.Combat
             /// <summary>Draw the load as a stack riding on the goblin, wearing the same mesh and material the real
             /// destructibles do. Presentation only: these have no physics, no health and no hit detection, which
             /// is the whole reason a carrier can haul a dozen without the level filling with bodies.</summary>
-            public void DrawLoad(Mesh look, Material lookMaterial)
+            /// <summary>Take a collection onto the carrier's back: what it is now holding, in the order it picked
+            /// them up, so the stack shows the load rather than a stand-in for it.</summary>
+            public void Shoulder(List<SulfurThrownCratePort.CrateLook> picked, int took)
+            {
+                for (var i = 0; i < picked.Count && i < took; i++)
+                {
+                    _carried.Add(picked[i]);
+                }
+
+                // A collection this peer could not itemise (it was told the count, not the contents) still has to
+                // show something, so the stack is padded with whatever the last known item was.
+                while (_carried.Count < Load)
+                {
+                    _carried.Add(_carried.Count > 0 ? _carried[_carried.Count - 1] : default(SulfurThrownCratePort.CrateLook));
+                }
+
+                Redraw();
+            }
+
+            public void DrawLoad()
             {
                 if (Unit == null)
                 {
                     return;
                 }
 
-                _look = look;
-                _lookMaterial = lookMaterial;
+                Redraw();
+            }
 
+            private void Redraw()
+            {
                 var drawn = Math.Min(Load, MaxDrawnStack);
                 while (_drawn.Count > drawn)
                 {
@@ -843,21 +844,26 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                 while (_drawn.Count < drawn)
                 {
-                    _drawn.Add(MakeOne(Unit.transform, _drawn.Count, _look, _lookMaterial));
+                    _drawn.Add(MakeOne(Unit.transform, _drawn.Count, LookAt(_drawn.Count)));
                 }
             }
+
+            /// <summary>The look of the nth thing on this carrier's back, or nothing when it was never itemised.
+            /// Drawn top of the stack last, which is the order they were picked up in.</summary>
+            private SulfurThrownCratePort.CrateLook LookAt(int place) =>
+                place < _carried.Count ? _carried[place] : default(SulfurThrownCratePort.CrateLook);
 
             /// <summary>One crate of the stack: a bare mesh renderer parented to the goblin, no collider and no
             /// body, so it rides along without touching physics. Falls back to a plain cube when the crate
             /// content is not ready, so a carrier is never invisibly empty-handed.</summary>
-            private static GameObject MakeOne(Transform on, int place, Mesh look, Material lookMaterial)
+            private static GameObject MakeOne(Transform on, int place, SulfurThrownCratePort.CrateLook look)
             {
                 GameObject box;
-                if (look != null && lookMaterial != null)
+                if (look.Known)
                 {
                     box = new GameObject("FalseGods_CarriedCrate");
-                    box.AddComponent<MeshFilter>().sharedMesh = look;
-                    box.AddComponent<MeshRenderer>().sharedMaterial = lookMaterial;
+                    box.AddComponent<MeshFilter>().sharedMesh = look.Mesh;
+                    box.AddComponent<MeshRenderer>().sharedMaterial = look.Material;
                 }
                 else
                 {
@@ -879,6 +885,10 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             public void ClearDrawnLoad()
             {
+                // What it was holding goes with what was drawn of it: a carrier that has set its load down starts
+                // its next collection empty, or the stack would keep growing out of the last trip's contents.
+                _carried.Clear();
+
                 for (var i = 0; i < _drawn.Count; i++)
                 {
                     if (_drawn[i] != null)

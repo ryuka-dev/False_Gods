@@ -197,6 +197,11 @@ namespace FalseGods.Plugin
             // who this peer is, which the flow knows; with no session there is nobody to tell.
             cratePort.Died = (crateId, death) => _crateFlow?.ReportDestroyed(crateId, death);
 
+            // The game's own blast catches everything in the room that the game runs. The boss is not one of
+            // those, so its share is worked out where the boss is — on this peer, and only meaningfully on the one
+            // that owns the fight.
+            cratePort.Exploded = at => _boss?.ExplosionAt(at);
+
             // Only ever used on a client: it puts the host's loads on the backs of the goblins this peer mirrored,
             // which the carry commands cannot do because they carry no idea of which goblin is which.
             _carriedLoads = new SulfurCarriedLoadMirror(cratePort, _log);
