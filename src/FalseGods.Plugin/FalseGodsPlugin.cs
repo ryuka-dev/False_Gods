@@ -842,6 +842,7 @@ namespace FalseGods.Plugin
         /// <summary>Single-player and host: the local simulation stack, with replication attached iff hosting.</summary>
         private void RunLocalComposition(IFalseGodsIntegration? integration, CompositionRole role)
         {
+            DropWithTheArena();
             RaiseWithTheArena(integration, role);
 
             // The session can start or end mid-encounter; keep the attached driver consistent with the live role.
@@ -859,6 +860,31 @@ namespace FalseGods.Plugin
             }
 
             _boss.Tick(UnityEngine.Time.deltaTime); // also drives a waiting host gate; a no-op when idle
+        }
+
+        /// <summary>
+        /// The fight belongs to the room, so it ends with the room.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Measured, after leaving one standing.</b> A fight was only ever dropped when a NEW arena
+        /// replaced the one it stood in, so walking out to an ordinary level left it running against a room that
+        /// no longer existed — still watching for somebody to reach a doorway at a fixed world position. Cross
+        /// that spot in the next level and the boss announced itself: roar, battle music, the boss bar, and the
+        /// arena's fog over a cave that had nothing to do with it.</para>
+        /// <para>Liveness is asked of the Unity object rather than tracked, so this needs no level-change
+        /// observer: the level destroys the arena on its way out and the answer changes by itself. Every local
+        /// raise comes from <see cref="RaiseWithTheArena"/> and so stands in the level's own arena, which is what
+        /// makes that one question enough.</para>
+        /// </remarks>
+        private void DropWithTheArena()
+        {
+            if (!_boss.IsUp || _levelArena.IsLive)
+            {
+                return;
+            }
+
+            Logger.LogMessage("The level took the arena with it; the fight there is over.");
+            _boss.Drop();
         }
 
         /// <summary>
