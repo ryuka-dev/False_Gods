@@ -152,6 +152,17 @@ namespace FalseGods.Plugin
         private const int ExplosiveRollSeed = 20873;
 
         /// <summary>
+        /// What catching one of the boss's barrels in mid-flight is worth against the boss itself.
+        /// </summary>
+        /// <remarks>
+        /// A skill reward, and deliberately a narrow one: it applies only to the boss's share, so shooting a
+        /// barrel over a crowd of goblins is no more effective than it ever was, and a player cannot make the room
+        /// safer this way — only the fight shorter. The barrel has to be in the air, which means it has to be one
+        /// the boss threw, which means the reward is for reading a barrage rather than for finding a barrel.
+        /// </remarks>
+        private const float AirburstOnTheBoss = 10f;
+
+        /// <summary>
         /// How long the boss spends announcing itself before the fight runs, matched to the roar the presentation
         /// plays so that "the boss has finished roaring" and "the fight has started" are the same moment.
         /// </summary>
@@ -345,7 +356,10 @@ namespace FalseGods.Plugin
         /// Told where a barrel went off, so the boss can take its share of one. Wired by the Composition Root,
         /// which owns the crate port; the encounter is what knows where the boss is and what a hit does to it.
         /// </summary>
-        public void ExplosionAt(ArenaWorldPoint at) => BossTakesItsShareOfTheBlast(at);
+        /// <param name="pickedOutOfTheAir">Whether a player shot this barrel down while the boss's throw was
+        /// still carrying it — the trick this fight rewards.</param>
+        public void ExplosionAt(ArenaWorldPoint at, bool pickedOutOfTheAir) =>
+            BossTakesItsShareOfTheBlast(at, pickedOutOfTheAir);
 
         /// <summary>
         /// The arena a hijacked level load left standing, when there is one. Set by the Composition Root; while it
@@ -407,6 +421,18 @@ namespace FalseGods.Plugin
             // The blast is the game's, so its numbers are too; read once per fight, when the game certainly has
             // its content loaded.
             (_crates as SulfurThrownCratePort)?.ReadBlast(out _blastDamage, out _blastRadius);
+
+            // Load the room's destructible content NOW, while the boss is still standing in the dark waiting for
+            // somebody to walk in — rather than at the first crate, which is the same instant the roar ends and
+            // the whole route starts moving. Three models, three materials and three break effects come out of the
+            // player's own install synchronously, and doing that on the frame the fight begins is a visible hitch
+            // at the worst possible moment.
+            if (_crates.Prepare())
+            {
+                _logger?.Log("[crate] destructible content loaded ahead of the fight.");
+            }
+
+            _carriers.Warm();
 
             // ── The arena may already be here. A hijacked level load realized our arena AS the level, through
             // this same load flow — same content hash, same parity check, same borrowed materials — so the
@@ -1331,7 +1357,7 @@ namespace FalseGods.Plugin
         /// <para>Host only, like every other decision: a client's barrels go off for the look of it and its own
         /// player takes the game's blast, but what it costs the boss is settled once, here.</para>
         /// </remarks>
-        private void BossTakesItsShareOfTheBlast(ArenaWorldPoint at)
+        private void BossTakesItsShareOfTheBlast(ArenaWorldPoint at, bool pickedOutOfTheAir)
         {
             if (_boss is null || _boss.IsDead || _blastRadius <= 0f)
             {
@@ -1354,7 +1380,16 @@ namespace FalseGods.Plugin
                 return;
             }
 
-            _logger?.Log($"[crate] a barrel went off {distance:0.#}m from the boss; its share is {share:0.#}.");
+            // The trick the fight rewards: catching one of the boss's own barrels in the air, over its head. It is
+            // worth ten times as much and ONLY to the boss — everything else in the blast, the players included,
+            // takes what a barrel is always worth, so this buys skill and not a safer room.
+            if (pickedOutOfTheAir)
+            {
+                share *= AirburstOnTheBoss;
+            }
+
+            _logger?.Log($"[crate] a barrel went off {distance:0.#}m from the boss; its share is {share:0.#}"
+                + (pickedOutOfTheAir ? " (shot out of the air — ten times over)." : "."));
             OnWeaponDamage(share);
         }
 

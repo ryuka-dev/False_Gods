@@ -73,6 +73,22 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// one heap is collected in one visit, and far short of the room, so it does not empty another.</summary>
         private const float PickUpReach = 9f;
 
+        /// <summary>
+        /// How long a carrier may stand perfectly still, on an errand, before it is assumed to have lost its way
+        /// and is put back on the route.
+        /// </summary>
+        /// <remarks>
+        /// <b>A backstop, not a mechanism.</b> A carrier that has stopped moving is not doing anything the fight
+        /// wants — it is neither fetching nor delivering nor being killed — and a route quietly losing goblins to
+        /// it starves the boss for reasons nobody can see. Long enough that the pauses the errand really has (the
+        /// handling beat at each end, a moment squeezing past another goblin) never trip it.
+        /// </remarks>
+        private const float StillTooLongSeconds = 5f;
+
+        /// <summary>How far a carrier has to move to count as moving at all, per frame of standing still. Loose
+        /// enough that the small shuffling an agent does while it settles is not movement.</summary>
+        private const float StillEnough = 0.05f;
+
         /// <summary>The tallest a stack is drawn. A carrier hauling a dozen crates would otherwise wear a mast;
         /// beyond this the load is still carried, just not all of it drawn.</summary>
         private const int MaxDrawnStack = 5;
@@ -117,6 +133,21 @@ namespace FalseGods.Integration.Sulfur.Combat
             _logger = logger;
             _announceTaken = announceTaken;
             _announceSetDown = announceSetDown;
+        }
+
+        public void Warm()
+        {
+            try
+            {
+                // Asking the game for the definition is what pulls the creature out of the player's install; the
+                // result is not needed here, only the fact that it has happened.
+                CarrierUnit.GetAsset();
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[carrier] the village could not be fetched ahead of time "
+                    + $"({exception.Message}); the first carrier will fetch it instead.");
+            }
         }
 
         public int Working
@@ -277,6 +308,12 @@ namespace FalseGods.Integration.Sulfur.Combat
         {
             carrier.OnLeg += deltaSeconds;
             carrier.DrawLoad();
+
+            if (HasSeizedUp(carrier, deltaSeconds))
+            {
+                PutBackOnTheRoute(carrier, sources);
+                return;
+            }
 
             switch (carrier.Leg)
             {
@@ -448,6 +485,75 @@ namespace FalseGods.Integration.Sulfur.Combat
             // Every peer lays the same load out from these few numbers; no crate position is ever sent.
             _announceSetDown?.Invoke(from, at, pile, load, seed, explosives);
             return placed;
+        }
+
+        /// <summary>
+        /// Whether this carrier has stood perfectly still long enough to count as lost.
+        /// </summary>
+        /// <remarks>
+        /// Measured off the goblin itself rather than off its agent's opinion of what it is doing: the failures
+        /// this is here for are exactly the ones where the agent believes it is walking.
+        /// </remarks>
+        private static bool HasSeizedUp(Carrier carrier, float deltaSeconds)
+        {
+            if (carrier.Unit == null)
+            {
+                return false;
+            }
+
+            var here = carrier.Unit.transform.position;
+            if ((here - carrier.StillSince).sqrMagnitude > StillEnough * StillEnough)
+            {
+                carrier.StillSince = here;
+                carrier.Still = 0f;
+                return false;
+            }
+
+            carrier.Still += deltaSeconds;
+            return carrier.Still >= StillTooLongSeconds;
+        }
+
+        /// <summary>
+        /// Put a carrier that stopped working back at a production point and start its errand again.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Moved with the game's own teleport</b> — the one the vanilla cave boss uses to change pools —
+        /// rather than by writing a transform, so the agent is told rather than discovering it has moved. The
+        /// destination is a production point the room authored: it is on the navigation mesh by construction, it
+        /// is where crates already appear, and it is the start of the errand anyway, so there is nothing there to
+        /// arrive inside of.</para>
+        /// <para>Its load comes with it. A carrier that was holding a delivery when it seized up did nothing
+        /// wrong, and dropping the load here would be a second invisible failure on top of the first.</para>
+        /// </remarks>
+        private void PutBackOnTheRoute(Carrier carrier, IReadOnlyList<ArenaWorldPoint> sources)
+        {
+            carrier.Still = 0f;
+            if (carrier.Unit == null || sources == null || sources.Count == 0)
+            {
+                return;
+            }
+
+            var to = sources[carrier.SourceIndex >= 0 && carrier.SourceIndex < sources.Count
+                ? carrier.SourceIndex
+                : 0];
+
+            try
+            {
+                carrier.Unit.TeleportTo(new Vector3(to.X, to.Y, to.Z));
+                carrier.StillSince = carrier.Unit.transform.position;
+                carrier.LastPosition = carrier.Unit.transform.position;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[carrier] a stuck carrier could not be moved ({exception.Message}); it will "
+                    + "be tried again.");
+                return;
+            }
+
+            carrier.Aimed = false;
+            Begin(carrier, Leg.ToSource, to);
+            _logger?.Log($"[carrier] one stood still for {StillTooLongSeconds:0.#}s and was put back at its "
+                + $"production point, still holding {carrier.Load}.");
         }
 
         /// <summary>Ground-plane distance, squared — heights differ across the room's terraces and would otherwise
@@ -819,6 +925,12 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             /// <summary>Where it was last seen alive — where a spilled load lands.</summary>
             public Vector3 LastPosition { get; set; }
+
+            /// <summary>Where this carrier was when it last actually moved, and how long ago that was. The
+            /// watchdog's whole state.</summary>
+            public Vector3 StillSince { get; set; }
+
+            public float Still { get; set; }
 
             /// <summary>Draw the load as a stack riding on the goblin, wearing the same mesh and material the real
             /// destructibles do. Presentation only: these have no physics, no health and no hit detection, which

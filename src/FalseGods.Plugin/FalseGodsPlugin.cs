@@ -200,7 +200,7 @@ namespace FalseGods.Plugin
             // The game's own blast catches everything in the room that the game runs. The boss is not one of
             // those, so its share is worked out where the boss is — on this peer, and only meaningfully on the one
             // that owns the fight.
-            cratePort.Exploded = at => _boss?.ExplosionAt(at);
+            cratePort.Exploded = (at, airburst) => _boss?.ExplosionAt(at, airburst);
 
             // Only ever used on a client: it puts the host's loads on the backs of the goblins this peer mirrored,
             // which the carry commands cannot do because they carry no idea of which goblin is which.

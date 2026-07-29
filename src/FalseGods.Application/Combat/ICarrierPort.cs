@@ -21,6 +21,17 @@ namespace FalseGods.Application.Combat
     /// </remarks>
     public interface ICarrierPort
     {
+        /// <summary>
+        /// Fetch what putting a goblin on the route needs, before one is wanted. Safe to call again.
+        /// </summary>
+        /// <remarks>
+        /// The first carrier of a fight is asked for on the frame the fight starts, which is also the frame the
+        /// room begins producing and the boss stops roaring — three things at once, one of them reaching into the
+        /// player's install for a creature it has not loaded yet. Doing it while the boss is still waiting costs
+        /// nothing: there is nothing else happening then.
+        /// </remarks>
+        void Warm();
+
         /// <summary>How many carriers are alive and working the route.</summary>
         int Working { get; }
 

@@ -442,7 +442,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 var at = unit.mainCollider != null ? unit.mainCollider.bounds.center : unit.transform.position;
                 StaticInstance<ExplosionManager>.Instance.QueueExplosion(
                     BarrelExplosion, at, Vector3.zero, Vector3.up, BarrelDamage, 1f, unit);
-                Exploded?.Invoke(ToPoint(at));
+                Exploded?.Invoke(ToPoint(at), ShotOutOfTheAir(unit));
             }
             catch (Exception exception)
             {
@@ -888,7 +888,39 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// <remarks>Raised on every peer, because every peer sets its own barrels off from the same commands and
         /// the same seed. Nothing here decides anything — what it costs the boss is settled where the boss is.
         /// </remarks>
-        public Action<ArenaWorldPoint> Exploded { get; set; }
+        public Action<ArenaWorldPoint, bool> Exploded { get; set; }
+
+        /// <summary>
+        /// Whether this barrel was picked out of the air by somebody, rather than going off for any of the reasons
+        /// the fight itself provides.
+        /// </summary>
+        /// <remarks>
+        /// <b>Two conditions, and both are needed.</b> It has to still be flying — a barrel resting on a pile is a
+        /// stationary target and shooting one is not the same trick — and its death has to be one nobody here
+        /// asked for. Everything this port does to a crate on purpose (landing it, bursting it on a wall or a
+        /// player) is done inside a flag, so what is left is the game's own damage path, which is a weapon.
+        /// </remarks>
+        private bool ShotOutOfTheAir(Unit unit)
+        {
+            if (_breakingItOurselves)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < _crates.Count; i++)
+            {
+                if (ReferenceEquals(_crates[i].Unit, unit))
+                {
+                    return _crates[i].Phase == Phase.Flying;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>True while this port is deliberately breaking a crate, so the barrel's own death can tell a
+        /// weapon apart from the fight.</summary>
+        private bool _breakingItOurselves;
 
         /// <summary>
         /// What one of these barrels is worth, and how far it reaches — read from the game's own explosion
@@ -1627,6 +1659,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// </remarks>
         private void BreakAsShot(ManagedCrate crate)
         {
+            _breakingItOurselves = true;
             try
             {
                 if (crate.Breakable != null)
@@ -1645,12 +1678,17 @@ namespace FalseGods.Integration.Sulfur.Combat
                     UnityEngine.Object.Destroy(crate.Unit.gameObject);
                 }
             }
+            finally
+            {
+                _breakingItOurselves = false;
+            }
         }
 
         /// <summary>Break a crate where it is — its real break, sound and debris — but without paying out loot.
         /// This is what both a quiet landing and a hit on a player do: only shooting a crate out of the air pays.</summary>
         private void BreakNoLoot(ManagedCrate crate)
         {
+            _breakingItOurselves = true;
             try
             {
                 if (crate.Breakable != null && _preventDroppingLoot != null)
@@ -1669,6 +1707,10 @@ namespace FalseGods.Integration.Sulfur.Combat
                 {
                     UnityEngine.Object.Destroy(crate.Unit.gameObject);
                 }
+            }
+            finally
+            {
+                _breakingItOurselves = false;
             }
         }
 
