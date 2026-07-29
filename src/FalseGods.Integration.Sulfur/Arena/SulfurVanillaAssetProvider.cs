@@ -231,7 +231,12 @@ namespace FalseGods.Integration.Sulfur.Arena
             if (donor == null)
                 return VanillaPropResult.Failed($"prop donor room '{request.RoomKey}' did not load: {donorError}");
 
-            var source = donor.transform.Find(request.PropPath);
+            // An empty path means the donor room ITSELF, not a prop inside it — the case where what is borrowed is
+            // a whole authored space rather than a piece of scenery. Everything after this is the same: it is
+            // staged inactive, stripped, and hung on a marker like any other clone.
+            var source = string.IsNullOrEmpty(request.PropPath)
+                ? donor.transform
+                : donor.transform.Find(request.PropPath);
             if (source == null)
                 return VanillaPropResult.Failed($"prop '{request.PropPath}' not found in donor room '{request.RoomKey}'");
 

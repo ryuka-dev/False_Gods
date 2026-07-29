@@ -244,7 +244,44 @@ namespace FalseGods.Application.Arena
                 StripComponentNames: NoNames,
                 LayerName: KeepTheDonorsLayer,
                 VolumeChildNames: NoNames),
+
+            // The way out, and the one borrowed thing that is a whole authored space rather than a piece of
+            // scenery: the game's own cave exit, with its shaft, the pit at the bottom, the embers that mark it
+            // and its ambience. Hung on a marker cut into our own wall, so a player leaves this room the way they
+            // leave every other cave in the game.
+            //
+            // Its layers are the donor's on purpose. The structure sits on Geometry, which is in the scan's mask,
+            // so the exit's floor joins this room's navigation without anything being authored for it - and its
+            // materials are the same cave set this arena already borrows, so the seam does not read as a seam.
+            //
+            // What goes: the Connector, which only means something to the generation graph that we are not
+            // running; the hidden chest and the bales it stands on, which sit fifteen metres up a shaft nobody can
+            // climb; and - for now - the level-change trigger itself, because the vanilla one completes the level
+            // and this room's exit belongs somewhere else. Wiring that is the next step, and until it is there the
+            // pit is a place to look at rather than a way out.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_ExitRoom",
+                CaveEndRoomKey,
+                WholeRoom,
+                StripChildNames: new[] { "HiddenChest", "HayBase", "HayBase (1)", "EndTrigger" },
+                StripComponentNames: new[] { "Connector" },
+                LayerName: KeepTheDonorsLayer,
+                VolumeChildNames: NoNames),
         };
+
+        /// <summary>The vanilla cave exit room - the donor for the way out of this arena.</summary>
+        public const string CaveEndRoomKey =
+            "Assets/_Core/Prefabs/LevelGeneration/Chunks/Caves/CaveEndRoom1.prefab";
+
+        /// <summary>
+        /// A prop path naming the donor room itself rather than something inside it.
+        /// </summary>
+        /// <remarks>
+        /// Borrowing a whole room is the same operation as borrowing a rock - stage it, strip what must not run,
+        /// hang it on a marker - so it is a value of the existing path rather than a second mechanism.
+        /// </remarks>
+        public const string WholeRoom = "";
 
         /// <summary>Solid to players and to the boss's thrown destructibles, invisible to the navigation scan -
         /// the same layer the sculpted cave shell uses.</summary>
