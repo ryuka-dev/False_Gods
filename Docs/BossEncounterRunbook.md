@@ -307,6 +307,32 @@ room prefab out of an AssetRipper export.*
   the private field after attaching keeps the game's translation and adds our own prefix; it is only rewritten on
   a language change, which is rare enough to accept.
 
+### 2.10 What a boss summons, and how strong a wave is
+
+*How to re-take: read `Unit_Boss_Goblin_Cousin_Base.prefab` and the `UnitPool_Caves_Tier*` assets out of an
+AssetRipper export; decompile `CousinHelper` and `SpawnEnemiesNode` from the live install.*
+
+- **The game has two idioms for composing a squad, and they are for different jobs.** A boss uses an authored
+  `List<UnitId>`, spawned straight through, so the headcount *is* the list length and the wave is exactly
+  reproducible. Procedural patrols use a weighted `UnitPool` plus a budget. A designed fight wants the first.
+- **The vanilla cave boss's two bands, measured:** `henchmenFirstSpawn` = 5x `GoblinYoung` + 2x `GoblinSpearman`;
+  `henchmenSecondSpawn` = 3x `GoblinYoung` + 4x `GoblinSpearman`. Both **seven** strong — the escalation is the
+  mix, not the count. `SpawnHenchmen()` uses the first list once and the second for every wave after it.
+- `SpawnFromList` picks a **random** `HenchmenSpawn` per unit and lets them collide, then does exactly three
+  things to each: `ActivateBehaviourTree()`, `MoveToPlayer()`, `AiAgent.disableMultipleRoles = true`.
+- **Which creatures belong in an environment is already answered, and tiered.** `UnitPool_Caves_Tier1` is the
+  rank and file (`GoblinArcher`, `GoblinCivilian`, `GoblinSpearman`, `GoblinYoung`), tier 2 adds
+  `GoblinBarrelBoy`, tier 3 adds the four `GoblinWizard*`. Every tier also carries a Black Guild entry at weight
+  3 against the goblins' 50 — `BlackGuildTracker`/`Dog`, plus `Rifleman` at tier 3.
+- **Strength has a real currency: `UnitSO.SpawnCost`**, which falls back to `experienceOnKill` when the authored
+  cost is 0, and to 1 when that is 0 too — so *every* unit has one. Cave values: Young 2, Spearman 4, Archer 5,
+  each Wizard 8, BarrelBoy 10. `SpawnEnemiesNode.packBudget` is **15**, so one vanilla cave patrol is the scale
+  to measure a summoned wave against.
+- **Sizes, for whether a summon fits the room's navigation** (capsule radius x prefab scale): Young 0.60,
+  Spearman 0.50, Archer 0.50, Wizard 0.53, **BarrelBoy 0.37** — the heavy is the *narrowest* of them, and tall
+  (3.05 m) rather than wide. Against §2.3's `characterRadius 0.5` nothing in the cave roster needs a wider graph;
+  what a tall unit can meet is a low overhang, since the scan only carves where there is `walkableHeight` 1.5.
+
 ---
 
 ## 3. Traps
