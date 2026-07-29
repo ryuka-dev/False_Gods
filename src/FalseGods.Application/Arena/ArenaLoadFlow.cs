@@ -191,6 +191,46 @@ namespace FalseGods.Application.Arena
                 LayerName: OffTheNavigationLayers,
                 VolumeChildNames: NoNames),
 
+            // The cave floor's own scatter: two kinds of small rock and a patch of trodden path. Pure decoration —
+            // no collider, no body, nothing on a navigable layer — so they keep the donor's layer and are cloned
+            // exactly as they stand.
+            //
+            // THEY TURN TO FACE THE PLAYER BY THEMSELVES. That is not a component we would have to add and drive:
+            // the donor dresses the rocks in billboard MATERIALS (SVGMeshBillboardRandFlippedXFace and
+            // SVGMeshBillboardBothAndFaceCamera), so the turning is in the shader and a clone of the renderer has
+            // it already. Whether one pitches as well as yaws is that shader's business, which is exactly what
+            // makes these read the same in our cave as in the game's.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_CaveRock1",
+                CaveBossRoomKey,
+                "Decorations/Rocks/CaveRock1 (5)",
+                StripChildNames: NoNames,
+                StripComponentNames: NoNames,
+                LayerName: KeepTheDonorsLayer,
+                VolumeChildNames: NoNames),
+
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_CaveRock2",
+                CaveBossRoomKey,
+                "Decorations/Rocks/CaveRock2 (24)",
+                StripChildNames: NoNames,
+                StripComponentNames: NoNames,
+                LayerName: KeepTheDonorsLayer,
+                VolumeChildNames: NoNames),
+
+            // The path. Flat on the floor and not billboarded — it is ground, not scenery standing on it.
+            new VanillaPropClone(
+                ParentPath,
+                "Prop_CavePath",
+                CaveBossRoomKey,
+                "Decorations/Paths/CavePatch (30)",
+                StripChildNames: NoNames,
+                StripComponentNames: NoNames,
+                LayerName: KeepTheDonorsLayer,
+                VolumeChildNames: NoNames),
+
             // Not decoration: the donor built this one as a destructible, and it is cloned with its breakable and
             // its hit mesh intact, on the layer that makes it shootable. Unlike the boss's ammunition, every peer
             // puts one at the same authored marker, so the session layer's own position-matched breakable sync has
