@@ -83,14 +83,28 @@ namespace FalseGods.Integration.Sulfur.Combat
                 // The one that goes off. Assembled exactly like the others and then given the game's own
                 // explosion to die with, so every way it can die — shot out of the air, shot where it stands,
                 // caught by another blast — ends in the same bang without any of those paths knowing about it.
+                //
+                // Every value here is read off a real one in the game rather than guessed, and two of them are not
+                // what the names suggest: it wears the SAME wood the ordinary barrel does (what marks it out is
+                // the heap of sulfur on its lid, below), and it goes off as DYNAMITE — the explosion type actually
+                // called ExplosiveBarrel is something else and is not what the game's own barrels use.
                 Unit = UnitIds.ExplosiveBarrel,
                 Name = "explosive barrel",
                 MeshPathFragment = "Barrel_Explosion",
-                MaterialPathFragment = "Barrels/M_Barrel",
-                BreakEffectPathFragment = "ExplosiveBarrelBreakEffect",
-                Explosion = ExplosionTypes.ExplosiveBarrel,
+                MaterialPathFragment = "Barrels/BarrelWood",
+                BreakEffectPathFragment = "BarrelBreakEffect (Exploding)",
+                Explosion = BarrelExplosion,
+                TopMeshPathFragment = "PileSulfur",
+                TopMaterialPathFragment = "SulfurYellow",
             },
         };
+
+        /// <summary>
+        /// What one of the game's own explosive barrels goes off as. <b>Not</b> <c>ExplosiveBarrel</c>, which is a
+        /// different explosion the game's barrels do not use — read off a configured one rather than picked by
+        /// name, and the boss's share of a blast is measured from this same definition.
+        /// </summary>
+        private const ExplosionTypes BarrelExplosion = ExplosionTypes.Dynamite;
 
         /// <summary>
         /// How often a produced destructible is an explosive barrel rather than ordinary cargo.
@@ -232,8 +246,19 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// on two peers, fourteen volleys in a hundred and sixteen. Whether a crate has finished falling is a
         /// question of local timing, and local timing must not decide what the boss is holding.
         /// </remarks>
+        /// <summary>
+        /// Whether this crate is part of <paramref name="pile"/> — collectable by a carrier, fireable by the boss,
+        /// and countable towards what is lying about.
+        /// </summary>
+        /// <remarks>
+        /// <b>A barrel with a lit fuse is on nobody's pile.</b> It is lying on the ground and it is about to go
+        /// off, so it is neither cargo to be carried away nor litter to be tidied up: without this a carrier could
+        /// walk over and pocket a live barrel, or the loose-cargo ceiling could quietly delete one, and either way
+        /// the bang the players were backing away from never comes.
+        /// </remarks>
         private static bool IsOn(ManagedCrate crate, CratePileId pile) =>
             crate.Unit != null
+            && crate.Fuse <= 0f
             && crate.Pile == pile
             && (crate.Phase == Phase.Resting || crate.Phase == Phase.Tossing);
 
@@ -362,6 +387,11 @@ namespace FalseGods.Integration.Sulfur.Combat
                 : meshMaterial;
 
             var body = BuildTemplate(definition, mesh, bodyMaterial, breakEffect, breakSound, out var templateError);
+            if (body != null)
+            {
+                AddTheMarkingOnTop(spec, template, body);
+            }
+
             if (body == null)
             {
                 _logger?.LogWarning($"[crate] the {spec.Name} template could not be assembled ({templateError}); skipped.");
@@ -419,6 +449,46 @@ namespace FalseGods.Integration.Sulfur.Combat
             return filter == null || renderer == null
                 ? default(CrateLook)
                 : new CrateLook(filter.sharedMesh, renderer.sharedMaterial);
+        }
+
+        /// <summary>
+        /// Put a kind's second piece on top of its body — the heap of sulfur that says a barrel is the one that
+        /// goes off.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why a kind needs one at all.</b> The game's barrels share a single material over a palette
+        /// texture, and which colour a barrel is comes from its own mesh's UVs — so the explosive one is already
+        /// red without anything being dressed differently. What it does not get from that is the load on its lid,
+        /// and that is the part a player reads at a distance, on a goblin's back, before it is thrown.</para>
+        /// <para>Optional and fail-soft: a kind that names no marking gets none, and one whose marking cannot be
+        /// sourced is still a working barrel that still explodes. Its collider is not extended to cover it — the
+        /// pile is scenery on top of the thing being shot.</para>
+        /// </remarks>
+        private void AddTheMarkingOnTop(DestructibleSpec spec, DestructibleTemplate template, GameObject body)
+        {
+            if (string.IsNullOrEmpty(spec.TopMeshPathFragment))
+            {
+                return;
+            }
+
+            var top = LoadAddressableMesh(spec.TopMeshPathFragment, template, out _, out var topError);
+            if (top == null)
+            {
+                _logger?.LogWarning($"[crate] the {spec.Name}'s marking could not be sourced ({topError}); it will "
+                    + "look like ordinary cargo.");
+                return;
+            }
+
+            var piece = new GameObject("Marking");
+            piece.transform.SetParent(body.transform, worldPositionStays: false);
+            piece.layer = body.layer;
+            piece.AddComponent<MeshFilter>().sharedMesh = top;
+            var renderer = piece.AddComponent<MeshRenderer>();
+            var material = LoadBodyMaterial(spec.TopMaterialPathFragment, template);
+            if (material != null)
+            {
+                renderer.sharedMaterial = material;
+            }
         }
 
         /// <summary>The built-in unit cube's mesh, borrowed from a throwaway primitive. The shared mesh is a
@@ -808,7 +878,7 @@ namespace FalseGods.Integration.Sulfur.Combat
             radius = 0f;
             try
             {
-                var definition = ExplosionTypes.ExplosiveBarrel.GetAsset();
+                var definition = BarrelExplosion.GetAsset();
                 if (definition == null)
                 {
                     return;
@@ -947,9 +1017,14 @@ namespace FalseGods.Integration.Sulfur.Combat
 
                         if (progress >= 1f)
                         {
-                            // Reached its landing spot: splash there, then break it, no loot.
-                            _crates.RemoveAt(index);
-                            Land(crate);
+                            // Reached its landing spot: splash there, then break it, no loot — unless it is a
+                            // barrel, which lies there with a lit fuse and therefore has to stay in our hands, or
+                            // nothing is left to burn it down.
+                            if (Land(crate))
+                            {
+                                _crates.RemoveAt(index);
+                            }
+
                             break;
                         }
 
@@ -1394,7 +1469,9 @@ namespace FalseGods.Integration.Sulfur.Combat
 
         /// <summary>The barrel arrived at its target: settle it there, splash the players around the landing point,
         /// then break it the game's way with the loot switched off.</summary>
-        private void Land(ManagedCrate crate)
+        /// <summary>Arrive. Returns whether the crate is finished with — false for one that is now lying on the
+        /// ground burning down, which this port still owns.</summary>
+        private bool Land(ManagedCrate crate)
         {
             crate.Unit.transform.position = crate.Target;
             _impact?.Splash(ToPoint(crate.Target));
@@ -1408,10 +1485,11 @@ namespace FalseGods.Integration.Sulfur.Combat
                 crate.RestWhereItLanded();
                 _logger?.Log($"[crate] a barrel landed at ({crate.Target.x:0.0}, {crate.Target.y:0.0}, "
                     + $"{crate.Target.z:0.0}); {LandedFuseSeconds:0.#}s to get clear.");
-                return;
+                return false;
             }
 
             BreakNoLoot(crate);
+            return true;
         }
 
         /// <summary>
@@ -1792,6 +1870,12 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             /// <summary>What this kind explodes as when it dies, or <c>None</c> for one that simply breaks.</summary>
             public ExplosionTypes Explosion;
+
+            /// <summary>A second mesh sitting on top of the body, for a kind whose whole point is that a player can
+            /// tell it apart at a glance. Optional: most kinds are one piece.</summary>
+            public string TopMeshPathFragment;
+
+            public string TopMaterialPathFragment;
         }
 
         /// <summary>One assembled kind: the inactive template every unit of it is cloned from, its definition, and
