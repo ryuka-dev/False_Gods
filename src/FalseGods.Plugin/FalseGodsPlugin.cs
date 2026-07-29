@@ -17,7 +17,6 @@ using FalseGods.RuntimeContracts.Arena;
 using FalseGods.RuntimeContracts.Integration;
 using FalseGods.UnityRuntime.Presentation;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 namespace FalseGods.Plugin
 {
@@ -52,8 +51,8 @@ namespace FalseGods.Plugin
     /// boss is raised by its arena being built and started by a player walking into the room — no key raises it,
     /// and damage is the real weapon path (the game's projectile/melee systems hitting the boss's collision body).
     /// The arena identity, hash, and origin all come from the real load flow — a raise without valid arena content
-    /// fails closed. <b>One development key is left</b>: the one that takes the session to the arena at all, which
-    /// has no replacement yet because nothing in ordinary play leads there.
+    /// fails closed. <b>No development keys remain</b>: ordinary play reaches the arena through the way that opens
+    /// in the vanilla cave boss's room once that boss is dead, so the plugin binds no keys at all.
     /// </para>
     /// </remarks>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
@@ -116,7 +115,6 @@ namespace FalseGods.Plugin
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
         private ConfigEntry<float> _maxClientHitDamage = null!;
-        private ConfigEntry<Key> _hijackKey = null!;
 
         // A fresh seed per volley so successive dev volleys scatter differently; the host would pick this and send
         // it once when this is wired to the boss, so every peer lays the same volley out.
@@ -186,19 +184,6 @@ namespace FalseGods.Plugin
                 + "ceiling on a forged message, not a substitute for rate limiting - set it above any legitimate "
                 + "single weapon hit. The host clamps to this; the simulation still decides weak-point, phase, and "
                 + "death. Read once at load.");
-
-            // TEMPORARY dev affordance (Strategy A bring-up): load our arena as the first cave level through the
-            // game's own level generation, so navigation is built natively (the additive raise fails on a large
-            // arena when the live level's nav is not scanned at the raise site). This first step loads the real
-            // cave level to prove the entry point; substituting our arena for the generated content follows. Not a
-            // shipping control - a developer-menu entry replaces the keybind later.
-            _hijackKey = Config.Bind("Boss", "HijackArenaKey", Key.H,
-                "[DEV/TEMPORARY - removed before release] Take the session to the boss arena, which replaces the "
-                + "first cave level and is generated natively (native navigation and player spawn); press it "
-                + "again to pick up re-authored arena content. ONE press on EITHER machine is enough - the host "
-                + "declares the level a boss arena for everyone and leads the transition, and a client's press is "
-                + "a request to the host. Without a session it just goes there. The game uses the new Input "
-                + "System.");
 
             _log = new BepInExLogger(Logger);
             // Held because the boss needs to hear about a hit: a route that runs and a pile that empties both say
@@ -301,8 +286,8 @@ namespace FalseGods.Plugin
             // one place; the handler only reports the transition.
             FalseGodsIntegrations.Changed += OnIntegrationChanged;
 
-            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. The boss stands up with its arena and is "
-                + $"started by walking into the room; take the session there with {_hijackKey.Value}. "
+            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Beat the cave boss and walk into the way "
+                + "through that opens in its room; the arena's own boss is started by walking into it. "
                 + $"Multiplayer integration: {(FalseGodsIntegrations.Current != null ? "registered" : "none (single-player)")}.");
         }
 
@@ -320,16 +305,6 @@ namespace FalseGods.Plugin
             MaintainArenaLevelFlow(FalseGodsIntegrations.Current);
             MaintainSpawnOwnership(FalseGodsIntegrations.Current);
             MaintainCrateFlow(FalseGodsIntegrations.Current);
-
-            // DEV (Strategy A bring-up): take the session to the arena. Role-independent for the player - one
-            // press on either machine gets everyone there - but not role-independent underneath: the host
-            // declares and leads, a client asks. Temporary, like the whole "Boss" dev config section.
-            if (KeyPressed(_hijackKey.Value))
-            {
-                GoToArenaLevel();
-                return;
-            }
-
 
             // Track EVERY player's velocity each frame so a volley can lead all of them by the average rather than
             // the instant — and so a barrage threatens the whole room, not whoever happens to be hosting.
@@ -1061,18 +1036,5 @@ namespace FalseGods.Plugin
                 : "Multiplayer integration revoked; returning to the single-player composition.");
         }
 
-        private static bool KeyPressed(Key key)
-        {
-            try
-            {
-                var keyboard = Keyboard.current;
-                return keyboard != null && keyboard[key].wasPressedThisFrame;
-            }
-            catch (Exception)
-            {
-                // No keyboard device, or an unmapped key.
-                return false;
-            }
-        }
     }
 }
