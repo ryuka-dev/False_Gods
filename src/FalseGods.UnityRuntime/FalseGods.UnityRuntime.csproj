@@ -66,10 +66,13 @@
     An empty/absent folder matches nothing (no build error); a missing texture just falls back to a flat quad.
   -->
   <ItemGroup>
+    <!--
+      The boss's own art, and the only source of it. A second glob used to reach into ExtractedAssets for a
+      placeholder taken out of the game; that was fine while there was nothing else to draw and is not fine in
+      anything that ships, because it would put one of the game's own textures inside our DLL. It also made
+      "the first resource whose name ends boss-body.png" a question with two answers.
+    -->
     <EmbeddedResource Include="EmbeddedArt\*.png">
-      <LogicalName>FalseGods.UnityRuntime.Art.%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="..\..\ExtractedAssets\Boss\*.png">
       <LogicalName>FalseGods.UnityRuntime.Art.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
