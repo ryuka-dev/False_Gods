@@ -230,6 +230,7 @@ namespace FalseGods.Plugin
         private readonly IBattlefieldCleanupPort _battlefield;
         private readonly IBossVoicePort _voice;
         private readonly IArenaAtmospherePort _atmosphere;
+        private readonly IBossRewardPort _reward;
 
         /// <summary>Where every player in the room is, so the host can tell when one has reached the boss's
         /// doorstep. The host answers for the whole session — a client's own arrival is not its to decide.</summary>
@@ -337,6 +338,7 @@ namespace FalseGods.Plugin
             IBattlefieldCleanupPort battlefield,
             IBossVoicePort voice,
             IArenaAtmospherePort atmosphere,
+            IBossRewardPort reward,
             IPlayerMotionPort players,
             IThrownCratePort crates,
             ICarrierPort carriers,
@@ -352,6 +354,7 @@ namespace FalseGods.Plugin
             _battlefield = battlefield ?? throw new ArgumentNullException(nameof(battlefield));
             _voice = voice ?? throw new ArgumentNullException(nameof(voice));
             _atmosphere = atmosphere ?? throw new ArgumentNullException(nameof(atmosphere));
+            _reward = reward ?? throw new ArgumentNullException(nameof(reward));
             _players = players ?? throw new ArgumentNullException(nameof(players));
             _crates = crates ?? throw new ArgumentNullException(nameof(crates));
             _carriers = carriers ?? throw new ArgumentNullException(nameof(carriers));
@@ -1377,6 +1380,12 @@ namespace FalseGods.Plugin
 
                 _atmosphere.StopBattleMusic();
                 _presence.HideHealthBar();
+
+                // Paid here rather than sent: loot is a local pickup the session layer does not mirror, so every
+                // peer answers the death by paying its own player. A client does the same off the replicated
+                // event, exactly as it plays its own music. See IBossRewardPort.
+                _reward.DropReward(BossStandsAt());
+
                 _carriers.Disband();
                 _rageArms.LowerAll();
                 _starvation.Reset();

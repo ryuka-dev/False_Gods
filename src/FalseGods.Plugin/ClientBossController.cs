@@ -60,6 +60,7 @@ namespace FalseGods.Plugin
         private readonly IBossArmPort _rageArms;
         private readonly IBossVoicePort _voice;
         private readonly IArenaAtmospherePort _atmosphere;
+        private readonly IBossRewardPort _reward;
 
         /// <summary>Whether this peer has declared the level it is in (or is loading) to be the boss arena, so an
         /// arena of its own is on its way and a second copy must not be loaded on top of it.</summary>
@@ -118,6 +119,9 @@ namespace FalseGods.Plugin
             _localPlayer = new SulfurLocalPlayer();
             _battlefield = new SulfurBattlefieldCleanup(logger);
             _rageArms = new SulfurBossArmPort(host, logger);
+            // Built here like the rest of this end's adapters: a client pays its own player, because loot is a
+            // local pickup nothing mirrors. See IBossRewardPort.
+            _reward = new SulfurBossReward(logger);
             _presence = new SulfurBossPresence(() => _presentation?.CollisionCollider, logger);
             _voice = new SulfurBossVoice(host.transform, logger);
             _voice.Warm();
@@ -205,6 +209,11 @@ namespace FalseGods.Plugin
                 {
                     _atmosphere.StopBattleMusic();
                     _presence.HideHealthBar();
+
+                    // This peer's own roll, at the body. Not sent and not asked for: the host is paying its own
+                    // player in the same frame, off the same fact.
+                    _reward.DropReward(new ArenaWorldPoint(
+                        snapshot.Position.X, snapshot.PositionHeight, snapshot.Position.Z));
                 }
             }
 

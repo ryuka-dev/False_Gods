@@ -271,6 +271,9 @@ namespace FalseGods.Plugin
                 new SulfurBattlefieldCleanup(_log),
                 _voice,
                 _atmosphere,
+                // What a dead boss leaves on the floor. Every peer pays its own player - loot is a local pickup
+                // and nothing mirrors it - so the client builds one of these for itself too.
+                new SulfurBossReward(_log),
                 _playerMotion,
                 _crates,
                 new SulfurCarrierPort(
