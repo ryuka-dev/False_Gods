@@ -6,8 +6,10 @@ merely works once; it is done when it meets the gates below and respects the bou
 mechanically — and which checks exist yet — lives in
 [ArchitectureEnforcement.md](ArchitectureEnforcement.md).
 
-All gates about runtime behaviour remain **proposed** until there is code to run them against, and every
-architecture check named below is currently `Planned`.
+There is code to run these against now, and they are run. The architecture checks named below are **not** all in
+place, though: five run in CI and block the pre-push hook, two more run locally only, and ten of the layers the
+rules name are still `Planned` — [ArchitectureEnforcement.md](ArchitectureEnforcement.md) says which is which and
+is the authority. A gate whose check is `Planned` is a gate you have to hold yourself.
 
 ## 1. Per-feature-type gates
 

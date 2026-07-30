@@ -7,6 +7,16 @@ compatibility model. The deep boss model lives in
 [OriginalBossNetworkingArchitecture.md](OriginalBossNetworkingArchitecture.md); this report covers the
 loading/arena contract and how the boss plugs into it.
 
+> **Built and verified on two machines.** The ready gate, the fail-closed aborts and the boss-start gating all
+> exist and have been exercised. Two things this report could not have known, and both matter to anyone extending
+> the flow: the arena is loaded by **driving the game's own level generation** rather than added on top of a level
+> ([ADR-002](ADRs/ADR-002-AStar-Recast-Integration.md)), so "the host and the clients each load the arena" means
+> each of them *generates the level*, at their own pace — which is why a client that has not finished generating
+> must **defer** rather than load a second copy of the bundle. And the exit rides the game's own `GoToLevel`,
+> which SULFUR Together already patches, so a client walking into the exit is intercepted and the host leads;
+> none of that is ours to reimplement. Current per-mechanic account:
+> [BossEncounterRunbook.md](BossEncounterRunbook.md).
+
 ## 5.1 What SULFUR Together provides, and the port it is consumed through
 
 **Boundary rule:** these capabilities are consumed **only** through project-owned ports implemented in the

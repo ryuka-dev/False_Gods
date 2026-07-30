@@ -3,6 +3,13 @@
 *A minimal test room that validates the risky mechanics — **not** the full cave arena.* Build this first; the
 large square cave arena only makes sense after every check below passes.
 
+> **This plan is finished.** Phase A (P0–P9) and Phase B both ran, and the boss encounter they cleared the way for
+> is built and playable. The document is kept for the per-step results recorded against each check — the
+> measurement and the verdict, which is what makes a later "does that still hold?" answerable — and for the two
+> places where a step's outcome changed the design rather than confirming it (P5's navmesh route, P3's pink
+> materials). It is **not** a plan to work through any more. The current production sequence, for the next arena
+> and the next boss, is [BossEncounterRunbook.md](BossEncounterRunbook.md).
+
 The PoC is split into two phases:
 
 - **Phase A — Arena Pipeline PoC** (§7.1–7.5 below): proves the map, materials, collision, navigation, and

@@ -4,9 +4,15 @@
 architecture that [MultiplayerLoadingContract.md §5.4–5.9](MultiplayerLoadingContract.md) references; the
 loading/arena contract lives there, the boss internals live here.
 
-All runtime behaviour is **proposed/unverified** until exercised by the Original Boss Networking Vertical
-Slice ([MinimalProofOfConceptPlan.md, Phase B](MinimalProofOfConceptPlan.md)). Reuse claims are grounded in
-SULFUR Together's round-1-audited systems (see `../Decompiled/` and the ST docs cited inline).
+**This model is built and has been verified on two machines**, so the architecture here reads as description
+rather than proposal. Its detail is not maintained against the code, though — where a signature or a field list
+differs, the code wins, and the current per-mechanic account is
+[BossEncounterRunbook.md](BossEncounterRunbook.md). The shape that survived contact is the one described below,
+with one addition worth knowing before designing the next boss: **every change a player can notice goes on the
+wire twice** — as the reliable event it is *played* with and as the snapshot field a peer that missed it
+*corrects from* — and a state with two ways out needs exactly one place that answers for it
+([ADR-005](ADRs/ADR-005-Snapshot-And-Discrete-Event-Replication.md)). Reuse claims are grounded in SULFUR
+Together's round-1-audited systems (see `../Decompiled/` and the ST docs cited inline).
 
 ## 9.1 Why not just reuse the vanilla boss adapter?
 

@@ -1,6 +1,6 @@
 # ADR-001 — Unity prefab as arena source of truth
 
-**Status:** Proposed
+**Status:** Accepted, implemented (`FalseGods.Unity` -> AssetBundle + `ArenaContentArtifact`)
 
 ## Context
 Arenas need to be iterated visually (geometry, lighting, occlusion, boss-fight space) and must load identically
@@ -25,4 +25,18 @@ only `VanillaAssetProxy` objects; it does not reconstruct the arena from hard-co
 - Prefabs are content, not service containers (ADR-006).
 
 ## Verification status
-Unverified — depends on AssetBundle load (PoC P2) and runtime parity (RiskList R14).
+**Verified in game.** The arena the first encounter is fought in *is* an authored Unity prefab: built into
+`falsegods-poc-room.bundle` by `FalseGods.Unity`, shipped beside a `ArenaContentArtifact` that carries the
+authored hierarchy, and loaded at runtime. AssetBundle load closed at PoC P2 (RiskList R2); authored-hierarchy
+parity closed at P8 (R14, `verdict = MATCH`, all 14 parity nodes at their authored local transforms).
+
+What the decision looks like in practice, a year of arena work later: **markers, not transform data.** Boss
+stations, minion spawn points, crate production and delivery points, the fight's start trigger, the reward drop
+and the vanilla-prop placements are all authored objects in the prefab that runtime code *reads*; none of them is
+a constant in C#. The one thing the prefab does **not** decide is which of them carry an artifact row — the
+parity map covers identity, colliders and spawns, so a marker added outside that set moves the bundle without
+moving the content hash. See [BossEncounterRunbook.md](../BossEncounterRunbook.md).
+
+Still not exercised: **vanilla-proxy** divergence (R14's open half). The arena borrows vanilla materials, props
+and whole donor rooms, but by cloning live assets at load rather than through authored proxy references, so the
+editor/runtime divergence this ADR worried about has no authored proxies to diverge from yet.

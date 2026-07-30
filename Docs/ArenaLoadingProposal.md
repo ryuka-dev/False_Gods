@@ -3,6 +3,16 @@
 *How a custom fixed arena is loaded, and how the "proxy object in the editor → real vanilla asset at
 runtime" flow works for SULFUR.* Builds on report 1.
 
+> **This report recommended Strategy B, and Strategy A is what shipped.** Read §2.1 knowing that: the arena is
+> delivered by driving the game's own level generation, so the arena *is* the level and the game scans its
+> navigation, spawns the player and applies the fog natively — every "just works" listed under Strategy A turned
+> out to be worth more than the authoring cost counted against it, and the additive route's manual rescan was the
+> single hardest thing in the whole PoC (see [RiskList](RiskList.md) R4/R5 and
+> [ADR-002](ADRs/ADR-002-AStar-Recast-Integration.md)). The additive path is still built and still used by the
+> client that loads an arena on top of a level. The proxy → real-asset flow of §2.2 onwards also went a different
+> way in practice: vanilla content is cloned from **live** assets at load, not resolved from authored proxy
+> references.
+
 ## 2.1 The two integration strategies
 
 ### Strategy A — feed the arena into the game's `Room` / level-gen pipeline

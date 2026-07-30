@@ -1,6 +1,6 @@
 # ADR-004 — Optional SULFUR Together adapter
 
-**Status:** Proposed
+**Status:** Accepted, implemented (`FalseGods.Integration.SulfurTogether`, a companion BepInEx plugin)
 
 ## Context
 False Gods must run in vanilla single-player when SULFUR Together (ST) is not installed, and provide
@@ -115,13 +115,29 @@ next ST coordination item. Either way the fragility is confined to the adapter a
   (seal/teleport, activation), tracked as the next coordination request to ST.
 
 ## Verification status
-Adapter itself unverified (not built yet — Phase B). Gates: "loads and plays with the adapter DLL deleted"
-(RiskList R20/R29, PoC B0) and a metadata check that `FalseGods.Plugin.dll` references no adapter assembly (rules
-`FG-ARCH-002` / `FG-ARCH-009` in [ArchitectureEnforcement.md](../ArchitectureEnforcement.md)). ST visibility
-counts were read from the ST source in this repository's neighbouring checkout and will drift with ST releases.
+**Built, shipped and verified in game.** `FalseGods.Integration.SulfurTogether` is a companion BepInEx plugin with
+hard GUID-string dependencies on the base plugin and on ST, deployed to its own plugin folder so no assembly
+identity is loaded twice from two paths. It self-registers through the single-slot `FalseGodsIntegrations` broker,
+and `FalseGods.Plugin` is the only reader of that broker and never names an adapter type.
+
+**Both gates hold.** Single-player runs with the adapter absent (verified in game, repeatedly — it is the ordinary
+way the mod is played). `FG-ARCH-002` checks that `FalseGods.Plugin` does not reference the adapter, at two
+layers: the evaluated MSBuild project graph, which runs in CI for every declared configuration, and the compiled
+`AssemblyRef` table of the DLL built by that same run, which needs the game DLLs and so runs only in the local
+full verify and the pre-push hook. `FG-ARCH-011` scans the adapter's own field signatures. `FG-ARCH-009`
+(composition-root behaviour) is still `Planned`.
+
+ST visibility counts below were read from the ST source in this repository's neighbouring checkout and will drift
+with ST releases.
 
 **The bridge this ADR calls for now exists and is proven.** The public `SULFURTogether.Api.NetExternalChannel` /
 `NetSessionInfo` surface landed on ST `main` (PR #13, 2026-07-13) and was verified in-game by the P9 probe across
 two instances — byte-identical cross-instance `ContentHash`, a fail-closed gate, and the abort paths — over the
-channel + session bridge with **no reflection** (MinimalProofOfConceptPlan.md §7.2 P9). The remaining reflection
-question is confined to the not-yet-bridged seal/teleport and activation capabilities.
+channel + session bridge with **no reflection** (MinimalProofOfConceptPlan.md §7.2 P9).
+
+**And it has since grown three more mod-neutral surfaces**, each added to ST because a False Gods mechanic needed
+it and none of them naming False Gods: `NetExternalSpawns` (a mod declares a spawn the host owns, so summoned
+minions reach clients through ST's own enemy proxy), `NetExternalDestructibles` (a mod-owned breakable that is
+gone for everybody when anyone breaks it — and, as it turned out, ST's destructible mirror had to be taught *not*
+to claim ours), and `NetPlayerLife` (whether a participant is down, so the boss does not throw at a corpse). The
+remaining reflection question is confined to seal/teleport and remote NPC activation.

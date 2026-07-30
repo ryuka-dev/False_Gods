@@ -1,6 +1,6 @@
 # ADR-006 — Ports-and-adapters module boundaries
 
-**Status:** Proposed
+**Status:** Accepted, implemented; mechanical enforcement still partial (see Verification status)
 
 ## Context
 SULFUR Together accumulated debt because features reached directly into managers, statics, Harmony patches,
@@ -72,6 +72,22 @@ The checks, their stable rule ids, and their current status live in
 - Prefabs are content only, bound to ports by the Composition Root — no service locators.
 
 ## Verification status
-Unverified (structural) — enforced later by the checks registered in
-[ArchitectureEnforcement.md §5](../ArchitectureEnforcement.md), all currently `Planned`; risks R21–R31 and R35
-track leakage.
+**The boundaries held while the code grew inside them** — which is the only test this ADR could ever pass. All
+eight modules now carry real source, and `FalseGods.Core`, `.Protocol`, `.RuntimeContracts` and `.Application`
+still build and unit-test on a machine with no game and no BepInEx installed at all.
+
+**Enforcement is real but partial, and the split matters.** The project reference graph already makes the common
+violations *not compile*: Core cannot see `UnityEngine`, `UnityRuntime` cannot see `FalseGods.Protocol`,
+`RuntimeContracts` sees nothing but Core, only `Integration.Sulfur` sees `0Harmony`, and `FalseGods.Plugin`
+cannot see the ST adapter. On top of that, five checks run in CI and block the pre-push hook (the project-graph
+layer of `FG-ARCH-002`, plus `FG-ARCH-003`, `-005`, `-006` and `-010`); `FG-ARCH-002`'s metadata layer and
+`FG-ARCH-011` need a built adapter DLL and so run locally only. **Ten of the layers the rules name still have no
+check, and no rule is enforced at every layer it names** — see
+[ArchitectureEnforcement.md](../ArchitectureEnforcement.md), which is the authority on this and is kept current.
+
+**Where the pressure actually showed up**, a year of feature work later: not in the module graph, which held, but
+in deciding *which* module a new port belongs to. The rule that settled it is the one already written here — a
+port lives in the innermost module that actually consumes it, and Core may not declare a port with no present
+consumer. Ports whose implementation must see `Application` live in `Application`; the ones `UnityRuntime`
+implements live in `RuntimeContracts`, because `UnityRuntime` cannot see `Application`. Risks R21–R31 and R35
+still track leakage.

@@ -1,6 +1,6 @@
 # ADR-005 — Snapshot + discrete-event replication
 
-**Status:** Proposed
+**Status:** Accepted, implemented (`FalseGods.Protocol` + `FalseGods.Application/Replication`)
 
 ## Context
 Clients render a host-authoritative boss inside a host-authoritative arena. Continuous state (position, health,
@@ -55,5 +55,22 @@ gains a hazard, and makes an arena-less boss test impossible to serialize.
   (RiskList R19); baseline-driven late join (RiskList R18).
 
 ## Verification status
-Unverified — validated by PoC Phase B (B2–B8), with B8 asserting that one `EncounterBaseline` restores boss,
-arena, and encounter state together.
+**Implemented and verified in game on two machines.** Continuous state rides `BossSnapshot` / `ArenaSnapshot`;
+every change a player can *notice* is also a discrete reliable event, and the snapshot is what a peer that missed
+one corrects itself from. That "on the wire twice" shape has now been applied often enough to be the house
+pattern: the boss beginning, its rage, its stations, its death, the room's supply and its exit all follow it, and
+the protocol has been through seventeen versions doing so.
+
+**Two things the two-peer runs taught that the ADR could not have known:**
+
+- **"Triggered" and "running" are different states** wherever a boss has an opening. A room whose machinery was
+  gated on *begun* started working during the roar. The snapshot field was right; the question asked of it was not.
+- **A discrete event and the state it changes must be cleared in the same place.** A rage that ended left
+  `Enraged` true on the host once, and clients read their arms off that field — so the arms stayed up over the
+  corpse. Two ways out of one state means exactly one place may answer for it.
+
+Late join works on the catch-up path as well as the ceremony path: a peer arriving mid fight opens the room
+without replaying the roar. Duplicate and out-of-order application are covered by unit tests (`ReplicationTests`),
+not just by design.
+
+**Open:** host/client telegraph and commit offsets have never been measured (RiskList R17).

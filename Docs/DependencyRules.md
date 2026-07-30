@@ -4,7 +4,9 @@
 mechanically.* Companion to [Architecture.md](Architecture.md). The intent is that **common violations become
 compile-time or CI failures**, not matters of discipline.
 
-Nothing here is implemented in this documentation pass; this is the rulebook and the enforcement plan.
+This is the rulebook. What is actually enforced, at which layer, and by what, is
+[ArchitectureEnforcement.md](ArchitectureEnforcement.md) — the authority on that question. §7 below summarises it
+and is not authoritative.
 
 ## 1. Allowed project references
 
@@ -167,17 +169,22 @@ Deliberately separate: a rule is a claim about the design, and a check is a prog
 The rules above are the authority. The enforcement document carries the stable rule ids (`FG-ARCH-001` …) that
 every automated check must cite, and none of the rule text is duplicated there.
 
-**The module skeleton now exists**, so §1's allow-list is expressed as real `.csproj` reference lists and the
-compiler already rejects the common violations: Core cannot see `UnityEngine`, `UnityRuntime` cannot see
-`FalseGods.Protocol`, `RuntimeContracts` cannot see anything but Core, only `Integration.Sulfur` can see
-`0Harmony`, and `FalseGods.Plugin` cannot see the ST adapter.
+**§1's allow-list is expressed as real `.csproj` reference lists**, and every module now carries real source
+inside them, so the compiler already rejects the common violations: Core cannot see `UnityEngine`, `UnityRuntime`
+cannot see `FalseGods.Protocol`, `RuntimeContracts` cannot see anything but Core, only `Integration.Sulfur` can
+see `0Harmony`, and `FalseGods.Plugin` cannot see the ST adapter.
 
-**Two automated checks now exist** — `FG-ARCH-002` and `FG-ARCH-010` — and they fail when run
-(`.\scripts\verify.ps1`). The other eight rules have no check, and **no rule is `Required in CI`**, because
-there is no CI. Remember what the compiler does and does not do: it stops you *using* a forbidden type, and it
-does not stop you *adding the reference*, which is why `FG-ARCH-002` also inspects the evaluated MSBuild
-project graph. See [ArchitectureEnforcement.md §13](ArchitectureEnforcement.md) for exactly what is and is not
-protected today.
+**Five checks run in CI on every push and block the local pre-push hook:** the evaluated project-graph layer of
+`FG-ARCH-002`, plus `FG-ARCH-003`, `FG-ARCH-005`, `FG-ARCH-006` and `FG-ARCH-010`. `FG-ARCH-002`'s
+assembly-metadata layer and `FG-ARCH-011`'s field-signature scan need a built adapter DLL, which CI cannot build,
+so they run only in the full `.\scripts\verify.ps1` and the pre-push hook — **a green CI is not a full-green.**
+Ten of the layers the rules name still have no check, and no rule is enforced at every layer it names.
+
+Remember what the compiler does and does not do: it stops you *using* a forbidden type, and it does not stop you
+*adding the reference*, which is why `FG-ARCH-002` also inspects the evaluated MSBuild project graph. Branch
+protection was removed, so CI is a visible re-check rather than a merge gate. See
+[ArchitectureEnforcement.md](ArchitectureEnforcement.md) for exactly what is and is not protected today — these
+two paragraphs are a summary and it is the authority.
 
 ## 8. How to use this during development
 

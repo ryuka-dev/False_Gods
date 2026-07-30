@@ -9,8 +9,14 @@
 > materials, shaders, sprites, VFX, animation, audio, and the arena/boss prefabs — and never redistribute
 > vanilla SULFUR assets.
 
-All runtime behaviour here is **proposed/unverified** until exercised by the PoC (report 7). Facts read
-directly from the game files are marked *(verified from game files)*.
+**The pipeline this report proposed is the one in use**, and the PoC (report 7) exercised it: authoring in a
+matching-version Unity project, an AssetBundle plus a content artifact, original art only, vanilla content
+resolved at runtime. Two things it got wrong are worth reading it with: stock-URP materials in our own bundle
+render **pink** in game, so original geometry wears borrowed vanilla materials instead (§3 / RiskList R6/R13);
+and the arena's navigation is not shipped in the bundle at all, because the arena arrives as the level and the
+game scans it ([ADR-002](ADRs/ADR-002-AStar-Recast-Integration.md)). Facts read directly from the game files are
+marked *(verified from game files)*; the current working details of the authoring loop are in
+[BossEncounterRunbook.md](BossEncounterRunbook.md).
 
 ## 8.1 Target engine (verified from game files)
 

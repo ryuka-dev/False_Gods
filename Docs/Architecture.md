@@ -6,8 +6,10 @@ authority on **structure**; the wire/replication contract lives in
 [MultiplayerLoadingContract.md](MultiplayerLoadingContract.md), and the enforcement detail in
 [DependencyRules.md](DependencyRules.md).
 
-All module/interface layouts here are **proposed** until implementation; exact signatures are deferred.
-No code is created by this document.
+**This structure is built.** All eight modules carry real source and the boundaries below are the ones the
+compiler enforces, so where this document and a `.csproj` reference list disagree, the reference list wins and
+this document is wrong. Individual type and method signatures are still deliberately not pinned here — the code
+is the authority on those, and duplicating them here would only create a second thing to keep true.
 
 ## 1. Goals
 

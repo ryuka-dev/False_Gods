@@ -1,6 +1,6 @@
 # ADR-003 — Network-native boss architecture (Simulation / Presentation / Replication)
 
-**Status:** Proposed
+**Status:** Accepted, implemented (`FalseGods.Core` / `.UnityRuntime` / `.Protocol` + `.Application`)
 
 ## Context
 SULFUR Together retrofits networking onto vanilla bosses via Harmony + reflection + adapters, achieving only
@@ -41,4 +41,19 @@ host, and replicated as a result.
 - Enables single-player without any networking dependency (ADR-004).
 
 ## Verification status
-Unverified — validated by PoC Phase B ([MinimalProofOfConceptPlan.md](../MinimalProofOfConceptPlan.md)).
+**Implemented and verified in game on two machines.** The three layers exist as separate assemblies and the
+separation is mechanical, not aspirational: `FalseGods.Core` holds the simulation and cannot reference
+`UnityEngine`; `FalseGods.UnityRuntime` holds the presentation and cannot reference `FalseGods.Protocol`, so
+handing presentation a wire DTO does not compile; `FalseGods.Application` owns both mappers (domain → presentation
+and wire → presentation) and `PresentationParityTests` asserts the two produce the same presentation for the same
+state, which is what stops single-player and multiplayer drifting apart.
+
+**What the two-peer runs proved beyond compilation:** the host owns the boss's phase, health, stations, rage,
+summons and death; each peer plays its own roar, fog, music, arms, hit flash and boss bar off the replicated
+facts; a client's weapon hits arrive as *intents* and the host answers with results; and a peer that joins mid
+fight rebuilds the presentation it missed rather than replaying the ceremony. Every one of those was watched on
+both machines, and each round's log was read on both sides rather than judged by feel — which is how the one real
+bug of the opening arc was caught (a room gated on "triggered" where it meant "running").
+
+**Open:** telegraph/commit timing offsets between host and client have never been measured (RiskList R17), and no
+second boss has yet tested whether the definition really is data rather than a special case.
