@@ -62,7 +62,19 @@ MaxClientHitDamage = 1000
 
 ## Known issues
 
-The fight is tuned but new. If a phase feels too long or too cheap, say so — the numbers are easy to move and
+**Playing without SULFUR Together logs an error, and it is not one.** You will see this:
+
+```ini
+[Error: BepInEx] Could not load [False Gods - SULFUR Together Adapter] because it has missing
+dependencies: com.ryuka.sulfur.together
+```
+
+That is BepInEx reporting a *skipped* plugin, and skipping it is the whole point — the co-op adapter declares
+SULFUR Together as a hard requirement precisely so that without it the adapter is never loaded at all, instead of
+loading and then failing somewhere less obvious. The mod itself has already loaded by then and says so on the line
+above. Nothing is broken and there is nothing to fix. BepInEx just files "skipped" under Error.
+
+**The fight is tuned but new.** If a phase feels too long or too cheap, say so — the numbers are easy to move, and
 feedback on pacing is the most useful thing you can send.
 
 ## Credits
