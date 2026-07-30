@@ -95,4 +95,21 @@
     <Message Condition="'$(BepInExClientPluginDir)' != ''" Text="False Gods ST adapter deployed (client) -&gt; $(_AdapterClientDeployDir)" Importance="high" />
   </Target>
 
+  <!--
+    Release staging: this adapter ships INSIDE the base mod's package, not as a separate download. It is one
+    plugin folder for the player and two BepInEx plugins inside it, which is the arrangement its hard
+    [BepInDependency] attributes were written for — BepInEx orders them, and with SULFUR Together absent it
+    skips this one (never CLR-loading it, so no type-load failure) while the base plugin plays single-player.
+
+    Note this is deliberately NOT the two-folder split DeployAdapter uses. That split exists because the two
+    development deploys each copy the shared FalseGods.* assemblies, and one assembly identity loaded from two
+    paths is its own class of bug. In the package there is exactly one copy of each, so one folder is both
+    simpler and the thing that has no duplicates to get wrong.
+  -->
+  <Target Name="StageForThunderstore" AfterTargets="Build" Condition="'$(DeployToSulfurProfile)' == 'true' AND '$(ThunderstoreDir)' != ''">
+    <MakeDir Directories="$(ThunderstoreDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ThunderstoreDir)" OverwriteReadOnlyFiles="true" />
+    <Message Text="Staged for release -&gt; $(ThunderstoreDir): $(TargetFileName)" Importance="high" />
+  </Target>
+
 </Project>

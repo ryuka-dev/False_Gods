@@ -249,6 +249,36 @@ BepInEx profile is a separate, opt-in step, and it needs `BepInExPluginDir` set 
    `dotnet build tools/FalseGods.Probe/FalseGods.Probe.csproj -p:DeployProbe=true`. It loads its own copy of the
    arena bundle, so an unexpected room in an ordinary level is usually the probe and not the mod.
 
+## Packaging a release
+
+`Thunderstore/` holds the store page, the changelog, the manifest and the icon, and is also where a release is
+staged. Build the arena content in Unity first (step 1 above), then:
+
+```
+dotnet build "False Gods.slnx" -c Release -p:DeployToSulfurProfile=true
+```
+
+**The whole solution, not one project** — the multiplayer companion is deliberately absent from the base plugin's
+project graph (`FG-ARCH-002`), so nothing that builds only `FalseGods.Plugin` can produce a complete package. Both
+projects stage themselves. Unlike the development deploys, staging **fails** rather than warns when the arena
+bundle is missing: a release without it installs, loads, and then fails closed at the arena for every player.
+
+**One plugin folder, two BepInEx plugins.** The package ships the base plugin and the multiplayer companion side
+by side — which is what the companion's hard `[BepInDependency]` attributes were written for. BepInEx orders them,
+and with SULFUR Together absent it skips the companion without ever CLR-loading it, so single-player is unaffected.
+This is *not* the two-folder split `DeployAdapter` uses; that split exists only because the two development
+deploys each copy the shared `FalseGods.*` assemblies, and one assembly identity loaded from two paths is its own
+class of bug. In the package there is exactly one copy of each.
+
+Two things to check by hand before publishing, because nothing automates them
+([RiskList](Docs/RiskList.md) R12):
+
+- **Nothing vanilla is redistributed.** The staged DLLs must carry no extracted texture (the only embedded image
+  should be our own `boss-body.png`) and the bundle no `Texture2D` at all — the arena's vanilla-looking rock is
+  *marker names* resolved from the player's install at runtime, not shipped assets.
+- **The staged bundle is current.** It is a Unity build output; a `.blend` edited after the last bundle build is
+  not in it.
+
 ## Reference environment (verified during investigation)
 
 - Game: **SULFUR v0.18.5**, **Unity 6000.3.6f1** (Mono `net472`), managed assemblies under

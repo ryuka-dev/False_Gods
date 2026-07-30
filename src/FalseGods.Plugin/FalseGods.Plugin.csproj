@@ -104,4 +104,38 @@
     <Message Condition="'$(BepInExClientPluginDir)' != ''" Text="False Gods plugin deployed (client) -&gt; $(_PluginClientDeployDir)" Importance="high" />
   </Target>
 
+  <!--
+    Release staging: put everything the base plugin needs at runtime into Thunderstore/, which is what the
+    packaging script zips. Separate from DeployPlugin on purpose — that one targets a live game profile and is
+    a development convenience; this one produces a release artifact and is allowed to FAIL.
+
+    And it does fail, loudly, when the arena content is absent. DeployPlugin only warns, because a dev who has
+    not built the bundle yet still wants the DLLs in their profile; a release without the bundle is a mod that
+    installs, loads, and fails closed at the arena with "content unavailable" for every player who tries it.
+    The bundle is a Unity build output (gitignored), so a clean clone genuinely does not have one — which is
+    exactly the case that must not silently ship.
+
+    Build+stage:  dotnet build "False Gods.slnx" -c Release -p:DeployToSulfurProfile=true
+    (the whole solution, because the ST adapter is deliberately NOT in this project's graph — FG-ARCH-002 —
+     and it stages itself from its own project.)
+  -->
+  <Target Name="StageForThunderstore" AfterTargets="Build" Condition="'$(DeployToSulfurProfile)' == 'true' AND '$(ThunderstoreDir)' != ''">
+    <PropertyGroup>
+      <_UnityBuildDir>$(MSBuildProjectDirectory)\..\..\FalseGods.Unity\Build</_UnityBuildDir>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_UnityBuildDir)\falsegods-poc-room.bundle')"
+           Text="Cannot stage a release: FalseGods.Unity\Build\falsegods-poc-room.bundle is missing. Build it in the Unity project (False Gods -&gt; Build PoC AssetBundle) first — a package without it installs broken." />
+    <Error Condition="!Exists('$(_UnityBuildDir)\arena-content-PocRoom.artifact')"
+           Text="Cannot stage a release: FalseGods.Unity\Build\arena-content-PocRoom.artifact is missing. Build it in the Unity project (False Gods -&gt; Build PoC AssetBundle) first — the arena fails closed without it." />
+    <ItemGroup>
+      <_StagedDll Include="$(TargetDir)FalseGods.*.dll" />
+      <_StagedContent Include="$(_UnityBuildDir)\falsegods-poc-room.bundle" />
+      <_StagedContent Include="$(_UnityBuildDir)\arena-content-PocRoom.artifact" />
+    </ItemGroup>
+    <MakeDir Directories="$(ThunderstoreDir)" />
+    <Copy SourceFiles="@(_StagedDll)" DestinationFolder="$(ThunderstoreDir)" OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="@(_StagedContent)" DestinationFolder="$(ThunderstoreDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="true" />
+    <Message Text="Staged for release -&gt; $(ThunderstoreDir): @(_StagedDll->'%(Filename)%(Extension)'), arena bundle + content artifact" Importance="high" />
+  </Target>
+
 </Project>

@@ -55,11 +55,13 @@ evidence is the next step's input.
 
 **Entry:** nothing.
 **Do:** the arena is delivered by hijacking the game's own level generation, not by overlaying a room on an
-existing level. A dev key arms the hijack, then `GameManager.GoToLevel(Act_01_Caves, 0, …)`; a Harmony prefix on
+existing level. Something arms the hijack, then `GameManager.GoToLevel(Act_01_Caves, 0, …)`; a Harmony prefix on
 `CreateStartAreaNode.Execute` substitutes our arena, wrapped as a `Room`, for the vanilla start room, and the
 neutered-node set skips main-path/extra-room/enemy/event generation. Everything else runs natively.
 **Closes when:** the level loads, the log lists every generation step as `native` or `skipped`, and a manually
 summoned enemy paths on the arena floor.
+**Since:** a dev key armed it during bring-up; that key is gone. Arming now comes from a row in the game's own
+developer menu, and in ordinary play from the portal that opens in the vanilla cave boss's room.
 
 > **Why this way.** The first attempt loaded the arena additively onto a normal level and rescanned navigation
 > itself. That is a dead end: the port fail-closes on `!recast.isScanned`, and a large footprint also trips the

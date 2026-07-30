@@ -35,6 +35,13 @@
       degrades to warning MSB3245 and the assembly silently compiles against nothing.
     -->
     <MSBuildWarningsAsErrors>$(MSBuildWarningsAsErrors);MSB3245</MSBuildWarningsAsErrors>
+
+    <!--
+      Release staging area. NOT a machine path - it is inside the repository - so unlike the SULFUR /
+      BepInEx paths it belongs here rather than in LocalPaths.props. Nothing is written to it unless a
+      build explicitly asks (-p:DeployToSulfurProfile=true), the same opt-in rule as every other deploy.
+    -->
+    <ThunderstoreDir Condition="'$(ThunderstoreDir)' == ''">$(MSBuildThisFileDirectory)Thunderstore</ThunderstoreDir>
   </PropertyGroup>
 
   <!--

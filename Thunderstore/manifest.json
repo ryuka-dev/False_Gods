@@ -1,0 +1,7 @@
+{
+  "name": "False_Gods",
+  "version_number": "0.4.0",
+  "website_url": "https://github.com/ryuka-dev/False_Gods",
+  "description": "An original boss and its own hand-built cave arena, reached from the cave boss's room. Works in single-player and in SULFUR Together co-op.",
+  "dependencies": ["BepInEx-BepInExPack-5.4.2100"]
+}

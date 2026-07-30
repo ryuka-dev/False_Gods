@@ -21,6 +21,17 @@ ProbeReports/
 BlenderWork/*
 !BlenderWork/Falsegods1.blend
 
+# Release staging. Thunderstore/ holds files we author (manifest, store page, changelog, icon,
+# and the generated-but-tracked nexusmods.txt) side by side with build output that must never be
+# committed: the staged DLLs, the arena bundle and its content artifact, the icon's Photoshop
+# source, and the packaged zip. Ignoring by kind rather than by name keeps a newly staged DLL out
+# of a commit without anyone remembering to add it here.
+Thunderstore/*.dll
+Thunderstore/*.zip
+Thunderstore/*.psd
+Thunderstore/*.bundle
+Thunderstore/*.artifact
+
 # Build output
 bin/
 obj/
