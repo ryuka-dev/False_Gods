@@ -33,7 +33,7 @@ namespace FalseGods.Integration.Sulfur.Arena
     /// </remarks>
     public static class LevelGenerationHijackPatches
     {
-        private const string HarmonyId = "ryuka_labs.falsegods.levelgen";
+        private const string HarmonyId = "ryuka.sulfur.false_gods.levelgen";
 
         private static bool _installed;
 

@@ -29,7 +29,7 @@ namespace FalseGods.Probe
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public sealed class ProbePlugin : BaseUnityPlugin
     {
-        public const string PluginGuid = "ryuka_labs.falsegods.probe";
+        public const string PluginGuid = "ryuka.sulfur.false_gods.probe";
         public const string PluginName = "False Gods Probe";
         public const string PluginVersion = "0.29.0";
 

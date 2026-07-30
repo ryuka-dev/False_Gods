@@ -58,7 +58,7 @@ namespace FalseGods.Plugin
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public sealed class FalseGodsPlugin : BaseUnityPlugin
     {
-        public const string PluginGuid = "ryuka_labs.falsegods";
+        public const string PluginGuid = "ryuka.sulfur.false_gods";
         public const string PluginName = "False Gods";
         public const string PluginVersion = "0.4.0";
 

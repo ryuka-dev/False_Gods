@@ -1,9 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using BepInEx;
-using BepInEx.Configuration;
 using FalseGods.RuntimeContracts.Integration;
-using UnityEngine.InputSystem;
 using ILogger = FalseGods.RuntimeContracts.Diagnostics.ILogger;
 
 namespace FalseGods.Integration.SulfurTogether
@@ -26,11 +24,6 @@ namespace FalseGods.Integration.SulfurTogether
     /// type-load failure (Docs/DependencyRules.md §6, RiskList R20/R29). The same discipline keeps ST types out of
     /// every field in this assembly (FG-ARCH-011; see <see cref="StEncounterChannel"/>'s remarks).
     /// </para>
-    ///
-    /// <para>
-    /// The two dev keys are a TEMPORARY harness for PoC B0's seam checks (register-twice rejected, revoke falls
-    /// back to single-player); they drive only the broker, never gameplay.
-    /// </para>
     /// </remarks>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     [BepInDependency(BasePluginGuid)]
@@ -39,18 +32,15 @@ namespace FalseGods.Integration.SulfurTogether
     {
         public const string PluginGuid = "ryuka.sulfur.false_gods_sulfur_together";
         public const string PluginName = "False Gods - SULFUR Together Adapter";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.4.0";
 
         /// <summary>The False Gods base plugin (FalseGodsPlugin.PluginGuid — a string on purpose, FG-ARCH-002).</summary>
-        private const string BasePluginGuid = "ryuka_labs.falsegods";
+        private const string BasePluginGuid = "ryuka.sulfur.false_gods";
 
         /// <summary>SULFUR Together's plugin GUID (verified against the ST source's ModInfo).</summary>
         private const string SulfurTogetherGuid = "com.ryuka.sulfur.together";
 
         // Initialised in Awake (Unity's lifecycle entry point, not the constructor); null! documents that contract.
-        private ConfigEntry<Key> _registerKey = null!;
-        private ConfigEntry<Key> _revokeKey = null!;
-
         private ILogger _log = null!;
         private StEncounterChannel? _channel;
         private SulfurTogetherIntegration? _integration;
@@ -58,32 +48,11 @@ namespace FalseGods.Integration.SulfurTogether
 
         private void Awake()
         {
-            _registerKey = Config.Bind("Dev", "RegisterKey", Key.F10,
-                "TEMPORARY B0 harness: attempt a broker registration. With ours already live this demonstrates "
-                + "the duplicate being rejected (first registration wins); after a revoke it re-registers.");
-
-            _revokeKey = Config.Bind("Dev", "RevokeKey", Key.F11,
-                "TEMPORARY B0 harness: dispose the registration token. The base plugin must fall back to the "
-                + "single-player composition until a registration returns.");
-
             _log = new Diagnostics.BepInExLogger(Logger);
 
-            Logger.LogMessage($"{PluginName} {PluginVersion} loaded. Dev keys: register {_registerKey.Value}, "
-                + $"revoke {_revokeKey.Value}.");
+            Logger.LogMessage($"{PluginName} {PluginVersion} loaded.");
 
             TryCompose("plugin load");
-        }
-
-        private void Update()
-        {
-            if (KeyPressed(_registerKey.Value))
-            {
-                TryCompose("dev key");
-            }
-            else if (KeyPressed(_revokeKey.Value))
-            {
-                Revoke();
-            }
         }
 
         private void OnDestroy()
@@ -185,19 +154,5 @@ namespace FalseGods.Integration.SulfurTogether
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static string DescribeBridge() =>
             $"ST bridge API v{SULFURTogether.Api.NetExternalChannel.ApiVersion}";
-
-        private static bool KeyPressed(Key key)
-        {
-            try
-            {
-                var keyboard = Keyboard.current;
-                return keyboard != null && keyboard[key].wasPressedThisFrame;
-            }
-            catch (Exception)
-            {
-                // No keyboard device, or an unmapped key.
-                return false;
-            }
-        }
     }
 }
