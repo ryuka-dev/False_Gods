@@ -304,8 +304,20 @@ room prefab out of an AssetRipper export.*
 - **The label has no seam.** `UpdateLabel` fills a private `bossName` (a TMP text) from
   `Npc.GetActorName()`, which is `LocalizationManager.TryGetTranslation("UnitNames/" + unitSO.name)` falling back
   to `unitSO.displayName`. Borrowing a vanilla definition therefore announces the vanilla creature. Writing over
-  the private field after attaching keeps the game's translation and adds our own prefix; it is only rewritten on
-  a language change, which is rare enough to accept.
+  the private field after attaching keeps the game's translation and adds our own prefix.
+- **The bar renames itself when the language changes, so our prefix has to follow it.** `BossHealth.Start`
+  subscribes its own `UpdateLabel` to `AsyncAssetLoading.onLanguageChange` (and unsubscribes in `OnDestroy`), and
+  `AsyncAssetLoading.ChangeLanguage(string)` raises that delegate right after setting
+  `LocalizationManager.CurrentLanguage`. **That delegate is the canonical hook**, not I2's `OnLocalizeEvent`:
+  anything that renames the boss earlier is overwritten by the bar a moment later, and a handler added while the
+  boss is on the bar runs after the bar's own because a delegate keeps subscription order.
+- **The mod's own words are the mod's** (`FalseGodTitle`, in `FalseGods.Application`): a plain table of the
+  fourteen languages the game ships, keyed by `LocalizationManager.CurrentLanguageCode`. Nothing is added to the
+  game's I2 source — that source is an Addressables-owned asset the game adds to and removes from as it swaps
+  fonts, and a mod writing terms into it would be writing into shared game data. Only two questions go to I2:
+  which language is current, and — for a right-to-left one — `FixRTL_IfNeeded` over our own word, because I2
+  returns translations **already reordered for display**, which is also why the two halves of the name are
+  emitted in the opposite order for such a language.
 
 ### 2.10 What a boss summons, and how strong a wave is
 

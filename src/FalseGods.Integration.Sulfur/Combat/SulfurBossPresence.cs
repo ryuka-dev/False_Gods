@@ -1,6 +1,8 @@
 using System;
 using System.Reflection;
 using FalseGods.Application.Combat;
+using FalseGods.Application.Presentation;
+using I2.Loc;
 using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.UI;
 using PerfectRandom.Sulfur.Core.Units;
@@ -48,17 +50,6 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// creature it attached.</summary>
         private const string BossBarLabelFieldName = "bossName";
 
-        /// <summary>
-        /// What the borrowed creature's name is announced as.
-        /// </summary>
-        /// <remarks>
-        /// The bar's label comes from the unit definition, and ours is borrowed from the cave boss — so left alone
-        /// it would announce the vanilla creature by its own localised name. Prefixing keeps that localisation
-        /// (which is free, and correct in every language the game ships) while saying plainly that this is not the
-        /// creature the player has met before.
-        /// </remarks>
-        private const string BossNamePrefix = "SULFUR ";
-
         private readonly Func<Collider?> _solidBody;
         private readonly ILogger? _logger;
 
@@ -66,6 +57,7 @@ namespace FalseGods.Integration.Sulfur.Combat
         private Npc? _npc;
         private bool _onTheBar;
         private float _shownHealth = -1f;
+        private AsyncAssetLoading.OnLanguageChange? _renameOnLanguageChange;
 
         /// <param name="solidBody">The boss's own solid capsule — what the game is told to measure it by, and what
         /// the listing hangs from so it goes wherever the boss goes.</param>
@@ -152,6 +144,7 @@ namespace FalseGods.Integration.Sulfur.Combat
                 _onTheBar = true;
                 _shownHealth = 1f;
                 NameTheBoss(npc);
+                KeepTheNameInThePlayersLanguage();
                 _logger?.Log("[boss-bar] the boss is on the game's own boss bar.");
             }
             catch (Exception exception)
@@ -198,6 +191,7 @@ namespace FalseGods.Integration.Sulfur.Combat
 
             _onTheBar = false;
             _shownHealth = -1f;
+            StopFollowingTheLanguage();
             try
             {
                 npc.AttachToBossUI(false);
@@ -214,8 +208,13 @@ namespace FalseGods.Integration.Sulfur.Combat
         /// <remarks>
         /// <para>The bar fills its label from the attached creature's localised name, which for a borrowed
         /// definition is the vanilla creature's. There is no seam for supplying a different one — the label is a
-        /// private field the game writes once on attach — so it is written over afterwards. Reflection for exactly
-        /// one field, like the roar.</para>
+        /// private field the game writes on attach and on every language change — so it is written over afterwards.
+        /// Reflection for exactly one field, like the roar.</para>
+        /// <para><b>Both halves are the player's language.</b> The creature's half is the game's own translation,
+        /// re-read here rather than remembered; ours comes from <see cref="FalseGodTitle"/>, a table this mod owns,
+        /// looked up by the language the game says is current. A right-to-left language needs two things of us: our
+        /// own word shaped for display, which is the localisation layer's job and is asked of it here, and the two
+        /// halves emitted in the opposite order, which is the title's job.</para>
         /// <para>Fail-soft on purpose: a build that cannot find the label shows the vanilla name, which is wrong
         /// but harmless, and a fight is not worth failing over a caption.</para>
         /// </remarks>
@@ -240,7 +239,12 @@ namespace FalseGods.Integration.Sulfur.Combat
                     return;
                 }
 
-                label.text = BossNamePrefix + npc.GetActorName();
+                var title = FalseGodTitle.For(LocalizationManager.CurrentLanguageCode);
+                label.text = FalseGodTitle.Compose(
+                    LocalizationManager.FixRTL_IfNeeded(title.Word),
+                    title.Joiner,
+                    npc.GetActorName(),
+                    LocalizationManager.IsRight2Left);
             }
             catch (Exception exception)
             {
@@ -248,9 +252,80 @@ namespace FalseGods.Integration.Sulfur.Combat
             }
         }
 
+        /// <summary>
+        /// Follow the player's language for as long as the boss is on the bar.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>The game's own event, not the localisation library's.</b> The bar subscribes its own
+        /// <c>UpdateLabel</c> to <c>AsyncAssetLoading.onLanguageChange</c> and rewrites the label from the borrowed
+        /// creature the moment the language changes — so hooking anything earlier would be overwritten a moment
+        /// later. Subscribing to the same delegate puts our rename behind the bar's own, because a delegate runs
+        /// its handlers in the order they were added and the bar's was added when the UI was built.</para>
+        /// <para>Cheap to be wrong about: if the order ever did invert, the player would see the vanilla name until
+        /// the next thing that renames the boss. Nothing but the caption depends on this.</para>
+        /// </remarks>
+        private void KeepTheNameInThePlayersLanguage()
+        {
+            if (_renameOnLanguageChange != null)
+            {
+                return;
+            }
+
+            try
+            {
+                var assets = StaticInstance<AsyncAssetLoading>.Instance;
+                if (assets == null)
+                {
+                    return;
+                }
+
+                _renameOnLanguageChange = () =>
+                {
+                    var npc = _npc;
+                    if (npc != null && _onTheBar)
+                    {
+                        NameTheBoss(npc);
+                    }
+                };
+                assets.onLanguageChange += _renameOnLanguageChange;
+            }
+            catch (Exception exception)
+            {
+                _renameOnLanguageChange = null;
+                _logger?.LogWarning($"[boss-bar] the boss's name will not follow a language change "
+                    + $"({exception.Message}).");
+            }
+        }
+
+        /// <summary>Let go of the language, whether or not the bar is still there to rename.</summary>
+        private void StopFollowingTheLanguage()
+        {
+            var rename = _renameOnLanguageChange;
+            _renameOnLanguageChange = null;
+            if (rename == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var assets = StaticInstance<AsyncAssetLoading>.Instance;
+                if (assets != null)
+                {
+                    assets.onLanguageChange -= rename;
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[boss-bar] the boss's rename could not be unsubscribed from language changes "
+                    + $"({exception.Message}).");
+            }
+        }
+
         public void Withdraw()
         {
             HideHealthBar();
+            StopFollowingTheLanguage(); // also when the bar was already gone, so nothing outlives the encounter
             var npc = _npc;
             _npc = null;
             if (npc != null)

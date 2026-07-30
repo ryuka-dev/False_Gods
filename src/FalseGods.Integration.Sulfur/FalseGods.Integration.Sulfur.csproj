@@ -133,6 +133,14 @@
       <Private>false</Private>
     </Reference>
 
+    <!-- The game's localisation layer (I2 Localization). Read-only, and for two questions only: which language
+         the player is in, and how this mod's own word for a false god must be shaped for a right-to-left one.
+         The mod's translations are its own (FalseGodTitle) — nothing here writes into the game's text. -->
+    <Reference Include="I2AsmDef">
+      <HintPath>$(SulfurManagedDir)\I2AsmDef.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
     <!-- Addressables: how vanilla content is resolved from the player's own install. -->
     <Reference Include="Unity.Addressables">
       <HintPath>$(SulfurManagedDir)\Unity.Addressables.dll</HintPath>
