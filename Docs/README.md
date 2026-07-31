@@ -27,6 +27,13 @@ unverified* until validated in game.
   order that works: the production sequence and what closes each step, the measurements pinned to a game version
   with how to re-take them, and the traps that cost real time. Read this before building the next arena.
 
+## Planned work
+
+- **[FarmExpansionRoadmap.md](FarmExpansionRoadmap.md)** — a farm plot in the church hub, worked by hand first
+  and by an enslaved goblin later, with crops advancing per level cleared. **Design only — nothing is built.**
+  Records the settled decisions, the phase order, and the open questions, chief among them whether a custom item
+  type can exist at all.
+
 ## Reports
 
 1. **[ArenaResourceArchitecture.md](ArenaResourceArchitecture.md)** — How SULFUR cave levels are organized
