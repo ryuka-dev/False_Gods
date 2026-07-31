@@ -61,8 +61,8 @@ Each phase ends with an in-game check by the user. Phases are ordered so that ea
 ### P0 — Investigation (blocking, must finish before P2 is designed)
 The seed carrier is settled (§7.1: a marked vanilla item, one minted marker pair). What remains is the
 **achievement side effect** — marking must not regress a player's `OIL_IT_UP` progress, on marking *or* on every
-subsequent load — plus building the badge, since the mark is invisible in the vanilla tooltip. Nothing else is
-blocked by it: **P1 does not need any of it.**
+subsequent load — plus the mark's presentation (§7.4), which is entirely ours because vanilla draws nothing.
+Nothing else is blocked by it: **P1 does not need any of it.**
 
 ### P1 — The plot and manual tending
 The farm exists and is playable. No goblins, no seeds, no shrines.
@@ -217,8 +217,15 @@ resolves by asset name) that the load path already consults when `data.id == Ite
 | Check | Result |
 |---|---|
 | Do vanilla oils stack, merging a marked oil into unmarked ones? | **No.** No `maxStack` / `isStackable` / `CanStackWith` / `TryStack` / merge logic exists anywhere in Core; `quantity` is only ever restored verbatim from save data. Matches the user's own knowledge. Mods that add stacking are explicitly out of scope. |
-| Does the tooltip show the mark? | **No** — and that is acceptable. Enchantment rendering sits behind `weaponSO.TypeIsEnchantable` inside the weapon branch, so an oil's enchantments never draw. The mark is therefore invisible by default, which means **a badge of our own is required**, and also means we cannot disturb vanilla tooltip layout. Precedent for the badge: `InventoryItem` already has a `brokenIcon` (`Image`, `SetActive(true)` + recoloured when broken). |
+| Does the tooltip show the mark? | **No** — and that is acceptable. Enchantment rendering sits behind `weaponSO.TypeIsEnchantable` inside the weapon branch, so an oil's enchantments never draw. The mark is therefore invisible by default, so **its whole presentation is ours to build** (§7.4) and vanilla tooltip layout stays untouched. Precedent for a badge: `InventoryItem` already has a `brokenIcon` (`Image`, `SetActive(true)` + recoloured when broken). |
 | Does marking have side effects? | **Yes — this one needs solving.** `AddEnchantment` calls `AchievementManager.EnchantmentAppliedToItem`, which calls `SetLocalStat("OIL_IT_UP", enchantmentCount)`. In `SetLocalStat` the assignment `value2.currentValue = value` happens **before** the `onlyIncreaseValue` guard, so the guard suppresses only the notification and the unlock check — **not the write**. Marking an oil reports a count of 1 and can therefore *regress* a player's `OIL_IT_UP` progress, and `SetupEnchantmentsFromData` re-triggers it on **every load** of a marked oil. It is a no-op once the achievement is unlocked (`if (value2.isUnlocked) return`). Regressing a player's achievement progress is user data we must not touch. |
+
+`OIL_IT_UP` tracks **how many enchantments are stacked on a single item** — that is the value
+`EnchantmentAppliedToItem` reports. Its `TargetValue` could not be read: `AchievementDefinition` is a
+`ScriptableObject` and the identifier appears in none of the 4 200 assets under `MonoBehaviour/` in the
+AssetRipper export, so those definitions load by some other path. The exact target does not change the
+conclusion — **we would report 1, which is almost certainly below a player's real progress**, so the regression
+is real either way.
 
 Candidate mitigations for that last one, **both unverified**:
 - `InventoryItem.enchantments` is `public List<EnchantmentDefinition> { get; private set; }` — the getter is
@@ -315,7 +322,36 @@ avoid. It is also the larger job.
 
 Safe to share the panel: Telia is in the church and shrines are in levels, so the two can never be open at once.
 
-### 7.4 Smaller open items
+### 7.4 Presenting the mark: a badge *and* a tooltip line
+
+Vanilla shows nothing (§7.1), so both are ours to build, and they are independent — the badge and the line read
+the same marker state and neither constrains the other.
+
+**The tooltip line.** The tooltip is built by **`ItemDescription.Setup(InventoryItem)`** — public, and the
+weapon/non-weapon branch inside it is where an oil takes the `else` path. A Harmony **postfix** on it can check
+`inventoryItem.enchantments` for our marker and append a line.
+
+Vanilla appends a line as `descriptionTextPrefabPool.Get()` → set `textComp.text` → `SetSiblingIndex(childIndex)`,
+but **both pools are private**, so a postfix cannot borrow one. Instead **clone an existing `ItemDescriptionText`
+instance** — it already sits under the right parent with the right font and material, the same
+borrow-a-live-instance habit the rest of this mod uses rather than authoring a replacement.
+`ItemDescriptionText.textComp` is a public `TextMeshProUGUI`.
+
+> **Lifetime trap:** vanilla's lines come from an object pool and are `Release`d back. A cloned line is **not**
+> pool-managed, so it must be destroyed by us — otherwise every hover leaks one. Whoever creates it cleans it up.
+
+**The shimmer, and why it must not be a shader.** Two ways to animate a highlight across TMP text, and this
+project has already paid for one of them: our own stock-URP materials **rendered pink** in game, and the fix that
+shipped was to borrow a vanilla material rather than distribute shader variants (see the TL;DR in
+[README.md](README.md)). A custom TMP shader would walk straight back into that, and ship an extra asset besides.
+
+Use **animated vertex colours** instead: write `textInfo.meshInfo[i].colors32` each frame with a highlight window
+that moves across the character indices, then `UpdateVertexData(TMP_VertexDataUpdateFlags.Colors32)`. It is the
+standard TMP "shiny text" technique, it needs **no new shader, material or asset**, and it runs on whatever
+material the vanilla text already carries — so it cannot render pink. Speed, band width, colour and looping are
+all our own constants, on a small MonoBehaviour attached to that one line.
+
+### 7.5 Smaller open items
 - Which boss gates the goblin unlock, and what the unlock object is.
 - The transformable whitelist, and cycle length per rarity tier. Oils are not all equally rare.
 - What a "food workbench" is, if the farm needs one at all: cooking in vanilla is manual/recipe driven
