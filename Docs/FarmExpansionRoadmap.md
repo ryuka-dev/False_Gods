@@ -59,8 +59,10 @@ balance dial. It must never be treated as UI capacity or as a convenience settin
 Each phase ends with an in-game check by the user. Phases are ordered so that each is independently shippable.
 
 ### P0 — Investigation (blocking, must finish before P2 is designed)
-Resolve the custom-item question in §7.1. Everything about "seeds" depends on it, and the answer may change the
-whole shape of P2. Nothing else is blocked by it: **P1 does not need it.**
+Settle §7.1: not *whether* a custom item can be minted (it looks viable) but **how its `ItemId` survives a game
+update**, since ids are positional. Also confirm whether anything iterating `ItemDatabase.GetRawList()` would
+break on null holes. Everything about "seeds" depends on the answer. Nothing else is blocked by it: **P1 does
+not need it.**
 
 ### P1 — The plot and manual tending
 The farm exists and is playable. No goblins, no seeds, no shrines.
@@ -160,20 +162,63 @@ This does not decide the numbers; it makes them decidable with one comparison in
 
 ## 7. Open questions and risks
 
-### 7.1 The custom-item problem — the largest unknown in the feature
-A "seed" as a **new item type** needs a valid `ItemId` and an `ItemDefinition` in the game's item database.
-`RecipeDatabase` shows the shape of these databases and it is discouraging: `private RecipeData[] recipes`, a
-**fixed array indexed by `RecipeId.value - 1`**. If the item database is built the same way, minting a new item
-means growing a private array and inventing an id — fragile, and hostile to save compatibility.
+### 7.1 The seed must be a real item — minting one looks viable; making its id survive an update is the risk
 
-Four ways out, in rough order of preference. **This must be settled before P2 is designed:**
-1. **The seed is not a new item** — the transformation marks the *original* item (a flag/tag the plot reads), so
-   nothing new is minted.
-2. **Reuse an existing vanilla item as the carrier**, marked the same way.
-3. **A ledger** — the shrine records "this player has N plantable X" in our own JSON and no item is carried.
-   *Cheapest, but it throws away the design's best tension:* the player is supposed to have to survive the rest
-   of the run to bring the seed home.
-4. **Genuinely mint an item type.** Only if 1–3 fail; assume it is expensive.
+**Design constraint (settled):** the seed is a **physical item that sits in the backpack**. Not a ledger entry.
+Inventory pressure is one of SULFUR's core tensions, and a seed that costs no bag space quietly removes it. This
+rules out the cheap options and commits the design to a real `ItemId`.
+
+**The item database is more open than the recipe database.** An earlier draft of this document extrapolated from
+`RecipeDatabase` (`private RecipeData[] recipes`, a genuinely fixed array) and assumed items worked the same
+way. **They do not:**
+
+```csharp
+public class ItemDatabase : ScriptableObject {
+    [SerializeField] private List<ItemDefinition> itemDefs = new List<ItemDefinition>();
+    public List<ItemDefinition> GetRawList() => itemDefs;        // public, hands back the live list
+    public ItemDefinition this[ItemId id] {
+        get {
+            int num = id.value - 1;
+            if (num >= itemDefs.Count) {
+                Debug.LogWarning($"[ItemDatabase] ItemId {id.value} is out of range (only {itemDefs.Count} items on this version).");
+                return null;                                      // degrades, does not throw
+            }
+            ...
+```
+
+So appending an `ItemDefinition` at runtime needs **no reflection**. Two details suggest an unknown id is a
+*handled* condition rather than a crash: the indexer returns `null` with a warning whose own wording anticipates
+version-varying ids ("on this version"), and `TranslateLegacyIdentifier` null-guards entries while scanning,
+implying the list may legitimately contain holes. `EnchantmentDatabase` has the same `List` + public
+`GetRawList()` shape.
+
+**The real risk is that `ItemId` is positional.** `ItemId.value == index + 1`. An item appended after the vanilla
+entries takes the next free index — so if a game update adds vanilla items, a previously saved id resolves to a
+**different, vanilla** item. That is silent save corruption, and it is the thing P0 has to solve, not "can we
+mint at all".
+
+Two candidate mitigations, **both unverified**:
+- **Append at a high fixed offset**, far past any plausible vanilla count, so vanilla growth never reaches our
+  ids. Requires padding the list with nulls; the null-guarding seen in `TranslateLegacyIdentifier` is
+  encouraging but **every other consumer of `GetRawList()` would have to tolerate holes** — that is the thing to
+  check before choosing this.
+- **Lean on the name path.** `ItemDatabase.TranslateLegacyIdentifier(string)` is **public static** and resolves
+  by `ItemDefinition.name` (dictionary first, then a case-insensitive scan), and the load path already consults
+  `InventoryData.identifier` whenever `data.id == ItemId.None`. A name is stable across updates in a way an index
+  is not. The catch: `InventoryItem.GetSerialized()` writes **only** the numeric id and never populates
+  `identifier`, so using this path means intervening at save time.
+
+**Rejected, with reasons — do not revisit without new information:**
+- *Mark the original item instead of minting one.* Two independent blockers. (a) The save stores enchantments as
+  `InventoryData.enchantmentIds`, typed **`ItemId[]`** — the *applier* items — and resolves the definition via
+  `ItemDefinition.appliesEnchantment`, so a custom enchantment cannot persist without a custom `ItemId` anyway.
+  (b) Enchantments target weapons and armour: `GetItemsCompatibleWithEnchantment` requires
+  `HasFreeEnchantmentSlot` + `IsEnchantmentCompatible`. The items this feature wants to seed *are* oils and
+  scrolls — appliers, not targets. They cannot carry an enchantment at all.
+- *A per-item mark tracked in our own JSON.* There is **no unique instance id** anywhere in `InventoryData`; an
+  item is identified only by type + grid position + per-instance state, all of which change when the player moves
+  it. There is nothing to key on.
+- *A ledger with no item.* Ruled out by the design constraint above.
 
 ### 7.2 Hold-to-interact — mostly free, with one behavioural trap
 `HoldingInteractable : Interactable` is public and subclassable, and the fields that matter are `protected`, so
@@ -222,17 +267,26 @@ What was found:
   `TransformQuestInventory`. There is **no API to create a seventh**. A station binds `ContainerTransform` to one
   of these — e.g. `SacrificeStation` uses `TransformSacrificeInventory` and its `sacrificeFeedbackText`.
 
-Two candidate approaches, **neither chosen yet**:
+**Chosen: borrow the sacrifice panel.** Two requirements decided this together — a grid holding several items at
+once, and *no vanilla recipes offered while transforming*, which would read as out of place. The sacrifice panel
+has **no recipe list at all**: it is a grid, a confirm button and a feedback line, which is exactly a
+transformation. The alternative — injecting recipes into the real crafting page
+(`CraftingStation.GetAvailableRecipes()` returns `recipeDatabase.cookingRecipes` / `.enchantmentRecipes`, both
+`[NonSerialized] public List<RecipeData>` rebuilt by `InitRuntime()` and filtered on `IsLearned`, so runtime
+injection looks plausible) — would drag the vanilla cooking recipes in alongside ours, which is the thing to
+avoid. It is also the larger job.
 
-- **Borrow the sacrifice panel.** It is already the right *shape* — insert one item, press confirm, get a result,
-  with a feedback line — and it can never be open at the same time as a shrine (Telia is in the church, shrines
-  are in levels), so reuse is safe. Least work, least native-crafting look.
-- **Inject recipes into the real crafting page.** `CraftingStation.GetAvailableRecipes()` returns
-  `AsyncAssetLoading.Instance.recipeDatabase.cookingRecipes` / `.enchantmentRecipes`, and both are
-  `[NonSerialized] public List<RecipeData>` rebuilt by `InitRuntime()`; `PopulateRecipesMenu()` iterates them and
-  filters on `IsLearned`. **Those lists are public and mutable**, so runtime injection looks plausible — a
-  transformation is just a one-input recipe. This would be maximally native. **Unverified**, and it still runs
-  into §7.1, because `RecipeData.createsItem` is an `ItemId`.
+`SacrificeStation` already demonstrates every piece this needs:
+
+| Requirement | How |
+|---|---|
+| A grid bigger than 3×3 | `serviceGrid.SetupGrid(new Vector2Int(w, h), playerUnit, GridType)` — size is ours. Sacrifice itself uses **7×2 = 14 slots**, so the panel comfortably exceeds 3×3. |
+| Button lights up when the grid holds something convertible | `serviceGrid.onContentsChanged += …` — the exact hook; `SacrificeStation` re-evaluates and toggles its confirm button this way. |
+| Batch conversion + a whitelist that filters out what must not become a seed | Entirely ours: walk the grid contents, apply the whitelist, act on the matches. Nothing in the game constrains this. |
+| The player keeps their items | Override `RemoveItemsOnExit` — it is `public virtual`, and `SacrificeStation` sets it `true` (it consumes). We want `false`. |
+| Feedback line | `inventoryUI.sacrificeFeedbackText`, as `SacrificeStation.DoSetup` uses it. |
+
+Safe to share the panel: Telia is in the church and shrines are in levels, so the two can never be open at once.
 
 ### 7.4 Smaller open items
 - Which boss gates the goblin unlock, and what the unlock object is.
