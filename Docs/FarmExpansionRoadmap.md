@@ -59,10 +59,10 @@ balance dial. It must never be treated as UI capacity or as a convenience settin
 Each phase ends with an in-game check by the user. Phases are ordered so that each is independently shippable.
 
 ### P0 — Investigation (blocking, must finish before P2 is designed)
-Settle §7.1: not *whether* a custom item can be minted (it looks viable) but **how its `ItemId` survives a game
-update**, since ids are positional. Also confirm whether anything iterating `ItemDatabase.GetRawList()` would
-break on null holes. Everything about "seeds" depends on the answer. Nothing else is blocked by it: **P1 does
-not need it.**
+The seed carrier is settled (§7.1: a marked vanilla item, one minted marker pair). What remains is the
+**achievement side effect** — marking must not regress a player's `OIL_IT_UP` progress, on marking *or* on every
+subsequent load — plus building the badge, since the mark is invisible in the vanilla tooltip. Nothing else is
+blocked by it: **P1 does not need any of it.**
 
 ### P1 — The plot and manual tending
 The farm exists and is playable. No goblins, no seeds, no shrines.
@@ -162,63 +162,90 @@ This does not decide the numbers; it makes them decidable with one comparison in
 
 ## 7. Open questions and risks
 
-### 7.1 The seed must be a real item — minting one looks viable; making its id survive an update is the risk
+### 7.1 The seed is a marked vanilla item, not a minted copy
 
-**Design constraint (settled):** the seed is a **physical item that sits in the backpack**. Not a ledger entry.
-Inventory pressure is one of SULFUR's core tensions, and a seed that costs no bag space quietly removes it. This
-rules out the cheap options and commits the design to a real `ItemId`.
+**Two design constraints, both settled:**
+1. The seed is a **physical item occupying a backpack slot**. Not a ledger entry — inventory pressure is one of
+   SULFUR's core tensions, and a seed that costs no bag space quietly removes it.
+2. The seed **is the vanilla oil/scroll itself, unchanged**. Cloning an item per seedable oil would mean
+   maintaining a parallel copy of every one of them, keeping their numbers correct, keeping their normal
+   enchantment behaviour working, and re-adapting after every balance patch. A marked oil must still be usable
+   as an ordinary oil.
 
-**The item database is more open than the recipe database.** An earlier draft of this document extrapolated from
-`RecipeDatabase` (`private RecipeData[] recipes`, a genuinely fixed array) and assumed items worked the same
-way. **They do not:**
+Together these rule out minting a seed *item* and commit the design to **marking**.
+
+**The mechanism: one marker enchantment, applied to the real item.** Every item's save record carries
+`InventoryData.enchantmentIds` (typed `ItemId[]` — the *applier* items), and on an oil that field is naturally
+always empty, so any value there is a signal only we produce. The restore path does **not** filter by item type:
 
 ```csharp
-public class ItemDatabase : ScriptableObject {
-    [SerializeField] private List<ItemDefinition> itemDefs = new List<ItemDefinition>();
-    public List<ItemDefinition> GetRawList() => itemDefs;        // public, hands back the live list
-    public ItemDefinition this[ItemId id] {
-        get {
-            int num = id.value - 1;
-            if (num >= itemDefs.Count) {
-                Debug.LogWarning($"[ItemDatabase] ItemId {id.value} is out of range (only {itemDefs.Count} items on this version).");
-                return null;                                      // degrades, does not throw
-            }
-            ...
+private void SetupEnchantmentsFromData(InventoryData attachedData) {
+    foreach (ItemId itemId in attachedData.enchantmentIds) {
+        ItemDefinition asset = itemId.GetAsset();
+        if (asset == null) { Debug.LogWarning(...); break; }
+        AddEnchantment(asset, announce: false);        // no target-type check
+    }
+}
+
+public void AddEnchantment(ItemDefinition enchantmentItem, bool announce = true) {   // public, no slot check
+    EnchantmentDefinition asset = enchantmentItem.appliesEnchantment.GetAsset();
+    asset.RegisterAppliedBy(enchantmentItem);
+    enchantments.Add(asset);
+    foreach (var m in asset.modifiersApplied) stats.AddModifier(...);   // empty list => no effect at all
+}
 ```
 
-So appending an `ItemDefinition` at runtime needs **no reflection**. Two details suggest an unknown id is a
-*handled* condition rather than a crash: the indexer returns `null` with a warning whose own wording anticipates
-version-varying ids ("on this version"), and `TranslateLegacyIdentifier` null-guards entries while scanning,
-implying the list may legitimately contain holes. `EnchantmentDatabase` has the same `List` + public
-`GetRawList()` shape.
+The earlier claim that "oils cannot carry an enchantment" was drawn from
+`GetItemsCompatibleWithEnchantment`, which governs **what the UI offers the player**, not what the data model
+stores. The two are not the same.
 
-**The real risk is that `ItemId` is positional.** `ItemId.value == index + 1`. An item appended after the vanilla
-entries takes the next free index — so if a game update adds vanilla items, a previously saved id resolves to a
-**different, vanilla** item. That is silent save corruption, and it is the thing P0 has to solve, not "can we
-mint at all".
+Recipe — **one** minted `EnchantmentDefinition` (empty `modifiersApplied` → zero gameplay effect) plus **one**
+minted `ItemDefinition` as its applier, never obtainable. **One pair total, however many oils are seedable.**
+Marking is then `oil.AddEnchantment(markerItem, announce: false)`; the save writes the marker's `ItemId` and the
+load path restores it. The oil's stats, function and balance stay vanilla and inherit patches for free.
 
-Two candidate mitigations, **both unverified**:
-- **Append at a high fixed offset**, far past any plausible vanilla count, so vanilla growth never reaches our
-  ids. Requires padding the list with nulls; the null-guarding seen in `TranslateLegacyIdentifier` is
-  encouraging but **every other consumer of `GetRawList()` would have to tolerate holes** — that is the thing to
-  check before choosing this.
-- **Lean on the name path.** `ItemDatabase.TranslateLegacyIdentifier(string)` is **public static** and resolves
-  by `ItemDefinition.name` (dictionary first, then a case-insensitive scan), and the load path already consults
-  `InventoryData.identifier` whenever `data.id == ItemId.None`. A name is stable across updates in a way an index
-  is not. The catch: `InventoryItem.GetSerialized()` writes **only** the numeric id and never populates
-  `identifier`, so using this path means intervening at save time.
+**The failure mode is soft.** If the marker's positional `ItemId` shifts after a game update, `GetAsset()`
+either returns null (warning, `break`, the mark is lost and the oil is still an ordinary oil) or resolves to
+some other vanilla item (the oil carries an odd enchantment, still an ordinary oil). Compare minting a seed
+*item*, where the seed itself would silently become a different item. The `ItemDatabase` shape is still worth
+knowing — a `List<ItemDefinition>` with a public `GetRawList()`, an indexer that returns `null` with a warning
+whose wording anticipates version-varying ids, and a `TranslateLegacyIdentifier(string)` (public static,
+resolves by asset name) that the load path already consults when `data.id == ItemId.None`.
+
+**Three checks run against this design. Two passed, one found a real problem:**
+
+| Check | Result |
+|---|---|
+| Do vanilla oils stack, merging a marked oil into unmarked ones? | **No.** No `maxStack` / `isStackable` / `CanStackWith` / `TryStack` / merge logic exists anywhere in Core; `quantity` is only ever restored verbatim from save data. Matches the user's own knowledge. Mods that add stacking are explicitly out of scope. |
+| Does the tooltip show the mark? | **No** — and that is acceptable. Enchantment rendering sits behind `weaponSO.TypeIsEnchantable` inside the weapon branch, so an oil's enchantments never draw. The mark is therefore invisible by default, which means **a badge of our own is required**, and also means we cannot disturb vanilla tooltip layout. Precedent for the badge: `InventoryItem` already has a `brokenIcon` (`Image`, `SetActive(true)` + recoloured when broken). |
+| Does marking have side effects? | **Yes — this one needs solving.** `AddEnchantment` calls `AchievementManager.EnchantmentAppliedToItem`, which calls `SetLocalStat("OIL_IT_UP", enchantmentCount)`. In `SetLocalStat` the assignment `value2.currentValue = value` happens **before** the `onlyIncreaseValue` guard, so the guard suppresses only the notification and the unlock check — **not the write**. Marking an oil reports a count of 1 and can therefore *regress* a player's `OIL_IT_UP` progress, and `SetupEnchantmentsFromData` re-triggers it on **every load** of a marked oil. It is a no-op once the achievement is unlocked (`if (value2.isUnlocked) return`). Regressing a player's achievement progress is user data we must not touch. |
+
+Candidate mitigations for that last one, **both unverified**:
+- `InventoryItem.enchantments` is `public List<EnchantmentDefinition> { get; private set; }` — the getter is
+  public and hands back the live list, so `.Add(ourDefinition)` bypasses `AddEnchantment` and its achievement
+  call entirely. This covers our own marking, but **not** the load path, which the game itself drives.
+- Save and restore the `OIL_IT_UP` progress value around the call, or suppress the call with a Harmony patch.
+  A patch is needed for the load path regardless.
+
+**Minting the marker pair.** Both databases are `List`s with a public `GetRawList()` returning the live list, so
+appending needs no reflection — `ItemDatabase` holds `List<ItemDefinition>`, `EnchantmentDatabase` holds
+`List<EnchantmentDefinition>`. This corrects an earlier draft of this document, which extrapolated from
+`RecipeDatabase` (`private RecipeData[] recipes`, a genuinely fixed array) and assumed items were the same.
+
+`ItemId.value == index + 1`, so ids remain positional and vanilla growth can still shift the marker. That risk is
+now bounded by the soft failure mode above rather than being load-bearing, but if it is worth hardening, two
+candidates, **both unverified**: append at a high fixed offset past any plausible vanilla count (requires padding
+the list with nulls — check that **every** consumer of `GetRawList()` tolerates holes, not just
+`TranslateLegacyIdentifier`, which does), or intervene at save time to write `InventoryData.identifier` so the
+name path resolves it (`GetSerialized()` writes only the numeric id today).
 
 **Rejected, with reasons — do not revisit without new information:**
-- *Mark the original item instead of minting one.* Two independent blockers. (a) The save stores enchantments as
-  `InventoryData.enchantmentIds`, typed **`ItemId[]`** — the *applier* items — and resolves the definition via
-  `ItemDefinition.appliesEnchantment`, so a custom enchantment cannot persist without a custom `ItemId` anyway.
-  (b) Enchantments target weapons and armour: `GetItemsCompatibleWithEnchantment` requires
-  `HasFreeEnchantmentSlot` + `IsEnchantmentCompatible`. The items this feature wants to seed *are* oils and
-  scrolls — appliers, not targets. They cannot carry an enchantment at all.
 - *A per-item mark tracked in our own JSON.* There is **no unique instance id** anywhere in `InventoryData`; an
   item is identified only by type + grid position + per-instance state, all of which change when the player moves
-  it. There is nothing to key on.
-- *A ledger with no item.* Ruled out by the design constraint above.
+  it. There is nothing to key on. The marker rides on the item's own serialized state precisely because of this.
+- *A ledger with no item.* Ruled out by design constraint 1.
+- *Minting one seed item per seedable oil.* Ruled out by design constraint 2 — an unbounded maintenance burden
+  and a permanent re-adaptation cost after every balance patch.
 
 ### 7.2 Hold-to-interact — mostly free, with one behavioural trap
 `HoldingInteractable : Interactable` is public and subclassable, and the fields that matter are `protected`, so
