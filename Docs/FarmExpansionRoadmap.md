@@ -59,10 +59,10 @@ balance dial. It must never be treated as UI capacity or as a convenience settin
 Each phase ends with an in-game check by the user. Phases are ordered so that each is independently shippable.
 
 ### P0 — Investigation (blocking, must finish before P2 is designed)
-The seed carrier is settled (§7.1: a marked vanilla item, one minted marker pair). What remains is the
-**achievement side effect** — marking must not regress a player's `OIL_IT_UP` progress, on marking *or* on every
-subsequent load — plus the mark's presentation (§7.4), which is entirely ours because vanilla draws nothing.
-Nothing else is blocked by it: **P1 does not need any of it.**
+The seed carrier is settled (§7.1: a marked vanilla item, one minted marker pair), and the `OIL_IT_UP` side
+effect investigated there turned out to be cosmetic, so it blocks nothing. What remains before P2 is the mark's
+**presentation** (§7.4) — badge, tooltip line and shimmer — which is entirely ours to build because vanilla
+draws nothing for it. **P1 needs none of this.**
 
 ### P1 — The plot and manual tending
 The farm exists and is playable. No goblins, no seeds, no shrines.
@@ -218,21 +218,43 @@ resolves by asset name) that the load path already consults when `data.id == Ite
 |---|---|
 | Do vanilla oils stack, merging a marked oil into unmarked ones? | **No.** No `maxStack` / `isStackable` / `CanStackWith` / `TryStack` / merge logic exists anywhere in Core; `quantity` is only ever restored verbatim from save data. Matches the user's own knowledge. Mods that add stacking are explicitly out of scope. |
 | Does the tooltip show the mark? | **No** — and that is acceptable. Enchantment rendering sits behind `weaponSO.TypeIsEnchantable` inside the weapon branch, so an oil's enchantments never draw. The mark is therefore invisible by default, so **its whole presentation is ours to build** (§7.4) and vanilla tooltip layout stays untouched. Precedent for a badge: `InventoryItem` already has a `brokenIcon` (`Image`, `SetActive(true)` + recoloured when broken). |
-| Does marking have side effects? | **Yes — this one needs solving.** `AddEnchantment` calls `AchievementManager.EnchantmentAppliedToItem`, which calls `SetLocalStat("OIL_IT_UP", enchantmentCount)`. In `SetLocalStat` the assignment `value2.currentValue = value` happens **before** the `onlyIncreaseValue` guard, so the guard suppresses only the notification and the unlock check — **not the write**. Marking an oil reports a count of 1 and can therefore *regress* a player's `OIL_IT_UP` progress, and `SetupEnchantmentsFromData` re-triggers it on **every load** of a marked oil. It is a no-op once the achievement is unlocked (`if (value2.isUnlocked) return`). Regressing a player's achievement progress is user data we must not touch. |
+| Does marking have side effects? | **One, and it turns out to be cosmetic.** See below. |
 
-`OIL_IT_UP` tracks **how many enchantments are stacked on a single item** — that is the value
-`EnchantmentAppliedToItem` reports. Its `TargetValue` could not be read: `AchievementDefinition` is a
-`ScriptableObject` and the identifier appears in none of the 4 200 assets under `MonoBehaviour/` in the
-AssetRipper export, so those definitions load by some other path. The exact target does not change the
-conclusion — **we would report 1, which is almost certainly below a player's real progress**, so the regression
-is real either way.
+**The `OIL_IT_UP` side effect — investigated, then downgraded.** `AddEnchantment` calls
+`AchievementManager.EnchantmentAppliedToItem` → `SetLocalStat("OIL_IT_UP", enchantmentCount)`, and in
+`SetLocalStat` the assignment `value2.currentValue = value` happens **before** the `onlyIncreaseValue` guard. So
+marking an oil reports a count of 1 and writes the stored progress down, and `SetupEnchantmentsFromData`
+re-triggers it on **every load** of a marked oil. An earlier draft called this a blocking user-data problem. It
+is not:
 
-Candidate mitigations for that last one, **both unverified**:
-- `InventoryItem.enchantments` is `public List<EnchantmentDefinition> { get; private set; }` — the getter is
-  public and hands back the live list, so `.Add(ourDefinition)` bypasses `AddEnchantment` and its achievement
-  call entirely. This covers our own marking, but **not** the load path, which the game itself drives.
-- Save and restore the `OIL_IT_UP` progress value around the call, or suppress the call with a Harmony patch.
-  A patch is needed for the load path regardless.
+- **The guard does protect everything that matters.** When the value decreases, `!(currentValue > newValue &&
+  onlyIncreaseValue)` is false, so the whole block is skipped: no `isDirty` (**no Steam/online stat sync**), no
+  `OnAchievementProgressUpdated`, and no unlock check. Only the bare field assignment escaped it.
+- **The stored value gates nothing.** The unlock fires from the *instantaneous* count at the moment of
+  enchanting (`value2.currentValue >= TargetValue` evaluated on that same call), so a lowered stored value
+  cannot stop a player earning the achievement — they still simply have to stack the oils.
+- **Vanilla writes it down constantly by itself.** Enchant weapon A with three oils (progress 3), then put one
+  oil on a fresh weapon B, and vanilla stores 1. Our marking reporting 1 is **indistinguishable from a player
+  putting a single oil on a new weapon**. We are not introducing a new class of behaviour.
+- No-op entirely once the achievement is unlocked (`if (value2.isUnlocked) return`).
+
+It *is* persisted (`SulfurSaveState.active.ACHIEVEMENT_PROGRESS`), and the one way we differ from vanilla is
+**frequency** — a player carrying a marked oil pins the value to 1 at every level load rather than occasionally.
+Since the value gates nothing, that is a statistic reading low, not damage. **Not worth a Harmony patch on the
+load path.**
+
+`OIL_IT_UP` is **"Well Oiled" — *Apply 5 oils to a single weapon*** (read from `LocalizedFonts/I2Languages.asset`
+in the AssetRipper export, terms `Achievements/OIL_IT_UP` and `…_DESCRIPTION`; the `AchievementDefinition` assets
+themselves are not under `MonoBehaviour/`). The tracked value is the enchantment count on the item just
+enchanted, and the target is 5 — so a marked oil reporting **1** is far below both the target and any progress a
+player is partway through, which is exactly why the write looks alarming and exactly why it costs nothing: it is
+the same 1 vanilla stores every time a player oils a fresh weapon.
+
+> **Trap for whoever implements marking.** `InventoryItem.enchantments` has a public getter handing back the
+> live list, so `.Add(ourDefinition)` looks like a free way to skip the achievement call. **Used alone it breaks
+> serialization:** `GetSerializedEnchantments()` reads `enchantments[i].ItemThatAppliedThis.id`, and
+> `ItemThatAppliedThis` is only set by `asset.RegisterAppliedBy(enchantmentItem)` inside `AddEnchantment`. Bypass
+> only by doing **both** — `RegisterAppliedBy` is public — or the mark will not survive a save.
 
 **Minting the marker pair.** Both databases are `List`s with a public `GetRawList()` returning the live list, so
 appending needs no reflection — `ItemDatabase` holds `List<ItemDefinition>`, `EnchantmentDatabase` holds
