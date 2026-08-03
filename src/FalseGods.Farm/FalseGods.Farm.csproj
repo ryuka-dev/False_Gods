@@ -1,0 +1,124 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    FalseGods.Farm - the farm expansion's own anti-corruption layer to the base game, and its own
+    BepInEx plugin.
+
+    It is the SECOND assembly permitted to patch the base game and to reflect into base-game
+    internals (FG-ARCH-006, Docs/ADRs/ADR-007). That permission is deliberately narrow: it applies to
+    the base game only. Note the absence below of any SULFUR Together, LiteNetLib or Steamworks
+    reference - reflection and patching are split by TARGET, not by "adapters may patch"
+    (Docs/DependencyRules.md §5).
+
+    Note what is NOT referenced:
+
+      - FalseGods.Plugin / .Application / .UnityRuntime / .Protocol
+                                The farm is not part of the boss composition and does not go through
+                                the Composition Root. It is a separate BepInEx plugin whose only
+                                coupling to the base mod is a [BepInDependency] GUID string.
+      - FalseGods.Core / .RuntimeContracts
+                                Nothing here consumes them yet. A reference with no consumer is what
+                                turns an optional plugin into a mandatory one, so it is added when a
+                                consumer arrives (Docs/ADRs/ADR-006, RiskList R31) - not before.
+      - SULFUR Together         The farm plot is instantiated locally and registered with nothing;
+                                privacy IS the absence of replication (Docs/FarmExpansionRoadmap.md
+                                decision 3). There is no multiplayer code to write.
+
+    Ships INSIDE the base mod's Thunderstore package as a second plugin in the same folder, exactly
+    like FalseGods.Integration.SulfurTogether - see that project's StageForThunderstore comment.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>FalseGods.Farm</AssemblyName>
+    <RootNamespace>FalseGods.Farm</RootNamespace>
+    <RequiresGameAssemblies>true</RequiresGameAssemblies>
+    <RequiresBepInEx>true</RequiresBepInEx>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Its own BepInEx plugin entry point. -->
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Harmony (from BepInEx core). Permitted here by ADR-007; see the file header. -->
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCoreDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The game: InventoryItem, ItemDescription, the item/enchantment databases, AsyncAssetLoading. -->
+    <Reference Include="PerfectRandom.Sulfur.Core">
+      <HintPath>$(SulfurManagedDir)\PerfectRandom.Sulfur.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(SulfurManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="netstandard">
+      <HintPath>$(SulfurManagedDir)\netstandard.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- uGUI: the badge is an Image, and the borrowed tooltip line carries one. -->
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- TextMeshPro: the tooltip line's text, and the vertex-colour buffer the shimmer animates.
+         A shader would have been the other way to do that, and this repository has already paid for
+         shipping its own material once - see the README's TL;DR. -->
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(SulfurManagedDir)\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- The game ships the new Input System; legacy UnityEngine.Input.GetKeyDown throws at runtime. -->
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(SulfurManagedDir)\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <Reference Include="UnityEngine">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SulfurManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!--
+    Deploy the FARM DLL ONLY, as its own plugin folder - the same split, and for the same reason, as
+    the ST adapter's DeployAdapter: one assembly identity loaded from two paths is its own class of bug.
+    This plugin depends on no FalseGods.* assembly, so there is nothing else to copy.
+
+    Build+deploy:  dotnet build src/FalseGods.Farm -p:DeployFarm=true
+  -->
+  <Target Name="DeployFarm" AfterTargets="Build" Condition="'$(DeployFarm)' == 'true' AND '$(BepInExPluginDir)' != ''">
+    <PropertyGroup>
+      <_FarmDeployDir>$(BepInExPluginDir)\FalseGods.Farm</_FarmDeployDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_FarmDeployDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(_FarmDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Text="False Gods farm deployed -&gt; $(_FarmDeployDir)" Importance="high" />
+    <!-- Optional second copy: the two-instance CLIENT profile (see LocalPaths.props.example). -->
+    <PropertyGroup Condition="'$(BepInExClientPluginDir)' != ''">
+      <_FarmClientDeployDir>$(BepInExClientPluginDir)\FalseGods.Farm</_FarmClientDeployDir>
+    </PropertyGroup>
+    <MakeDir Condition="'$(BepInExClientPluginDir)' != ''" Directories="$(_FarmClientDeployDir)" />
+    <Copy Condition="'$(BepInExClientPluginDir)' != ''" SourceFiles="$(TargetPath)" DestinationFolder="$(_FarmClientDeployDir)" OverwriteReadOnlyFiles="true" />
+    <Message Condition="'$(BepInExClientPluginDir)' != ''" Text="False Gods farm deployed (client) -&gt; $(_FarmClientDeployDir)" Importance="high" />
+  </Target>
+
+  <!-- Release staging: one flat folder shared with the base mod, as the ST adapter does. -->
+  <Target Name="StageForThunderstore" AfterTargets="Build" Condition="'$(DeployToSulfurProfile)' == 'true' AND '$(ThunderstoreDir)' != ''">
+    <MakeDir Directories="$(ThunderstoreDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ThunderstoreDir)" OverwriteReadOnlyFiles="true" />
+    <Message Text="Staged for release -&gt; $(ThunderstoreDir): $(TargetFileName)" Importance="high" />
+  </Target>
+
+</Project>

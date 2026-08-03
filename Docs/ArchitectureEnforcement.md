@@ -380,36 +380,45 @@ absent. That is why FG-ARCH-002 is checked at two layers, not one.
 
 <a id="fg-arch-006"></a>
 
-### FG-ARCH-006 — Harmony patches live only in Integration.Sulfur
+### FG-ARCH-006 — Harmony patches live only in a base-game anti-corruption layer
 
-- **Authority:** [DependencyRules.md §5](DependencyRules.md)
+- **Authority:** [DependencyRules.md §5](DependencyRules.md),
+  [ADR-007](ADRs/ADR-007-Feature-Owned-Base-Game-Adapters.md)
+- **The permitted set is an allow-list, and it is short.** `FalseGods.Integration.Sulfur` and
+  `FalseGods.Farm` — the boss composition's adapter and the farm expansion's own. It is a list of named
+  assemblies, deliberately **not** a naming convention: a project must not be able to grant itself the
+  permission by choosing a name. ADR-007 records why the list grew from one, and what did not change with it —
+  the ST adapter still may not patch anything, and no inner module gained anything.
 - **Check:** three layers, and only the first exists. The rule makes **two distinct claims**, and it is worth
-  separating them: *no other project references Harmony*, and *no type outside `Integration.Sulfur` carries
+  separating them: *no project outside the allow-list references Harmony*, and *no type outside it carries
   `[HarmonyPatch]`*. The second does not follow from the first.
-  1. **Project graph.** No project under `src/` other than `FalseGods.Integration.Sulfur` declares a reference
-     resolving to `0Harmony` (assembly) or `HarmonyLib` (its namespace, forbidden as an alias), in any declared
+  1. **Project graph.** No project under `src/` outside the allow-list declares a reference resolving to
+     `0Harmony` (assembly) or `HarmonyLib` (its namespace, forbidden as an alias), in any declared
      `Configuration`. A `HintPath` ending in `0Harmony.dll` is matched whatever the `Include` identity says.
      The scanned set is read from `src/` on disk, so a new project is covered automatically.
-  2. **Assembly metadata.** No compiled assembly but `Integration.Sulfur` has an `AssemblyRef` to `0Harmony`.
+  2. **Assembly metadata.** No compiled assembly outside the allow-list has an `AssemblyRef` to `0Harmony`.
      `Planned`.
-  3. **Patch attribute scan.** No type outside `FalseGods.Integration.Sulfur` carries `[HarmonyPatch]`.
-     `Planned`. Today no other project can even resolve the attribute — precisely because layer 1 holds — but
-     "cannot resolve it" and "does not carry it" are different claims, and only the first is checked.
+  3. **Patch attribute scan.** No type outside the allow-list carries `[HarmonyPatch]`. `Planned`. Today no
+     other project can even resolve the attribute — precisely because layer 1 holds — but "cannot resolve it"
+     and "does not carry it" are different claims, and only the first is checked.
 - **Check status:** `project graph` = `Required in CI`; `assembly metadata` = `Planned`; `patch attribute scan`
   = `Planned` (§5.1). **CI rejects a project that names `0Harmony`. CI does not look for `[HarmonyPatch]`.**
-- **Compiler protection:** `Full`. `0Harmony.dll` is referenced by `FalseGods.Integration.Sulfur` alone, so
+- **Compiler protection:** `Full`. `0Harmony.dll` is referenced by the two allow-listed projects alone, so
   `[HarmonyPatch]` does not resolve anywhere else. Note `Integration.SulfurTogether` does **not** reference
   0Harmony — it reflects into ST, and reflection is not a patch.
 - **Implementation:** `tests/FalseGods.ArchitectureTests/Checks/HarmonyStaysInIntegrationSulfurChecks.cs`, over
   the shared `Inspection/ForbiddenReferenceScanner.cs`. Proven by the `ForbiddenHarmonyReference` fixture,
   whose `Reference` identity names something else entirely and betrays itself only through its `HintPath`. A
-  further check asserts `Integration.Sulfur` *does* reference `0Harmony`: were Harmony renamed or dropped, the
-  forbidden name would match nothing anywhere and the rule would pass while checking for a ghost.
-- **Expected failure message:** `FG-ARCH-006: a project outside FalseGods.Integration.Sulfur references Harmony.
-  … FalseGods.Plugin [Release] references 0Harmony … Patches belong in Integration.Sulfur — see
-  Docs/DependencyRules.md §5.`
-- **Exceptions:** **Requires a new ADR**, not a suppression comment. The ST adapter reflecting into ST internals
-  is *not* an exception to this rule — reflection is not a patch (§5, FG-ARCH-005).
+  further check asserts **every** allow-listed project *does* reference `0Harmony`: were Harmony renamed or
+  dropped — or were a project exempted that has no business being — the forbidden name would match nothing
+  there and the rule would pass while checking for a ghost.
+- **Expected failure message:** `FG-ARCH-006: a project outside the base-game anti-corruption layers references
+  Harmony. … FalseGods.Plugin [Release] references 0Harmony … Patches belong in FalseGods.Integration.Sulfur /
+  FalseGods.Farm — see Docs/DependencyRules.md §5.`
+- **Exceptions:** none as such — growing the allow-list is a **rule change**, made in DependencyRules §5 with
+  its own ADR, not an exception with an expiry (§10, and ADR-007 explains why this case is the former). The ST
+  adapter reflecting into ST internals is *not* an exception to this rule — reflection is not a patch (§5,
+  FG-ARCH-005).
 
 <a id="fg-arch-007"></a>
 
@@ -652,7 +661,13 @@ not as a loose DLL next to the base plugin — the load-ordering guarantee in AD
 Most rules in §5 are marked "no exceptions", and that is not decoration — each of those, if excepted, deletes
 the property it exists to protect.
 
-Where an exception is genuinely possible (today: FG-ARCH-006 only):
+Note the distinction FG-ARCH-006 now illustrates: **widening a rule's permitted set is a rule change, not an
+exception.** An exception is time-boxed and has a cleanup condition; a permanent widening has neither, so it is
+written into DependencyRules with an ADR ([ADR-007](ADRs/ADR-007-Feature-Owned-Base-Game-Adapters.md)) and the
+check is updated to match. Dressing one up as the other is how a repository ends up with an "exception" list
+that is really an unwritten rule.
+
+Where an exception is genuinely possible:
 
 1. It requires an **ADR**, not an inline suppression. A suppression comment records that someone wanted to; an
    ADR records why it was right.
@@ -696,8 +711,8 @@ Retiring a rule is the same sequence in reverse, and the id stays burned.
 
 ## 13. Current implementation status
 
-The module skeleton exists: eight projects under `src/`, a `Directory.Build.props`/`.targets` pair,
-`global.json`, and `False Gods.slnx`. All **four inner** projects now carry source and unit tests —
+Nine projects under `src/`, a `Directory.Build.props`/`.targets` pair, `global.json`, and `False Gods.slnx`.
+All **four inner** projects carry source and unit tests —
 `FalseGods.Protocol` (the arena content artifact and canonical `ContentHash` from PoC Phase A, plus the Phase B
 replication wire DTOs — `BossSnapshot`/`ArenaSnapshot`/`BossEvent`/`ArenaEvent`/`EncounterBaseline` + the
 `WireCodec`; the FG-ARCH-008 boss/arena separation is guarded by a `FalseGods.ProtocolTests` test, pending its
@@ -706,10 +721,11 @@ promotion to a registered check), `FalseGods.Core`
 `FalseGods.RuntimeContracts` (the boss presentation contracts plus the transport carriers and multiplayer
 session/roster/channel ports), and `FalseGods.Application` (the domain→presentation and wire→presentation
 mappers, the replication sender/receiver over `IEncounterChannel`, and the fail-closed `EncounterReadyGate`),
-the last three being Phase B slices — while the **four outer** projects
-(UnityRuntime, both Integration.* adapters, Plugin) remain
-reference-graph-only skeletons; that graph is already doing work. The architecture test project,
-`scripts/verify.ps1` (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all exist.
+the last three being Phase B slices. The **five outer** projects (UnityRuntime, both `Integration.*` adapters,
+Plugin, and `Farm`) carry real source too, and are the ones CI cannot build because they need the game and
+BepInEx — their reference graph is checked by evaluation, their compilation only at L0. The architecture test
+project, `scripts/verify.ps1` (with a `-CiSafe` subset), and a CI workflow (`.github/workflows/verify.yml`) all
+exist.
 
 Per-layer statuses are in **§5.1**, which is the machine-checked authority. This table adds what a status
 cannot say: what each rule's *enforced* layer actually buys, and what it leaves open.
@@ -721,7 +737,7 @@ cannot say: what each rule's *enforced* layer actually buys, and what it leaves 
 | **FG-ARCH-003** | `project graph` ✅ CI | a Protocol type reached transitively | `Full` — UnityRuntime does not reference Protocol |
 | FG-ARCH-004 | — | the whole rule | `Partial`, via FG-ARCH-003 |
 | **FG-ARCH-005** | `project graph` ✅ CI | transitive drags; **the entire broker-access half** | `Partial` — no project references ST/LiteNetLib/Steamworks |
-| **FG-ARCH-006** | `project graph` ✅ CI | transitive drags; **`[HarmonyPatch]` outside Integration.Sulfur** | `Full` — only Integration.Sulfur references 0Harmony |
+| **FG-ARCH-006** | `project graph` ✅ CI | transitive drags; **`[HarmonyPatch]` outside the allow-list** | `Full` — only Integration.Sulfur and Farm reference 0Harmony |
 | FG-ARCH-007 | — (inner build only; not a cited check) | the whole rule | `Full` — RuntimeContracts references Core alone |
 | FG-ARCH-008 | — | the whole rule | `None` — needs the Protocol types to exist |
 | FG-ARCH-009 | `project graph` of FG-ARCH-002 | the behavioural half (needs a Composition Root) | `Partial`, via FG-ARCH-002 |
@@ -756,8 +772,6 @@ Still not created:
   a rule whose other half is now a merge gate.
 - any `.asmdef` (the Unity authoring project is separate — see
   [OriginalContentPipeline.md §8.2](OriginalContentPipeline.md))
-- any source file in the **four outer** production projects that are still skeletons (UnityRuntime, both
-  Integration.* adapters, and Plugin)
 
 **Next.** The cheapest remaining win is the `assembly metadata` layer for FG-ARCH-001/003/007 — one allow-list
 of assembly names each, over `AssemblyReferenceInspector`, which already exists and is already fixture-tested.

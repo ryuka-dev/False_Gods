@@ -78,7 +78,8 @@ still build and unit-test on a machine with no game and no BepInEx installed at 
 
 **Enforcement is real but partial, and the split matters.** The project reference graph already makes the common
 violations *not compile*: Core cannot see `UnityEngine`, `UnityRuntime` cannot see `FalseGods.Protocol`,
-`RuntimeContracts` sees nothing but Core, only `Integration.Sulfur` sees `0Harmony`, and `FalseGods.Plugin`
+`RuntimeContracts` sees nothing but Core, only a base-game anti-corruption layer sees `0Harmony`
+(`Integration.Sulfur`, and since [ADR-007](ADR-007-Feature-Owned-Base-Game-Adapters.md) also `Farm`), and `FalseGods.Plugin`
 cannot see the ST adapter. On top of that, five checks run in CI and block the pre-push hook (the project-graph
 layer of `FG-ARCH-002`, plus `FG-ARCH-003`, `-005`, `-006` and `-010`); `FG-ARCH-002`'s metadata layer and
 `FG-ARCH-011` need a built adapter DLL and so run locally only. **Ten of the layers the rules name still have no

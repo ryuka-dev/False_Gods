@@ -19,12 +19,17 @@ and is not authoritative.
 | `FalseGods.UnityRuntime` | `FalseGods.Core`, `FalseGods.RuntimeContracts`, `UnityEngine` (+ URP/2D modules) |
 | `FalseGods.Integration.Sulfur` | `FalseGods.Core`, `FalseGods.Protocol`, `FalseGods.RuntimeContracts`, `FalseGods.Application`, `UnityEngine`, game DLLs, Harmony, A*, Addressables |
 | `FalseGods.Integration.SulfurTogether` *(optional)* | `FalseGods.Core`, `FalseGods.RuntimeContracts`, SULFUR Together, LiteNetLib/Steamworks (transitively) |
+| `FalseGods.Farm` *(own BepInEx plugin)* | `UnityEngine`, game DLLs, Harmony, BepInEx |
 | `FalseGods.Plugin` (Composition Root) | `FalseGods.Core`, `FalseGods.Protocol`, `FalseGods.RuntimeContracts`, `FalseGods.Application`, `FalseGods.UnityRuntime`, `FalseGods.Integration.Sulfur`, BepInEx |
 
 Note what `FalseGods.Plugin` may **not** reference: `FalseGods.Integration.SulfurTogether`. See §6.
 
 `FalseGods.Integration.Sulfur` is referenced only by the Composition Root; no inner module references an
 adapter.
+
+`FalseGods.Farm` is a **second base-game anti-corruption layer** and its own BepInEx plugin, coupled to the base
+mod only by a `[BepInDependency]` GUID string ([ADR-007](ADRs/ADR-007-Feature-Owned-Base-Game-Adapters.md)). It
+references no `FalseGods.*` assembly, and nothing references it.
 
 ## 2. Forbidden dependencies (explicit)
 
@@ -59,8 +64,10 @@ BossPresentation MUST NOT apply authoritative gameplay damage, phase, death, tar
 FalseGods.Plugin MUST NOT reference FalseGods.Integration.SulfurTogether — no assembly
                     reference, no type in a signature, no typeof(), no static-init touch.
 
-Only Integration.Sulfur may apply Harmony patches (any exception needs its own ADR).
-Only Integration.Sulfur may reflect into SULFUR / base-game internals.
+Only a BASE-GAME ANTI-CORRUPTION LAYER may apply Harmony patches, and only such a layer may
+                    reflect into SULFUR / base-game internals. That role is an explicit allow-list of
+                    assemblies — today Integration.Sulfur and Farm — never a naming convention a
+                    project can grant itself. Adding to it changes §5 and needs its own ADR (ADR-007).
 Only Integration.Sulfur may directly operate AstarPath or Addressables for vanilla assets.
 Only Integration.SulfurTogether may reference or reflect into SULFUR Together internals,
                     LiteNetLib, or Steamworks.
@@ -83,17 +90,17 @@ Concrete ST/game type names may appear in prose **only** inside an "adapter impl
 
 | Namespace / API | Allowed only in |
 |---|---|
-| `UnityEngine.*` | UnityRuntime, Integration.* , Plugin (never Core/Protocol/RuntimeContracts) |
-| `HarmonyLib` / `[HarmonyPatch]` | Integration.Sulfur |
-| Reflection into **SULFUR / base-game** internals | Integration.Sulfur |
+| `UnityEngine.*` | UnityRuntime, Integration.* , Farm, Plugin (never Core/Protocol/RuntimeContracts) |
+| `HarmonyLib` / `[HarmonyPatch]` | Integration.Sulfur, Farm |
+| Reflection into **SULFUR / base-game** internals | Integration.Sulfur, Farm |
 | Reflection into **SULFUR Together** internals | Integration.SulfurTogether |
 | `Pathfinding.*` (AstarPath, RichAI, recast) | Integration.Sulfur |
 | `UnityEngine.AddressableAssets.*` (vanilla assets) | Integration.Sulfur |
-| `PerfectRandom.Sulfur.*` | Integration.Sulfur |
+| `PerfectRandom.Sulfur.*` | Integration.Sulfur, Farm |
 | `SULFURTogether.*`, `LiteNetLib.*`, `Steamworks.*` | Integration.SulfurTogether |
 | `FalseGods.Protocol.*` | Protocol, Application, Plugin (never UnityRuntime / RuntimeContracts / Core) |
 | `FalseGods.Integration.SulfurTogether.*` | itself only (never Plugin) |
-| `BepInEx.*` | Plugin, Integration.SulfurTogether (its own optional plugin entry) |
+| `BepInEx.*` | Plugin, Integration.SulfurTogether, Farm (each its own plugin entry) |
 
 ## 4. Identity & lifecycle shortcuts — prohibited
 
@@ -118,14 +125,19 @@ it.
   `Integration.SulfurTogether` (or ST itself) — never `BossSimulation`, `BossPresentation`, arena content,
   boss definitions, or the Protocol contracts. The adapter sees only `EncodedPayload` + `MessageDelivery`;
   serialization of Protocol DTOs happens in `Application`.
-- **Harmony isolation:** every Harmony patch lives in `Integration.Sulfur`. Feature code never adds a patch, and
-  neither does the ST adapter — if one ever genuinely needs to, that exception gets its own ADR before the
-  patch gets written.
-- **Reflection isolation, split by target:** `Integration.Sulfur` is the only module that may reflect into
-  **SULFUR / base-game** internals; `Integration.SulfurTogether` is the only module that may reflect into
-  **SULFUR Together** internals (which is unavoidable — see §6). Neither reflects into the other's target, and
-  no other module reflects into any external system's internals. Reflection over *False Gods'* own types (e.g.
-  in tests) is not what this rule is about.
+- **Harmony isolation:** every Harmony patch lives in a **base-game anti-corruption layer**, and the set of
+  those is an explicit allow-list: **`Integration.Sulfur` and `Farm`**. Inner modules never add a patch, and
+  neither does the ST adapter — reflection is not a patch, and the split below is by *target*, not by "adapters
+  may patch". Adding an assembly to the allow-list is a change to this section and needs its own ADR; the
+  reasoning behind today's two is [ADR-007](ADRs/ADR-007-Feature-Owned-Base-Game-Adapters.md). A *convention*
+  ("anything named `Integration.*`") is explicitly not the rule: a project must never be able to grant itself
+  the permission by choosing a name.
+- **Reflection isolation, split by target:** the base-game anti-corruption layers (`Integration.Sulfur`,
+  `Farm`) are the only modules that may reflect into **SULFUR / base-game** internals;
+  `Integration.SulfurTogether` is the only module that may reflect into **SULFUR Together** internals (which is
+  unavoidable — see §6). Neither side reflects into the other's target, and no other module reflects into any
+  external system's internals. Reflection over *False Gods'* own types (e.g. in tests) is not what this rule is
+  about.
 - **Unity isolation:** Core/Protocol/RuntimeContracts contain no `UnityEngine` types. Where a Unity math type is
   genuinely needed in the domain, wrap it in a project-owned value type at the boundary.
 - **Wire/presentation isolation:** `FalseGods.Protocol` types stop at `FalseGods.Application`. Presentation is
@@ -171,8 +183,8 @@ every automated check must cite, and none of the rule text is duplicated there.
 
 **§1's allow-list is expressed as real `.csproj` reference lists**, and every module now carries real source
 inside them, so the compiler already rejects the common violations: Core cannot see `UnityEngine`, `UnityRuntime`
-cannot see `FalseGods.Protocol`, `RuntimeContracts` cannot see anything but Core, only `Integration.Sulfur` can
-see `0Harmony`, and `FalseGods.Plugin` cannot see the ST adapter.
+cannot see `FalseGods.Protocol`, `RuntimeContracts` cannot see anything but Core, only the base-game
+anti-corruption layers can see `0Harmony`, and `FalseGods.Plugin` cannot see the ST adapter.
 
 **Five checks run in CI on every push and block the local pre-push hook:** the evaluated project-graph layer of
 `FG-ARCH-002`, plus `FG-ARCH-003`, `FG-ARCH-005`, `FG-ARCH-006` and `FG-ARCH-010`. `FG-ARCH-002`'s

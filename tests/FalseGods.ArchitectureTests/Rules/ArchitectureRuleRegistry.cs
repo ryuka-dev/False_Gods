@@ -130,13 +130,13 @@ public static class ArchitectureRuleRegistry
             },
             CompilerProtection.Partial),
 
-        new ArchitectureRule("FG-ARCH-006", "Harmony patches live only in Integration.Sulfur",
+        new ArchitectureRule("FG-ARCH-006", "Harmony patches live only in a base-game anti-corruption layer",
             new[]
             {
                 new RuleCheckLayer(ProjectGraph, CheckStatus.RequiredInCi),
                 new RuleCheckLayer(AssemblyMetadata, CheckStatus.Planned),
-                // "No type outside Integration.Sulfur carries [HarmonyPatch]" — a different claim from
-                // "no other project references 0Harmony", and not checked by the reference layer.
+                // "No type outside the allow-list carries [HarmonyPatch]" — a different claim from "no other
+                // project references 0Harmony", and not checked by the reference layer.
                 new RuleCheckLayer(PatchAttributeScan, CheckStatus.Planned),
             },
             CompilerProtection.Full),

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/FalseGods.Application/FalseGods.Application.csproj" />
     <Project Path="src/FalseGods.Core/FalseGods.Core.csproj" />
+    <Project Path="src/FalseGods.Farm/FalseGods.Farm.csproj" />
     <Project Path="src/FalseGods.Integration.Sulfur/FalseGods.Integration.Sulfur.csproj" />
     <Project Path="src/FalseGods.Integration.SulfurTogether/FalseGods.Integration.SulfurTogether.csproj" />
     <Project Path="src/FalseGods.Plugin/FalseGods.Plugin.csproj" />

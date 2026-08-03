@@ -20,22 +20,12 @@ public sealed class ProbeIsIsolatedChecks
 {
     private const string ProbeAssembly = "FalseGods.Probe";
 
-    private static readonly string[] ProductionProjects =
-    {
-        "FalseGods.Core",
-        "FalseGods.Protocol",
-        "FalseGods.RuntimeContracts",
-        "FalseGods.Application",
-        "FalseGods.UnityRuntime",
-        "FalseGods.Integration.Sulfur",
-        "FalseGods.Integration.SulfurTogether",
-        "FalseGods.Plugin",
-    };
-
     [Fact]
     public void No_production_project_references_the_probe()
     {
-        var offenders = ProductionProjects
+        // Read from src/ rather than listed here: a hardcoded list silently stops covering the project
+        // someone adds tomorrow, and nothing fails — the check just quietly inspects less than it claims.
+        var offenders = RepoLayout.ProductionProjectNames()
             .SelectMany(project => ProjectGraphInspector.EvaluateAllConfigurations(RepoLayout.ProjectFile(project)))
             .Where(evaluated => evaluated.ReferencesAssemblyNamed(ProbeAssembly))
             .Select(evaluated => $"{Path.GetFileName(evaluated.ProjectPath)} [{evaluated.Configuration}]")

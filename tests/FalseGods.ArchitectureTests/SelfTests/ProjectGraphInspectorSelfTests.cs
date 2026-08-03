@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FalseGods.ArchitectureTests.Inspection;
@@ -14,17 +15,11 @@ public sealed class ProjectGraphInspectorSelfTests
 {
     private const string ForbiddenAssembly = "FalseGods.Integration.SulfurTogether";
 
-    private static readonly string[] ProductionProjects =
-    {
-        "FalseGods.Core",
-        "FalseGods.Protocol",
-        "FalseGods.RuntimeContracts",
-        "FalseGods.Application",
-        "FalseGods.UnityRuntime",
-        "FalseGods.Integration.Sulfur",
-        "FalseGods.Integration.SulfurTogether",
-        "FalseGods.Plugin",
-    };
+    /// <summary>
+    /// Read from src/ rather than listed here, for the reason RepoLayout gives: a hardcoded list stops
+    /// covering the project someone adds tomorrow, and nothing fails.
+    /// </summary>
+    private static IReadOnlyList<string> ProductionProjects => RepoLayout.ProductionProjectNames();
 
     [Fact]
     public void A_conforming_graph_reports_no_violation()

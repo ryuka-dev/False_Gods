@@ -4,11 +4,17 @@
 them. Crops advance one stage per level cleared. High-value items become plantable by transforming them at a
 vanilla shrine.*
 
-> **Status: DESIGN ONLY.** No code, no prefabs, no assembly exists for this. Every game-API fact below was read
-> from the **v0.18.5 decompile** (the version this project compiles against) or from the AssetRipper export, and
-> is **not verified against DLL metadata and not verified in game**. The global rule that "the decompile can
+> **Status: P0 is built and verified in game (2026-08-03); everything else is design only.** The assembly
+> exists — `src/FalseGods.Farm`, its own BepInEx plugin — and carries the seed mark and its presentation
+> (§7.1, §7.4). There are still no prefabs, no plot, and no persistence.
+>
+> **What that means for the facts below.** Everything §7.1 and §7.4 rest on has now compiled against the real
+> DLLs and run: those two sections are *measured*. Everything else — §4's transition choke point, §7.2's
+> `HoldingInteractable`, §7.3's shrine station — was read from the **v0.18.5 decompile** and is **still
+> unverified against DLL metadata and still unverified in game**. The global rule that "the decompile can
 > disagree with the DLL" has already cost this project once (`ReceiveDamage`'s overload set), so treat every
-> signature here as *proposed* until it compiles and runs.
+> signature in those sections as *proposed* until it compiles and runs. Building P0 already turned up several
+> things the decompile reading had missed — they are recorded in §7.1 where they were found.
 >
 > The reference build is current: the live install's `PerfectRandom.Sulfur.Core.dll` and the v0.18.5 backup are
 > identical in size (2 230 784 bytes) — the same build, no version drift.
@@ -58,11 +64,24 @@ balance dial. It must never be treated as UI capacity or as a convenience settin
 
 Each phase ends with an in-game check by the user. Phases are ordered so that each is independently shippable.
 
-### P0 — Investigation (blocking, must finish before P2 is designed)
+### P0 — The seed mark and its presentation — **BUILT, verified in game 2026-08-03**
 The seed carrier is settled (§7.1: a marked vanilla item, one minted marker pair), and the `OIL_IT_UP` side
-effect investigated there turned out to be cosmetic, so it blocks nothing. What remains before P2 is the mark's
-**presentation** (§7.4) — badge, tooltip line and shimmer — which is entirely ours to build because vanilla
-draws nothing for it. **P1 needs none of this.**
+effect investigated there turned out to be cosmetic, so it blocks nothing. The mark's **presentation** (§7.4)
+— badge, tooltip line and shimmer — is entirely ours to build because vanilla draws nothing for it.
+
+All of it now exists in `src/FalseGods.Farm`, the feature's own assembly and its own BepInEx plugin
+([ADR-007](ADRs/ADR-007-Feature-Owned-Base-Game-Adapters.md) is what let it patch the base game itself). Marking
+runs through `AddEnchantment`, so `RegisterAppliedBy` happens and the mark survives a save. **Verified in a
+real session**: marked and unmarked repeatedly across a dozen different oils, badge and tooltip line and
+shimmer all present, mark still there after a save/load, a marked oil still enchants a weapon normally and is
+consumed, and a non-oil is refused. No errors in the log; the marker pair lands at the tail of both databases
+(enchantment 287 of 287, applier 1059 of 1059).
+
+**P1 needs none of this**, and P2 is no longer blocked.
+
+Still temporary: marking is reached with a development key (`Dev/ToggleSeedMarkKey`, F8), because nothing in
+ordinary play marks an oil until P2's shrine lands. That key goes with the shrine, the same way the arena's
+`H` went once beating the cave boss opened the way there.
 
 ### P1 — The plot and manual tending
 The farm exists and is playable. No goblins, no seeds, no shrines.
@@ -78,7 +97,7 @@ The farm exists and is playable. No goblins, no seeds, no shrines.
 High-value items become plantable.
 - A transformation station attached to vanilla shrines (§7.3).
 - A whitelist of transformable items with per-item cycle lengths (§6).
-- **Blocked on P0.**
+- Retires P0's development key: the shrine becomes the way an oil gets marked.
 
 ### P3 — Goblin automation
 - Capture mechanic (no vanilla API — must be designed from scratch).
@@ -268,6 +287,22 @@ the list with nulls — check that **every** consumer of `GetRawList()` tolerate
 `TranslateLegacyIdentifier`, which does), or intervene at save time to write `InventoryData.identifier` so the
 name path resolves it (`GetSerialized()` writes only the numeric id today).
 
+**What building it turned up that reading the decompile had not.** All five were found while writing
+`SeedMarkRegistry`, and the first two would have been live defects:
+
+| Found | Consequence, and what the implementation does |
+|---|---|
+| `InventoryItem.Price` adds `0.75 × ItemThatAppliedThis.basePrice` **per enchantment carried** | Left at `ItemDefinition`'s default `basePrice = 100`, marking an oil would silently make it worth 75 more — a mark that changes an item's value is not a mark. The applier is minted with `basePrice = 0`. |
+| The durability walk charges a flat cost for any enchantment whose `CostsDurability` is true, **even one carrying no durability modifier at all** | The empty `modifiersApplied` is not enough on its own; the marker is minted with `CostsDurability = false`, which is what makes the walk skip it. |
+| `AddEnchantment` touches `modifiersApplied` **twice** (`RemoveModifiersFromList`, then `.Any`) before it reaches any null check | The list must exist. Its own `if (asset == null)` guard sits after two dereferences of `asset`, so it is dead code. |
+| `InventoryItem.RemoveEnchantment` removes the stat modifiers and **never removes the entry from the list** | Unmarking cannot use it — the mark would survive the call and be written out again on the next save. Removal is done on the public list directly, which is complete here precisely because the mark contributes no modifier to withdraw. |
+| `SpawnAllItemsInFrontOfPlayer` reads `Resources.LoadAll<ItemDefinition>`, not the database | A runtime-appended definition is genuinely unreachable by the vanilla cheat — "never obtainable" is stronger than the design assumed. |
+
+Two smaller ones: a minted `ScriptableObject` needs `hideFlags = HideAndDontSave` or Unity's unused-asset
+sweep on the next level load can take the marker with it; and `EnchantmentDatabase`'s indexer, unlike
+`ItemDatabase`'s, does **not** bounds-check — irrelevant to the save path (which stores `ItemId`s) but worth
+knowing before anything resolves an `EnchantmentId` from data.
+
 **Rejected, with reasons — do not revisit without new information:**
 - *A per-item mark tracked in our own JSON.* There is **no unique instance id** anywhere in `InventoryData`; an
   item is identified only by type + grid position + per-instance state, all of which change when the player moves
@@ -344,10 +379,39 @@ avoid. It is also the larger job.
 
 Safe to share the panel: Telia is in the church and shrines are in levels, so the two can never be open at once.
 
-### 7.4 Presenting the mark: a badge *and* a tooltip line
+### 7.4 Presenting the mark: a badge *and* a tooltip line — **built**
 
 Vanilla shows nothing (§7.1), so both are ours to build, and they are independent — the badge and the line read
 the same marker state and neither constrains the other.
+
+> **Built as designed, with three changes the code made and this section now records.**
+> - **The badge is parented to the `InventoryItem` root, not to the artwork container.** The container is what
+>   the game rotates by -90° for a rotated item, which is exactly why `UpdateBrokenIndicators` has to force the
+>   broken icon's rotation back to identity every time it runs. The root never rotates and is resized to the
+>   item's current footprint, so a badge anchored to its corner is correct in both orientations with no
+>   per-frame correction and no second patch. Being its last child also puts it on top.
+> - **The tooltip line clones the panel's own `descriptionTextPrefab`, reached by reflection** — not a live
+>   instance. It is what the pool's own factory instantiates, so the result is identical, and it does not
+>   depend on the tooltip happening to have a line to copy at that moment. Cloning a live instance is kept as
+>   the fallback.
+> - **The badge sprite is generated at runtime** (a two-tone diamond in a small `Texture2D`), so there is no
+>   asset to package and it draws through uGUI's own default material.
+>
+> The lifetime trap below is closed by **reuse rather than by destruction**: one clone per description panel —
+> there are two, primary and secondary — hidden when the hovered item is not marked, and destroyed explicitly
+> when its panel goes. Nothing is created per hover, so there is nothing to leak.
+>
+> Both hooks are Harmony postfixes and both are canonical: `InventoryItem.Setup` is where an item's view is
+> built *and* where `SetupEnchantmentsFromData` restores a mark off disk, so the badge is decided in the same
+> call that decides the mark; `ItemDescription.Setup(InventoryItem)` is where the tooltip is built, once per
+> hover. Each body is guarded — a cosmetic badge must never be able to take the inventory down with it — and a
+> never-called method-group conversion pins both signatures, so a game update that changes either is a build
+> error rather than a silent failure to patch.
+>
+> **Open: the wording is English and not localised.** The game localises through I2
+> (`LocalizationManager.GetTermTranslation`) and this mod already ships its own translated term for the boss
+> title, so the seam is known and cheap. It is deliberately deferred: the farm's vocabulary is not settled
+> until P1/P2 are playable, and translating a string that is about to change wastes the translation.
 
 **The tooltip line.** The tooltip is built by **`ItemDescription.Setup(InventoryItem)`** — public, and the
 weapon/non-weapon branch inside it is where an oil takes the `else` path. A Harmony **postfix** on it can check
@@ -374,6 +438,8 @@ material the vanilla text already carries — so it cannot render pink. Speed, b
 all our own constants, on a small MonoBehaviour attached to that one line.
 
 ### 7.5 Smaller open items
+- **Localising the farm's own strings** (§7.4). Deferred until the vocabulary settles, not forgotten.
+- **Retiring `Dev/ToggleSeedMarkKey`** when P2's shrine gives marking a way in through ordinary play.
 - Which boss gates the goblin unlock, and what the unlock object is.
 - The transformable whitelist, and cycle length per rarity tier. Oils are not all equally rare.
 - What a "food workbench" is, if the farm needs one at all: cooking in vanilla is manual/recipe driven
@@ -384,7 +450,9 @@ all our own constants, on a small MonoBehaviour attached to that one line.
 ## 8. Related
 
 - [Architecture.md](Architecture.md) — module boundaries; the responsibility table this feature's own assembly
-  must fit into.
+  fits into.
+- [ADR-007](ADRs/ADR-007-Feature-Owned-Base-Game-Adapters.md) — why this feature is allowed to patch the base
+  game from its own assembly, and what that permission deliberately does *not* widen.
 - [DefinitionOfDone.md](DefinitionOfDone.md) — completion gates, and the rule against building the second
   abstraction before the second consumer exists.
 - [BossEncounterRunbook.md](BossEncounterRunbook.md) — the prop/room borrowing recipe and the marker-group

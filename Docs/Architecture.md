@@ -6,7 +6,7 @@ authority on **structure**; the wire/replication contract lives in
 [MultiplayerLoadingContract.md](MultiplayerLoadingContract.md), and the enforcement detail in
 [DependencyRules.md](DependencyRules.md).
 
-**This structure is built.** All eight modules carry real source and the boundaries below are the ones the
+**This structure is built.** All nine modules carry real source and the boundaries below are the ones the
 compiler enforces, so where this document and a `.csproj` reference list disagree, the reference list wins and
 this document is wrong. Individual type and method signatures are still deliberately not pinned here — the code
 is the authority on those, and duplicating them here would only create a second thing to keep true.
@@ -57,6 +57,12 @@ FalseGods.Plugin  (Composition Root, BepInEx entry)
   ╌╌►  FalseGods.Integration.SulfurTogether
         OPTIONAL companion BepInEx plugin. References RuntimeContracts + Core + ST/LiteNetLib/Steam.
         Registers itself through the FalseGodsIntegrations broker (RuntimeContracts).
+
+
+FalseGods.Farm   (separate BepInEx plugin, same package — no arrow to or from anything above)
+        The farm expansion's own base-game anti-corruption layer (ADR-007). References the game,
+        Unity, Harmony and BepInEx, and NO FalseGods assembly; nothing references it. Its only tie
+        to the base mod is a [BepInDependency] GUID string.
 ```
 
 - **Core** knows nothing outer, and holds **only** the domain plus the few abstractions the domain itself calls.
@@ -81,6 +87,7 @@ FalseGods.Plugin  (Composition Root, BepInEx entry)
 | **FalseGods.UnityRuntime** | Presentation & Unity realization: prefab instantiation, renderers/sprites, animation, VFX, audio, lighting, interpolation, arena-prefab realization, AssetBundle lifecycle, original-content loading, Unity authoring components. Implements `IEncounterPresentation` / `IArenaAssetProvider` / `IArenaRealization` | authoritative damage / attack selection / phase / death / authority / RNG outcomes; **any `FalseGods.Protocol` type** | Core, RuntimeContracts, UnityEngine |
 | **FalseGods.Integration.Sulfur** | Anti-corruption layer to the base game: `Unit.ReceiveDamage`, player lookup, vanilla loot/status, level transitions, A* Recast, `AiAgent`, Addressables for vanilla assets, **all Harmony patches**, **reflection into base-game internals**, private-field access, base-game lifecycle hooks. Single-player implementations of `IPlayerRoster` / `IArenaLockdownPort` / `IRemoteNpcActivationPort` | boss mechanics, wire protocol, reflection into ST internals | Core, Protocol, RuntimeContracts, Application, game DLLs |
 | **FalseGods.Integration.SulfurTogether** *(optional companion BepInEx plugin)* | Multiplayer adapter: host/client detection, session lifecycle, peer-id mapping, message registration, reliable/unreliable channel mapping onto `EncodedPayload`/`MessageDelivery`, arena-ready ACK transport, join/leave, ST managers, **reflection into ST internals**. Self-registers through `FalseGodsIntegrations` | boss/arena gameplay decisions; `FalseGods.Protocol` DTOs; `FalseGods.Application` internals; Harmony patches; reflection into base-game internals | RuntimeContracts, Core, ST + transport DLLs |
+| **FalseGods.Farm** *(feature plugin)* | The farm expansion's own anti-corruption layer to the base game, and its own BepInEx plugin: the seed mark (a minted enchantment/applier pair appended to the vanilla databases), its presentation on inventory items and item descriptions, **its own Harmony patches**, **reflection into base-game internals** (ADR-007). Later: the plot, hold-to-tend, growth on level transition, its own JSON persistence | boss/arena code; any `FalseGods.*` reference; SULFUR Together, LiteNetLib or Steamworks; replication of any kind — the plot is local and registered with nothing, which *is* the privacy mechanism | UnityEngine, game DLLs, Harmony, BepInEx |
 | **FalseGods.Plugin** (Composition Root) | BepInEx entry; construction and wiring of Core/Application/UnityRuntime/`Integration.Sulfur`; **the only reader of the `FalseGodsIntegrations` broker**; startup & shutdown ordering; graceful degradation when no multiplayer integration registers | substantive boss mechanics; **any reference to `Integration.SulfurTogether`** | Core, Protocol, RuntimeContracts, Application, UnityRuntime, Integration.Sulfur, BepInEx |
 
 ## 4. Composition Root, optional integration, and the three compositions

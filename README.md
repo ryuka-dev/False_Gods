@@ -31,7 +31,7 @@ left out; [Docs/BossEncounterRunbook.md](Docs/BossEncounterRunbook.md) is where 
   hand-sculpted cave authored in Blender and Unity, shipped as a mod-owned AssetBundle.
 - **Vanilla content is borrowed at runtime, never redistributed** — materials, props, and whole donor rooms are
   resolved from the player's own install through Addressables. The only art the assembly carries is ours.
-- **The boundaries held while the code grew inside them.** All eight modules now carry real source, and the four
+- **The boundaries held while the code grew inside them.** All nine modules now carry real source, and the four
   game-independent ones still build and unit-test on a machine with no game and no BepInEx installed at all —
   which is the boundary doing its job rather than a claim about it.
 
@@ -171,9 +171,9 @@ lists *are* the dependency rules — a forbidden dependency is a compile error, 
 |---|---|---|
 | **.NET SDK pinned by `global.json`** (10.0.301) | `.slnx` solutions, and MSBuild's `-getItem` evaluated-item output that the architecture checks read | everything |
 | **.NET Framework 4.7.2 Developer Pack** (targeting pack) | the plugins target `net472`, matching the game's Unity + Mono profile | building `src/` |
-| **SULFUR managed assemblies** (`<SULFUR>\Sulfur_Data\Managed`) | UnityEngine, the game DLLs, A\*, Addressables | the four outer projects |
-| **BepInEx 5 core** (`BepInEx\core` of the profile you run) | `BepInEx.dll`, `0Harmony.dll` | the four outer projects |
-| **`LocalPaths.props`** | tells the build where the two above live; gitignored, never committed | the four outer projects |
+| **SULFUR managed assemblies** (`<SULFUR>\Sulfur_Data\Managed`) | UnityEngine, the game DLLs, A\*, Addressables | the five outer projects |
+| **BepInEx 5 core** (`BepInEx\core` of the profile you run) | `BepInEx.dll`, `0Harmony.dll` | the five outer projects |
+| **`LocalPaths.props`** | tells the build where the two above live; gitignored, never committed | the five outer projects |
 | **Unity 6000.3.6f1** | the game's own Unity version — a bundle built by any other one may not load | building the arena content |
 
 `FalseGods.Core`, `.Protocol`, `.RuntimeContracts`, and `.Application` need only the first two — they build on a
