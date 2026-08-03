@@ -3,6 +3,7 @@
 #nullable disable
 
 using System;
+using PerfectRandom.Sulfur.Core;
 using PerfectRandom.Sulfur.Core.DevTools;
 using TMPro;
 using UnityEngine;
@@ -54,15 +55,27 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// Put the row in once the menu has built itself, and again if the menu is ever rebuilt.
         /// </summary>
         /// <remarks>
-        /// Cheap to call every frame: once the row exists this is a field read. Before that it is a scene query,
-        /// which only happens while the developer menu has not been opened yet — it populates its level list the
-        /// first time it is shown, so there is nothing to copy until then.
+        /// <para>Cheap to call every frame: once the row exists this is a field read, and until the developer menu
+        /// is actually open it is two static reads.</para>
+        /// <para><b>Why the open check is not optional.</b> The scene query below is
+        /// <c>FindObjectsByType(FindObjectsInactive.Include)</c>, which walks every loaded object — and the menu
+        /// only builds the panels it looks for the first time it is shown. Without a gate, a session that never
+        /// opens the menu (every session a player has: the menu needs developer mode) runs that walk on every
+        /// frame forever. Measured 2026-08-03: this and the cave-boss query together cost about half the frame
+        /// rate of an ordinary level. The menu's own state is the canonical answer to "is there anything to look
+        /// for yet", and it is what the game itself tests (<c>GameManager</c> gates its developer input the same
+        /// way), so this needs no observer and no timer.</para>
         /// </remarks>
         public void Maintain()
         {
             if (_row != null)
             {
                 return; // still standing; a destroyed one compares equal to null and sends this looking again
+            }
+
+            if (!TheMenuIsOpen())
+            {
+                return; // nothing has built a level list to copy a row from, and nothing is there to see it
             }
 
             ChapterPanel[] panels;
@@ -119,6 +132,31 @@ namespace FalseGods.Integration.Sulfur.Arena
             {
                 _logger?.LogWarning($"[dev-menu] the arena row could not be added ({exception.Message}).");
                 _row = null;
+            }
+        }
+
+        /// <summary>Whether the developer menu is up right now, which is also the only time it has a level list.
+        /// </summary>
+        /// <remarks>Two static reads and a bool. Developer mode is checked first because it is the cheaper of the
+        /// two and the one that is false for every player: with it off the menu cannot be opened at all, so the
+        /// row is never needed. Any throw is treated as "not open" — a row that fails to appear costs a developer
+        /// one shortcut, while a throw here would cost everyone the frame.</remarks>
+        private bool TheMenuIsOpen()
+        {
+            try
+            {
+                if (!GameManager.DeveloperMode)
+                {
+                    return false;
+                }
+
+                var menu = StaticInstance<DevToolsManager>.Instance;
+                return menu != null && menu.shouldShow;
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning($"[dev-menu] could not tell whether the menu is open ({exception.Message}).");
+                return false;
             }
         }
 

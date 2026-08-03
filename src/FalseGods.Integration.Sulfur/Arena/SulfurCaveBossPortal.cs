@@ -160,8 +160,28 @@ namespace FalseGods.Integration.Sulfur.Arena
         /// </summary>
         private const float SetsDownFromThePanel = 0.2f;
 
+        /// <summary>
+        /// How long between one look for the cave boss and the next, in seconds.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why this is not done every frame.</b> The look is a scene query for a type, and Unity answers
+        /// one by walking the loaded objects — thousands of them in a SULFUR level. In the room this cares about
+        /// the query is answered once and never asked again, but in <i>every other level</i> there is nothing to
+        /// find, so a per-frame call pays that walk on every frame of the game. Measured 2026-08-03: this and the
+        /// developer-menu query together roughly halved the frame rate everywhere.</para>
+        /// <para><b>Why a clock and not an event.</b> The canonical signal would be "a level finished generating",
+        /// and this project owns a hook at that boundary — but only for the levels it hijacks; wiring every
+        /// generation run through it to save a query that now costs twice a second is more machinery than the
+        /// problem is worth. Half a second is invisible where it applies: the door opens on the boss's death, and
+        /// finding the boss half a second into a fight that lasts minutes changes nothing a player can see.</para>
+        /// </remarks>
+        private const float LooksAgainEvery = 0.5f;
+
         private readonly ILogger _logger;
         private readonly Action _walkThrough;
+
+        /// <summary>When the last look happened, on the unscaled clock; zero until the first one.</summary>
+        private float _lastLooked;
 
         private CousinHelper _watched;
         private Unit _boss;
@@ -193,8 +213,8 @@ namespace FalseGods.Integration.Sulfur.Arena
 
         /// <summary>
         /// Keep up with the level: find the boss while it lives, and forget everything when it and its room are
-        /// gone. Cheap enough to call every frame — it is a field read once the boss has been found, and a single
-        /// scene query at most once per level before that.
+        /// gone. Meant to be called every frame — the opening animates on it — but the scene query it needs before
+        /// the boss is found runs on its own slower clock; see <see cref="LooksAgainEvery"/>.
         /// </summary>
         public void Watch()
         {
@@ -205,6 +225,11 @@ namespace FalseGods.Integration.Sulfur.Arena
             // boss in it is found from scratch. The corpse lingers after the fight, which is why a door already
             // opened does not send this looking again.
             if (_watched != null)
+            {
+                return;
+            }
+
+            if (!TimeToLookAgain())
             {
                 return;
             }
@@ -238,6 +263,26 @@ namespace FalseGods.Integration.Sulfur.Arena
             _boss = boss;
             boss.onDeath = (Unit.OnDeath)Delegate.Combine(boss.onDeath, new Unit.OnDeath(BossDied));
             FindTheDoorway(helper, boss);
+        }
+
+        /// <summary>Whether enough time has passed to look for the boss again, and books the attempt if so.
+        /// </summary>
+        /// <remarks>
+        /// <para>Unscaled, because this has to keep looking while the game is paused or the screen is black — a
+        /// level is generated with the clock stopped.</para>
+        /// <para>The first call always looks, so entering a level that already has the boss in it costs nothing in
+        /// delay.</para>
+        /// </remarks>
+        private bool TimeToLookAgain()
+        {
+            var now = Time.unscaledTime;
+            if (_lastLooked > 0f && now - _lastLooked < LooksAgainEvery)
+            {
+                return false;
+            }
+
+            _lastLooked = now;
+            return true;
         }
 
         /// <summary>
