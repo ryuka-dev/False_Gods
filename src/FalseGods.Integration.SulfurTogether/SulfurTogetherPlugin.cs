@@ -32,7 +32,7 @@ namespace FalseGods.Integration.SulfurTogether
     {
         public const string PluginGuid = "ryuka.sulfur.false_gods_sulfur_together";
         public const string PluginName = "False Gods - SULFUR Together Adapter";
-        public const string PluginVersion = "0.4.0";
+        public const string PluginVersion = "0.4.1";
 
         /// <summary>The False Gods base plugin (FalseGodsPlugin.PluginGuid — a string on purpose, FG-ARCH-002).</summary>
         private const string BasePluginGuid = "ryuka.sulfur.false_gods";

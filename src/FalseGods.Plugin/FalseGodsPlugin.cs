@@ -60,7 +60,7 @@ namespace FalseGods.Plugin
     {
         public const string PluginGuid = "ryuka.sulfur.false_gods";
         public const string PluginName = "False Gods";
-        public const string PluginVersion = "0.4.0";
+        public const string PluginVersion = "0.4.1";
 
         private const int TestBossDefinition = 1;
 

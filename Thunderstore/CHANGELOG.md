@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1
+
+- **Fixed a large frame-rate loss.** The mod was searching the entire level for two things it needed, on every
+  single frame, in every level of the game — instead of only where and when it had to look. It cost roughly
+  half the frame rate on the machine it was measured on (110 down to about 50), everywhere, whether or not you
+  had ever been near the arena. Both searches now happen only when there is something to find.
+- Nothing else changed: the boss, the arena, the way in and out, the loot and the co-op behaviour are all
+  exactly as they were in 0.4.0.
+
 ## 0.4.0
 
 First release.

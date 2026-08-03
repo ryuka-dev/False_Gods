@@ -24,8 +24,9 @@
                                 privacy IS the absence of replication (Docs/FarmExpansionRoadmap.md
                                 decision 3). There is no multiplayer code to write.
 
-    Ships INSIDE the base mod's Thunderstore package as a second plugin in the same folder, exactly
-    like FalseGods.Integration.SulfurTogether - see that project's StageForThunderstore comment.
+    WILL ship inside the base mod's Thunderstore package as a second plugin in the same folder, exactly
+    like FalseGods.Integration.SulfurTogether - but not yet: staging is held behind a switch until the
+    farm is a feature players are meant to have. See StageForThunderstore at the bottom of this file.
   -->
 
   <PropertyGroup>
@@ -114,8 +115,24 @@
     <Message Condition="'$(BepInExClientPluginDir)' != ''" Text="False Gods farm deployed (client) -&gt; $(_FarmClientDeployDir)" Importance="high" />
   </Target>
 
-  <!-- Release staging: one flat folder shared with the base mod, as the ST adapter does. -->
-  <Target Name="StageForThunderstore" AfterTargets="Build" Condition="'$(DeployToSulfurProfile)' == 'true' AND '$(ThunderstoreDir)' != ''">
+  <!--
+    Release staging: one flat folder shared with the base mod, as the ST adapter does.
+
+    Held back until the farm is a feature players are meant to have. Everything a release build stages into
+    Thunderstore/ is zipped and shipped, and a release build is the whole solution (the ST adapter is
+    deliberately outside the base plugin's project graph, FG-ARCH-002, so it must be) - which means an
+    unfinished plugin that stages itself ships by default, and nobody has to decide to ship it. That is the
+    wrong default: the decision to put something in players' hands should be a deliberate act, and here it is
+    setting StageFarmForRelease=true. Set it in the same command as DeployToSulfurProfile when the farm is
+    ready, and delete this switch once shipping it stops being a question:
+
+      dotnet build "False Gods.slnx" -c Release -p:DeployToSulfurProfile=true -p:StageFarmForRelease=true
+
+    The DEVELOPMENT deploys above are untouched - the farm still goes into the local profile on every build,
+    which is how it gets tested.
+  -->
+  <Target Name="StageForThunderstore" AfterTargets="Build"
+          Condition="'$(DeployToSulfurProfile)' == 'true' AND '$(ThunderstoreDir)' != '' AND '$(StageFarmForRelease)' == 'true'">
     <MakeDir Directories="$(ThunderstoreDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ThunderstoreDir)" OverwriteReadOnlyFiles="true" />
     <Message Text="Staged for release -&gt; $(ThunderstoreDir): $(TargetFileName)" Importance="high" />
